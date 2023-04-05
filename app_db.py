@@ -13,7 +13,7 @@ from utils import apps_dir, output_dir
 
 DEFAULT_UPDATE_INTERVAL = datetime.timedelta(minutes=1)
 
-DB_DIR = Path(__file__).parent / "db.json"
+DB_DIR = Path(__file__).parent / "app_db.json"
 DB = TinyDB(str(DB_DIR))
 
 

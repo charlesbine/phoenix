@@ -1,0 +1,12 @@
+{
+    "_default": {
+        "0": {
+            "layout_mode": "cycle",
+            "cycle_interval": 10,
+            "SUPPORTED_LAYOUT_MODES": [
+                "cycle",
+                "single"
+            ]
+        }
+    }
+}
