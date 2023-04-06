@@ -52,6 +52,9 @@ def apps_to_frame(apps: list[AppConfig]) -> pd.DataFrame:
 
 def display_app_details(app: AppConfig):
     st.markdown(f"### {app.name}")
+    if not app.output_filename_large.is_file():
+        st.error(f"No output file found for app {app.name} under {app.output_filename_large}")
+        return 
     display_animated_image(app.output_filename_large)
     st.markdown(f"Last updated: {app.last_updated}")
 

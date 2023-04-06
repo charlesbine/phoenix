@@ -6,10 +6,14 @@ import time
 
 from loguru import logger
 
-from app_db import get_app_by_name, upsert, read_all_apps
+from app_db import get_app_by_name, upsert, read_all_apps, AppConfig
 
 
-DEBUG = True
+#: should we also generate a 5x magnified version ? It is used for display in the UI's
+RUN_LARGE = True
+
+RENDER_WIDTH = 64
+RENDER_HEIGHT = 64
 
 
 def run_app(name: str):
@@ -25,20 +29,9 @@ def run_app(name: str):
     if not app.filename.exists():
         raise ValueError(f"File {app.filename} does not exist.")
 
-    # TODO: pass args: eg "timezone=UTC" for clock
-    args = ["pixlet", "render", str(app.filename), "-o", str(app.output_filename)]
-    subprocess.run(args, check=True)
-    if DEBUG:
-        args = [
-            "pixlet",
-            "render",
-            str(app.filename),
-            "-o",
-            str(app.output_filename_large),
-            "-m",
-            "5",
-        ]
-        subprocess.run(args, check=True)
+    subprocess.run(get_app_generation_command(app), check=True)
+    if RUN_LARGE:
+        subprocess.run(get_app_generation_command(app, large=True), check=True)
 
     # update the last update time
     upsert(name, last_updated=datetime.datetime.now())
@@ -48,6 +41,22 @@ def run_app(name: str):
         f"[{app.name}] Waiting {wait_time_remaining:.1f} seconds "
         f"(of {app.refresh_interval}) before next update."
     )
+
+
+def get_app_generation_command(app: AppConfig, large: bool = False):
+    """Return the command to generate the app."""
+    command = ["pixlet", "render", str(app.filename)] 
+    if large:
+        command.extend(["-o", str(app.output_filename_large), "-m", "5"])
+    else:
+        command.extend(["-o", str(app.output_filename)])
+    
+    # TODO: add the siza args
+    command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
+
+    # TODO: add the command line args from the app config eg "timezone=UTC" for clock
+
+    return command
 
 
 def call_and_loop(loop, app_name: str, refresh_delay: int):
@@ -61,6 +70,9 @@ def run_all_apps_sync():
     for app in read_all_apps():
         refresh_interval_seconds = app.refresh_interval.total_seconds()
         loop.call_soon(call_and_loop, loop, app.name, refresh_interval_seconds)
+
+    # TODO: add a handler to check for new apps and remove old apps
+    # old apps might not need to get removed since they can be disabled though
 
     loop.run_forever()
 

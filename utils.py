@@ -7,3 +7,7 @@ def output_dir() -> Path:
 
 def apps_dir() -> Path:
     return Path(__file__).parent / "apps"
+
+
+def get_downloaded_app_names() -> list[str]:
+    return [p.stem for p in apps_dir().glob("*.star")]

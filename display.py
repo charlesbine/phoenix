@@ -10,7 +10,7 @@ from PIL import Image, ImageSequence
 
 from app_db import read_all_apps, AppConfig
 from config import get_config
-from dashboard import display_animated_image
+from webapp.dashboard import display_animated_image
 
 
 IS_RASP = socket.gethostname() == "raspberrypi"
@@ -138,6 +138,7 @@ def still(image, duration=IMAGE_REFRESH_PERIOD):
 if __name__ == "__main__":
     print("Press CTRL-C to stop.")
     try:
-        run_display()
+        dm = DisplayManager()
+        dm.run_display()
     except KeyboardInterrupt:
         sys.exit(0)
