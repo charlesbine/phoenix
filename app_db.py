@@ -90,3 +90,11 @@ def upsert(name: str, **kwargs):
         app.update(kwargs)
         config = AppConfig(**app)
         DB.update(json.loads(config.json()), App.name == name)
+
+
+def update(name: str, **kwargs):
+    App = Query()
+    app = DB.get(App.name == name)
+    if app is None:
+        raise ValueError(f"No app found in db for name {name}")
+    upsert(name, **kwargs)

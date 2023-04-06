@@ -83,7 +83,7 @@ def main(config):
     fuzzed = fuzzy_time(config, now.hour, now.minute)
 
     # Add some left padding for ~style~.
-    texts = [render.Text(" " * i + s) for i, s in enumerate(fuzzed)]
+    texts = [render.Text(" " * i + s, font="6x13") for i, s in enumerate(fuzzed)]
 
     return render.Root(
         child = render.Padding(

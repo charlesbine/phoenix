@@ -68,7 +68,7 @@ class DisplayManager:
                 self.display_apps_in_random_order(active_apps, config.cycle_interval)
             elif config.layout_mode == "single":
                 if len(active_apps) > 1:
-                    logger.waring("More than one app is active, but display mode is single")
+                    logger.warning("More than one app is active, but display mode is single")
                 self.display_app(active_apps[0], config.cycle_interval)
             else:
                 raise ValueError(f"Unknown display mode {config.layout_mode}")
