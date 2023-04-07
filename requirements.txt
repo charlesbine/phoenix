@@ -5,5 +5,5 @@ streamlit
 tinydb
 requests
 humanize
-dotenv
+python-dotenv
 # sptools # if you want spotify now playing

@@ -79,6 +79,10 @@ class DisplayManager:
         image_path = app.output_filename if not self.debug else app.output_filename_large
         logger.info(f"Displaying {app.name} for {duration} seconds, {image_path=}")
 
+        if not app.output_filename.exists():
+            logger.error(f"Output file {app.output_filename} does not exist")
+            return
+            
         if self.debug:
             display_animated_image(image_path, self.debug_display_element)
             time.sleep(duration)
