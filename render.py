@@ -1,5 +1,7 @@
 import asyncio
 import datetime
+import importlib
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -32,9 +34,10 @@ def run_app(name: str):
 
     if app.uses_preprocessor:
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
-        subprocess.run(["python", str(app.python_filename)], check=True)
+        module = importlib.import_module(f"preprocessors.{app.python_filename.stem}")
+        module.main()
 
-    subprocess.run(get_app_generation_command(app), check=True)
+    subprocess.run(get_app_generation_command(app), check=True, env=os.environ)
     if RUN_LARGE:
         subprocess.run(get_app_generation_command(app, large=True), check=True)
 

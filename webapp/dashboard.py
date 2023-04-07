@@ -57,7 +57,7 @@ def main():
 
     st.header("App data")
     df = apps_to_frame(apps)
-    st.table(df)
+    st.dataframe(df)
 
 
 def apps_to_frame(apps: list[AppConfig]) -> pd.DataFrame:
@@ -68,9 +68,10 @@ def apps_to_frame(apps: list[AppConfig]) -> pd.DataFrame:
     df["age"] = (
         (pd.Timestamp.now() - df.last_updated)
         .apply(lambda x: x.total_seconds())
-        .astype("int")
+        .round(0)
     )
-    return df
+    styled = df.style.format("{:.0f}", subset=["age"])
+    return styled
 
 
 def display_app_details(app: AppConfig):
