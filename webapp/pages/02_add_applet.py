@@ -1,8 +1,10 @@
+import datetime
 from pathlib import Path
 
 import pandas as pd
 import pydantic
 import shutil
+from loguru import logger
 
 
 pydantic.class_validators._FUNCS.clear()  # ignore
@@ -30,6 +32,8 @@ def main():
 
     st.table(pd.DataFrame([app_manifest]).set_index("id").T)
 
+    refresh_interval = pd.Timedelta(st.text_input("refresh interval", value="1min")).to_pytimedelta()
+
     if app_community_path.stem in get_downloaded_app_names():
         st.warning(f"Applet {app_name} already exists.")
         st.stop()
@@ -40,6 +44,14 @@ def main():
         status.info(f"Importing applet {app_name}")
         shutil.copyfile(app_community_path, apps_dir() / app_community_path.name)
         status.success(f"Applet {app_name} imported")
+
+
+        # import ipdb; ipdb.set_trace()
+        # logger.info(app_community_path.name)
+        # logger.info(str(refresh_interval))
+        # print(read_all_apps())
+        upsert(app_community_path.stem, refresh_interval=refresh_interval)
+        # print(read_all_apps())
 
 
 if __name__ == "__main__":
