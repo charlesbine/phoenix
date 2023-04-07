@@ -1,0 +1,9 @@
+pillow
+pandas
+numpy
+streamlit
+tinydb
+requests
+humanize
+dotenv
+# sptools # if you want spotify now playing

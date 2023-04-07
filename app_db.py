@@ -8,7 +8,7 @@ import pydantic
 from tinydb import TinyDB, Query
 import tomli
 
-from utils import apps_dir, output_dir
+import utils
 
 
 DEFAULT_UPDATE_INTERVAL = datetime.timedelta(minutes=1)
@@ -31,15 +31,29 @@ class AppConfig(pydantic.BaseModel):
 
     @property
     def filename(self) -> Path:
-        return apps_dir() / (self.name + ".star")
+        return utils.apps_dir() / (self.name + ".star")
+
+    @property
+    def python_filename(self) -> Path:
+        return utils.preprocessors_dir() / (self.name + ".py")
+    
+    @property
+    def uses_preprocessor(self) -> bool:
+        return self.python_filename.exists()
+    
+    @property
+    def data_file(self) -> Path:
+        if not self.uses_preprocessor:
+            raise ValueError(f"The app {self.name} does not use a preprocessor")
+        return utils.data_dir() / (self.name + ".json")
 
     @property
     def output_filename(self) -> Path:
-        return output_dir() / (self.name + ".webp")
+        return utils.output_dir() / (self.name + ".webp")
 
     @property
     def output_filename_large(self) -> Path:
-        return output_dir() / (self.name + ".large.webp")
+        return utils.output_dir() / (self.name + ".large.webp")
 
     @pydantic.validator("refresh_interval", pre=True)
     def val_refresh_interval(cls, refresh_interval):

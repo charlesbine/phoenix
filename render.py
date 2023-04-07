@@ -19,15 +19,20 @@ RENDER_HEIGHT = 64
 def run_app(name: str):
     """Render the output of the app called `name`."""
     start_time = time.perf_counter()
-    logger.info(f"[{name}] running app")
-
     app = get_app_by_name(name)
 
     if not app.enabled:
-        logger.debug(f"Skipping disabled app {app.name}")
-
+        logger.debug(f"[{app.name}] Skipping disabled app {app.name}")
+        return
+    
+    logger.info(f"[{name}] running app")
+    
     if not app.filename.exists():
         raise ValueError(f"File {app.filename} does not exist.")
+
+    if app.uses_preprocessor:
+        logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
+        subprocess.run(["python", str(app.python_filename)], check=True)
 
     subprocess.run(get_app_generation_command(app), check=True)
     if RUN_LARGE:
