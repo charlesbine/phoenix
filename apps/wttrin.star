@@ -5,7 +5,7 @@ load("cache.star", "cache")
 API_ENDPOINT = "https://wttr.in/nyc?m0qFAT"
 
 def main():
-    weather_cached = cache.get("btc_rate")
+    weather_cached = cache.get("wttrin_weather")
     if weather_cached != None:
         print("Hit! Displaying cached data.")
         weather_text = weather_cached
