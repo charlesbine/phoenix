@@ -130,7 +130,11 @@ dmypy.json
 
 
 # Local stuff
-/outputs
-.DS_Store
+pheonix/apps_dev
+pheonix/outputs
+pheonix/data
 /community
-/data
+
+*.ipynb
+.DS_Store
+.vscode
