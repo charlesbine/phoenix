@@ -1,0 +1,13 @@
+# this is the main config for running the app
+
+[server]
+# this section defines the config for the simple http server that
+# will run locally to pass local files to the starklark ones
+
+# post the local server will listen on 
+port = 8000
+# host name to serve on. Best keep to local host
+hostname = "127.0.0.1"
+# the directory that the server will serve thigns from. This should be the
+# output dir of the python process that runs before the pixlet code
+directory = "data"

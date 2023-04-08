@@ -8,11 +8,7 @@ pydantic.class_validators._FUNCS.clear()  # ignore
 import streamlit as st
 
 
-from app_db import get_app_by_name, read_all_apps, upsert, AppConfig
-from render import run_app
-from webapp.dashboard import display_animated_image
-from display import DisplayManager
-
+from pheonix.display import DisplayManager
 
 
 def main():
@@ -22,7 +18,6 @@ def main():
     assert dm.debug
 
     dm.run_display()
-
 
 
 if __name__ == "__main__":

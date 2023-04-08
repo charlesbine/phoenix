@@ -19,7 +19,7 @@ DB = TinyDB(str(DB_DIR))
 
 
 class Config(pydantic.BaseModel):
-    SUPPORTED_LAYOUT_MODES: ClassVar[list[str]] = ["cycle", "single"]
+    SUPPORTED_LAYOUT_MODES: ClassVar[list[str]] = ["cycle", "single", "random"]
     layout_mode: str = "cycle"
 
     # cycle layout params

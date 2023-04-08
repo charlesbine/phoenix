@@ -1,7 +1,6 @@
-from utils import data_dir
-from app_db import AppConfig, get_app_by_name
+from app_db import get_app_by_name
 
-import sptools
+from sptools import sptools
 
 
 APPLET_NAME = "spotify_now_playing"

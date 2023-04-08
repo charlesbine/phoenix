@@ -8,7 +8,7 @@ import time
 
 from loguru import logger
 
-from app_db import get_app_by_name, upsert, read_all_apps, AppConfig
+from pheonix.app_db import get_app_by_name, upsert, read_all_apps, AppConfig
 
 
 #: should we also generate a 5x magnified version ? It is used for display in the UI's
@@ -26,9 +26,9 @@ def run_app(name: str):
     if not app.enabled:
         logger.debug(f"[{app.name}] Skipping disabled app {app.name}")
         return
-    
+
     logger.info(f"[{name}] running app")
-    
+
     if not app.filename.exists():
         raise ValueError(f"File {app.filename} does not exist.")
 
@@ -53,12 +53,12 @@ def run_app(name: str):
 
 def get_app_generation_command(app: AppConfig, large: bool = False):
     """Return the command to generate the app."""
-    command = ["pixlet", "render", str(app.filename)] 
+    command = ["pixlet", "render", str(app.filename)]
     if large:
         command.extend(["-o", str(app.output_filename_large), "-m", "5"])
     else:
         command.extend(["-o", str(app.output_filename)])
-    
+
     # TODO: add the siza args
     command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
 

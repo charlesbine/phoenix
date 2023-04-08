@@ -6,9 +6,8 @@ from typing import Optional
 import pandas as pd
 import pydantic
 from tinydb import TinyDB, Query
-import tomli
 
-import utils
+from pheonix import utils
 
 
 DEFAULT_UPDATE_INTERVAL = datetime.timedelta(minutes=1)

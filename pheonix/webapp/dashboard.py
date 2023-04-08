@@ -1,6 +1,3 @@
-import base64
-from pathlib import Path
-
 import humanize
 import pandas as pd
 import pydantic
@@ -9,9 +6,10 @@ pydantic.class_validators._FUNCS.clear()  # ignore
 import streamlit as st
 
 
-from app_db import get_app_by_name, read_all_apps, upsert, AppConfig
-from render import run_app
-from config import Config, get_config, set_config
+from pheonix.app_db import get_app_by_name, read_all_apps, upsert, AppConfig
+from pheonix.render import run_app
+from pheonix.config import Config, get_config, set_config
+from pheonix.webapp.helpers import display_animated_image
 
 
 DEBUG = False
@@ -24,22 +22,29 @@ def main():
     st.header("Config")
     config = get_config()
     st.markdown("Use this section to control how the apps will show up")
-    
+
     if DEBUG:
         st.json(config.dict())
 
-    layout_mode = st.selectbox("Layout mode", options=Config.SUPPORTED_LAYOUT_MODES,
-                               index=Config.SUPPORTED_LAYOUT_MODES.index(config.layout_mode))
+    layout_mode = st.selectbox(
+        "Layout mode",
+        options=Config.SUPPORTED_LAYOUT_MODES,
+        index=Config.SUPPORTED_LAYOUT_MODES.index(config.layout_mode),
+    )
     if layout_mode != config.layout_mode:
         config.layout_mode = layout_mode
         set_config(config)
-    
-    cycle_interval = st.slider("Duration of each face", value=config.cycle_interval,
-                               min_value=1, max_value=100, step=1)
+
+    cycle_interval = st.slider(
+        "Duration of each face",
+        value=config.cycle_interval,
+        min_value=1,
+        max_value=100,
+        step=1,
+    )
     if cycle_interval != config.cycle_interval:
         config.cycle_interval = cycle_interval
         set_config(config)
-
 
     st.header("Apps")
     apps = read_all_apps()
@@ -79,7 +84,9 @@ def display_app_details(app: AppConfig):
     if app.output_filename_large.is_file():
         display_animated_image(app.output_filename_large)
     else:
-        st.error(f"No output file found for app {app.name} under {app.output_filename_large}")
+        st.error(
+            f"No output file found for app {app.name} under {app.output_filename_large}"
+        )
 
     st.markdown(f"Last updated: {humanize.naturaltime(app.last_updated)}")
 
@@ -110,19 +117,6 @@ def display_app_details(app: AppConfig):
 
     if st.checkbox(f"Show config for {app.name}"):
         st.json(app.dict())
-
-
-def display_animated_image(path: Path, element: st.empty = None):
-    contents = path.read_bytes()
-    data_url = base64.b64encode(contents).decode("utf-8")
-
-    if element is None:
-        element = st
-
-    element.markdown(
-        f'<img src="data:image/webp;base64,{data_url}">',
-        unsafe_allow_html=True,
-    )
 
 
 if __name__ == "__main__":
