@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 from random import choice
 
-import utils
-import app_db
+from pheonix import utils
+from pheonix import app_db
 
 APPLET_NAME = "pixel_planet"
 

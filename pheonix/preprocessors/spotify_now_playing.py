@@ -1,4 +1,4 @@
-from app_db import get_app_by_name
+from pheonix.app_db import get_app_by_name
 
 from sptools import sptools
 
