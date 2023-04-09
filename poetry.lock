@@ -95,6 +95,8 @@ mypy-extensions = ">=0.4.3"
 packaging = ">=22.0"
 pathspec = ">=0.9.0"
 platformdirs = ">=2"
+tomli = {version = ">=1.1.0", markers = "python_version < \"3.11\""}
+typing-extensions = {version = ">=3.10.0.0", markers = "python_version < \"3.10\""}
 
 [package.extras]
 colorama = ["colorama (>=0.4.3)"]
@@ -609,6 +611,7 @@ files = [
 
 [package.dependencies]
 numpy = [
+    {version = ">=1.20.3", markers = "python_version < \"3.10\""},
     {version = ">=1.21.0", markers = "python_version >= \"3.10\""},
     {version = ">=1.23.2", markers = "python_version >= \"3.11\""},
 ]
@@ -1103,14 +1106,17 @@ version = "0.1.0"
 description = ""
 category = "main"
 optional = false
-python-versions = "^3.11"
+python-versions = "^3.9"
 files = []
 develop = true
 
 [package.dependencies]
 click = "^8.1.3"
+loguru = "^0.6.0"
 python-dotenv = "^1.0.0"
 spotipy = "^2.23.0"
+tinydb = "^4.7.1"
+tomli = "^2.0.1"
 
 [package.source]
 type = "directory"
@@ -1375,5 +1381,5 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.11"
-content-hash = "0219a6faf55c9b19b2798e0f5f729d71d711b7c751b1a7ea77bdd7cf8c1defd5"
+python-versions = ">=3.9,<3.9.7 || >3.9.7,<4.0"
+content-hash = "af68c972de45eba783554a4df003ecc40d91cca811f5d3411ac374e2b50a19fe"

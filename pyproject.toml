@@ -9,7 +9,7 @@ readme = "README.md"
 pheonix = "pheonix.cli:cli"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.9,<3.9.7 || >3.9.7,<4.0"
 streamlit = "^1.21.0"
 loguru = "^0.6.0"
 pillow = "^9.5.0"
