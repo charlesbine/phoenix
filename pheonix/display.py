@@ -38,7 +38,7 @@ else:
 # TODO: move to a config toml
 ANIMATION_DELAY = 0.5
 IMAGE_REFRESH_PERIOD = 10
-
+TOLERANCE_MULTIPLIER = 1.5
 
 class DisplayManager:
     def __init__(self, debug_display_element=None):
@@ -85,7 +85,8 @@ class DisplayManager:
             logger.error(f"Output file {app.output_filename} does not exist")
             return
 
-        if datetime.datetime.now() - app.last_updated > app.refresh_interval:
+        time_since_last_update = datetime.datetime.now() - app.last_updated
+        if time_since_last_update > TOLERANCE_MULTIPLIER * app.refresh_interval:
             logger.warning(
                 f"App {app.name} is stale. Last updated {app.last_updated}. Skipping."
             )
