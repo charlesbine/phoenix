@@ -1,8 +1,6 @@
-import asyncio
 import datetime
 import importlib
 import os
-from pathlib import Path
 import subprocess
 import time
 
@@ -14,6 +12,8 @@ from pheonix.app_db import get_app_by_name, upsert, read_all_apps, AppConfig
 #: should we also generate a 5x magnified version ? It is used for display in the UI's
 RUN_LARGE = True
 
+#: render size for the pixlet apps
+#: note that some apps have internal config that causes the layout to be smaller
 RENDER_WIDTH = 64
 RENDER_HEIGHT = 64
 
@@ -60,7 +60,6 @@ def get_app_generation_command(app: AppConfig, large: bool = False):
     else:
         command.extend(["-o", str(app.output_filename)])
 
-    # TODO: add the siza args
     command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
 
     # TODO: add the command line args from the app config eg "timezone=UTC" for clock
