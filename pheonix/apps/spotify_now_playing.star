@@ -15,6 +15,9 @@ def main():
     json = rep.json()
     # TODO: check if now playing
     # TODO: once conditional eval is implemented, skip from rotation if not playing
+    if json == None:
+        # TODO: do something better with this, don't display?
+        return render.Root(render.Text("Nothing playing"))
 
     title = json["item"]["name"]
     artists = json["item"]["artists"]

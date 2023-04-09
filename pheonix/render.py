@@ -27,19 +27,21 @@ def run_app(name: str):
         logger.debug(f"[{app.name}] Skipping disabled app {app.name}")
         return
 
-    logger.info(f"[{name}] running app")
-
     if not app.filename.exists():
         raise ValueError(f"File {app.filename} does not exist.")
 
     if app.uses_preprocessor:
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
         module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
-        module.main()
+        data = module.main()
+        if data is None:
+            logger.warning(f"[{app.name}] Preprocessor returned None, skipping.")
 
-    subprocess.run(get_app_generation_command(app), check=True, env=os.environ)
-    if RUN_LARGE:
-        subprocess.run(get_app_generation_command(app, large=True), check=True)
+    if not app.uses_preprocessor or data is not None:
+        logger.info(f"[{name}] running applet")
+        subprocess.run(get_app_generation_command(app), check=True, env=os.environ)
+        if RUN_LARGE:
+            subprocess.run(get_app_generation_command(app, large=True), check=True)
 
     # update the last update time
     upsert(name, last_updated=datetime.datetime.now())
