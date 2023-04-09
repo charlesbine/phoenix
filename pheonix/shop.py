@@ -8,7 +8,7 @@ from sh.contrib import git
 
 
 COMMUNITY_REPO_URL = "git@github.com:tidbyt/community.git"
-COMMUNITY_REPO_LOCATION = Path(__file__).parent / "community"
+COMMUNITY_REPO_LOCATION = Path(__file__).parent.parent / "community"
 
 
 def get_community_repo() -> git.Repo:

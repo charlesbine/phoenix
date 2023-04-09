@@ -9,8 +9,8 @@ def cli(debug):
 
 @cli.command()
 def render():
-    from pheonix.render import run_all_apps_sync
-    run_all_apps_sync()
+    from pheonix.render import run_all_apps
+    run_all_apps()
 
 
 @cli.command()

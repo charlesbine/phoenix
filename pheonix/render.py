@@ -17,10 +17,14 @@ RUN_LARGE = True
 RENDER_WIDTH = 64
 RENDER_HEIGHT = 64
 
+# this controls how often we check for new apps to render
+# useful if we have a bunch of slow updating apps and want to guarantee that 
+# adding a new quick updating app will not be queued for a long time
+MAX_TIME_BETWEEN_UPDATES = datetime.timedelta(seconds=30)
+
 
 def run_app(name: str):
     """Render the output of the app called `name`."""
-    start_time = time.perf_counter()
     app = get_app_by_name(name)
 
     if not app.enabled:
@@ -45,12 +49,7 @@ def run_app(name: str):
 
     # update the last update time
     upsert(name, last_updated=datetime.datetime.now())
-    update_time_elapsed = time.perf_counter() - start_time
-    wait_time_remaining = app.refresh_interval.total_seconds() - update_time_elapsed
-    logger.debug(
-        f"[{app.name}] Waiting {wait_time_remaining:.1f} seconds "
-        f"(of {app.refresh_interval}) before next update."
-    )
+
 
 
 def get_app_generation_command(app: AppConfig, large: bool = False):
@@ -69,23 +68,48 @@ def get_app_generation_command(app: AppConfig, large: bool = False):
     return command
 
 
-def call_and_loop(loop, app_name: str, refresh_delay: int):
-    run_app(app_name)
-    loop.call_later(refresh_delay, call_and_loop, loop, app_name, refresh_delay)
+def run_all_apps():
+    """ Run all apps. The app database is read at every iteration, so apps can be 
+    added or removed while this is running. """
+    while True:
+        all_apps = read_all_apps()
+        all_enabled = [app for app in all_apps if app.enabled]
+
+        def expected_next_update_time(app: AppConfig) -> datetime.datetime:
+            """ When should this app be updated next? If the app has never been updated,
+            then we assume it should be updated now. """
+            if app.last_updated is None:
+                return datetime.datetime.now()
+            return app.last_updated + app.refresh_interval
+
+        next_app_to_run = min(all_enabled, key=expected_next_update_time)
+        now = datetime.datetime.now()
+        time_to_next_update = expected_next_update_time(next_app_to_run) - now
+
+        if time_to_next_update > MAX_TIME_BETWEEN_UPDATES:
+            # if the next app is too far in the future, then we'll just wait for the
+            # max time between updates
+            time_to_next_update = MAX_TIME_BETWEEN_UPDATES
+            logger.debug("Nothing to update in the next "
+                         f"{MAX_TIME_BETWEEN_UPDATES.total_seconds()} seconds, "
+                         "will check again then.")
+            time.sleep(time_to_next_update.total_seconds())
+            continue
+       
+        # set any negative number to 0
+        clipped_time_to_next_update = max(time_to_next_update.total_seconds(), 0)
+
+        logger.debug(
+            f"Next app to run is {next_app_to_run.name} in "
+            f"{time_to_next_update.total_seconds():.1f} seconds"
+        )
+
+        time.sleep(clipped_time_to_next_update)
+        run_app(next_app_to_run.name)
 
 
-def run_all_apps_sync():
-    loop = asyncio.new_event_loop()
-
-    for app in read_all_apps():
-        refresh_interval_seconds = app.refresh_interval.total_seconds()
-        loop.call_soon(call_and_loop, loop, app.name, refresh_interval_seconds)
-
-    # TODO: add a handler to check for new apps and remove old apps
-    # old apps might not need to get removed since they can be disabled though
-
-    loop.run_forever()
+    
 
 
 if __name__ == "__main__":
-    run_all_apps_sync()
+    run_all_apps()
