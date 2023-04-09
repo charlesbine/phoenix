@@ -25,13 +25,13 @@ if IS_RASP:
     options.cols = 64
     options.chain_length = 1
     options.parallel = 1
-    options.hardware_mapping = (
-        "adafruit-hat"  # 'regular'  # If you have an Adafruit HAT: 'adafruit-hat'
-    )
+    # 'regular'  # If you have an Adafruit HAT: 'adafruit-hat'
+    options.hardware_mapping = "adafruit-hat"
 
     matrix = RGBMatrix(options=options)
 
 else:
+    # TODO: drop superuser privileges here if applicable
     import streamlit as st
 
 

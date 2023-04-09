@@ -27,6 +27,10 @@ def run_app(name: str):
     """Render the output of the app called `name`."""
     app = get_app_by_name(name)
 
+    # TODO: wrap all this in a try/except and determine what to do if an app fails
+    # either at the python or pixlet stages. Probably the right thing to do is
+    # to do some retries with exponential backoff, and then give up and disable
+
     if not app.enabled:
         logger.debug(f"[{app.name}] Skipping disabled app {app.name}")
         return
@@ -36,16 +40,19 @@ def run_app(name: str):
 
     if app.uses_preprocessor:
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
-        module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
+        module = importlib.import_module(
+            f"pheonix.preprocessors.{app.python_filename.stem}")
         data = module.main()
         if data is None:
             logger.warning(f"[{app.name}] Preprocessor returned None, skipping.")
 
     if not app.uses_preprocessor or data is not None:
         logger.info(f"[{name}] running applet")
-        subprocess.run(get_app_generation_command(app), check=True, env=os.environ)
+        subprocess.run(get_app_generation_command(app), 
+                                   check=True, env=os.environ)
         if RUN_LARGE:
-            subprocess.run(get_app_generation_command(app, large=True), check=True)
+            subprocess.run(get_app_generation_command(app, large=True), 
+                                       check=True, env=os.environ)
 
     # update the last update time
     upsert(name, last_updated=datetime.datetime.now())
