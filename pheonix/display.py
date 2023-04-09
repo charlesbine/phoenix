@@ -85,9 +85,7 @@ class DisplayManager:
             logger.error(f"Output file {app.output_filename} does not exist")
             return
 
-        if datetime.datetime.now() - app.last_updated > datetime.timedelta(
-            seconds=app.refresh_interval
-        ):
+        if datetime.datetime.now() - app.last_updated > app.refresh_interval:
             logger.warning(
                 f"App {app.name} is stale. Last updated {app.last_updated}. Skipping."
             )
