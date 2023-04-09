@@ -34,7 +34,7 @@ def run_app(name: str):
 
     if app.uses_preprocessor:
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
-        module = importlib.import_module(f"preprocessors.{app.python_filename.stem}")
+        module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
         module.main()
 
     subprocess.run(get_app_generation_command(app), check=True, env=os.environ)
