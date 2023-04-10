@@ -81,6 +81,8 @@ def apps_to_frame(apps: list[AppConfig]) -> pd.DataFrame:
 
 def display_app_details(app: AppConfig):
     st.markdown(f"### {app.name}")
+    if app.is_stale():
+        st.warning("App is stale", icon="⚠️")
     if app.output_filename_large.is_file():
         display_animated_image(app.output_filename_large)
     else:

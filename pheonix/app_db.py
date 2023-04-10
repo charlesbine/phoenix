@@ -1,7 +1,7 @@
 import datetime
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, ClassVar
 
 import pandas as pd
 import pydantic
@@ -28,6 +28,9 @@ class AppConfig(pydantic.BaseModel):
     # enabled means it should be rendered
     enabled: bool = True
 
+    #: the ratio of the refresh interval after which the app is considered stale
+    STALE_TOLERANCE_MULTIPLIER: ClassVar[float] = 1.5
+
     @property
     def filename(self) -> Path:
         return utils.apps_dir() / (self.name + ".star")
@@ -53,6 +56,13 @@ class AppConfig(pydantic.BaseModel):
     @property
     def output_filename_large(self) -> Path:
         return utils.output_dir() / (self.name + ".large.webp")
+    
+    def is_stale(self) -> bool:
+        if self.last_updated is None:
+            # if we've never updated, then it's stale 
+            return True
+        time_since_last_update = datetime.datetime.now() - self.last_updated
+        return time_since_last_update > self.STALE_TOLERANCE_MULTIPLIER * self.refresh_interval
 
     @pydantic.validator("refresh_interval", pre=True)
     def val_refresh_interval(cls, refresh_interval):

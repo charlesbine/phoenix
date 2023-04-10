@@ -38,7 +38,9 @@ else:
 # TODO: move to a config toml
 ANIMATION_DELAY = 0.5
 IMAGE_REFRESH_PERIOD = 10
-TOLERANCE_MULTIPLIER = 1.5
+#: number of seconds to wait before next update loop if all apps are stale
+ALL_APPS_STALE_WAIT_TIME = 1
+
 
 class DisplayManager:
     def __init__(self, debug_display_element=None):
@@ -52,6 +54,12 @@ class DisplayManager:
         while True:
             apps = read_all_apps()
             active_apps = [app for app in apps if app.enabled and app.active]
+
+            if all(app.is_stale() for app in active_apps):
+                # all apps are stale, so we wait for a bit to avoid an infinite loop
+                time.sleep(ALL_APPS_STALE_WAIT_TIME)
+                # we continue to refresh the apps
+                continue
 
             if len(active_apps) == 0:
                 logger.error("No active apps found.")
@@ -88,8 +96,7 @@ class DisplayManager:
             logger.error(f"Output file {app.output_filename} does not exist")
             return
 
-        time_since_last_update = datetime.datetime.now() - app.last_updated
-        if time_since_last_update > TOLERANCE_MULTIPLIER * app.refresh_interval:
+        if app.is_stale():
             logger.warning(
                 f"App {app.name} is stale. Last updated {app.last_updated}. Skipping."
             )
