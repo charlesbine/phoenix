@@ -55,16 +55,17 @@ class DisplayManager:
             apps = read_all_apps()
             active_apps = [app for app in apps if app.enabled and app.active]
 
-            if all(app.is_stale() for app in active_apps):
-                # all apps are stale, so we wait for a bit to avoid an infinite loop
-                time.sleep(ALL_APPS_STALE_WAIT_TIME)
-                # we continue to refresh the apps
-                continue
-
             if len(active_apps) == 0:
                 logger.error("No active apps found.")
                 # TODO: display a default clock or something
                 raise RuntimeError("no active apps found")
+            
+            if all(app.is_stale() for app in active_apps):
+                # all apps are stale, so we wait for a bit to avoid an infinite loop
+                logger.warning("All apps are stale, waiting for {ALL_APPS_STALE_WAIT_TIME}s")
+                time.sleep(ALL_APPS_STALE_WAIT_TIME)
+                # we continue to refresh the apps
+                continue
 
             config = get_config()
             logger.debug(f"Got config: {config}")

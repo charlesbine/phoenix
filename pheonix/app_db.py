@@ -75,9 +75,6 @@ class AppConfig(pydantic.BaseModel):
             ) - datetime.datetime.combine(date, datetime.time(0))
         return refresh_interval
 
-    def save(self):
-        pass
-
 
 class Config(pydantic.BaseModel):
     apps: list[AppConfig]
