@@ -17,6 +17,9 @@ from pheonix.webapp.helpers import display_animated_image
 IS_RASP = socket.gethostname() == "raspberrypi"
 
 if IS_RASP:
+    import sys
+    sys.path.append("/usr/local/lib/python3.9/dist-packages/")
+    
     from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
     # Configuration for the matrix
