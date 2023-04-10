@@ -9,7 +9,7 @@ from typing import Optional
 from loguru import logger
 from PIL import Image, ImageSequence
 
-from pheonix.app_db import read_all_apps, AppConfig
+from pheonix.app_db import read_all_apps, AppConfig, get_app_by_name
 from pheonix.config import get_config
 from pheonix.webapp.helpers import display_animated_image
 
@@ -77,6 +77,9 @@ class DisplayManager:
 
     def display_app(self, app: AppConfig, duration: int):
         """Display an app for `duration` seconds."""
+
+        app = get_app_by_name(app.name)
+
         image_path = (
             app.output_filename if not self.debug else app.output_filename_large
         )
