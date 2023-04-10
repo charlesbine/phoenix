@@ -5,18 +5,10 @@ load("cache.star", "cache")
 API_ENDPOINT = "https://wttr.in/nyc?m0qFAT"
 
 def main():
-    weather_cached = cache.get("wttrin_weather")
-    if weather_cached != None:
-        print("Hit! Displaying cached data.")
-        weather_text = weather_cached
-    else:
-        print("Miss! Calling wttr.in API.")
-        rep = http.get(API_ENDPOINT)
-        if rep.status_code != 200:
-            fail("wttr.in request failed with status %d", rep.status_code)
-        weather_text = rep.body()
-        print(weather_text)
-        cache.set("wttrin_weather", weather_text, ttl_seconds = 240)
+    rep = http.get(API_ENDPOINT)
+    if rep.status_code != 200:
+        fail("wttr.in request failed with status %d", rep.status_code)
+    weather_text = rep.body()
     
     weather_lines = weather_text.splitlines()
     longest_line = max([len(line) for line in weather_lines])
