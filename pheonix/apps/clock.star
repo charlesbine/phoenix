@@ -13,11 +13,11 @@ def main(config):
             child = render.Animation(
                 children = [
                     render.Text(
-                        content = now.format("3:04 PM"),
+                        content = now.format("15:04"),
                         font = "10x20", #"6x13",
                     ),
                     render.Text(
-                        content = now.format("3 04 PM"),
+                        content = now.format("15 04"),
                         font = "10x20", #"6x13",
                     ),
                 ],
