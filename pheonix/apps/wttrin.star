@@ -13,8 +13,8 @@ def main():
     weather_lines = weather_text.splitlines()
     longest_line = max([len(line) for line in weather_lines])
     weather_lines = [ljust(line, longest_line) for line in weather_lines]
-    weather_lines[3] += " "
-    weather_lines[4] += "  "
+    # weather_lines[3] += " "
+    # weather_lines[4] += "  "
 
     # for line in weather_lines:
     #     print(len(line))

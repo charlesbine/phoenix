@@ -45,6 +45,12 @@ def run_app(name: str):
         data = module.main()
         if data is None:
             logger.warning(f"[{app.name}] Preprocessor returned None, skipping.")
+            if app.output_filename.exists():
+                logger.info(f"[{app.name}] Removing old data file {app.output_filename}")
+                app.output_filename.unlink()
+            if app.output_filename_large.exists():
+                logger.info(f"[{app.name}] Removing old data file {app.output_filename_large}")
+                app.output_filename_large.unlink()
 
     if not app.uses_preprocessor or data is not None:
         logger.info(f"[{name}] running applet")

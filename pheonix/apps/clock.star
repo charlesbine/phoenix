@@ -14,11 +14,11 @@ def main(config):
                 children = [
                     render.Text(
                         content = now.format("3:04 PM"),
-                        font = "6x13",
+                        font = "10x20"; #"6x13",
                     ),
                     render.Text(
                         content = now.format("3 04 PM"),
-                        font = "6x13",
+                        font = "10x20"; #"6x13",
                     ),
                 ],
             ),
