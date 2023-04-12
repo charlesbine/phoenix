@@ -65,7 +65,7 @@ class DisplayManager:
             
             if all(app.is_stale() for app in active_apps):
                 # all apps are stale, so we wait for a bit to avoid an infinite loop
-                logger.warning("All apps are stale, waiting for {ALL_APPS_STALE_WAIT_TIME}s")
+                logger.warning(f"All apps are stale, waiting for {ALL_APPS_STALE_WAIT_TIME}s")
                 time.sleep(ALL_APPS_STALE_WAIT_TIME)
                 # we continue to refresh the apps
                 continue
@@ -121,7 +121,7 @@ class DisplayManager:
         Display apps in a cycle, one at a time. Displays each one for 
         `each_duration` seconds.
         """
-        for app in cycle(apps):
+        for app in apps:
             logger.debug(f"Displaying {app.name} for {each_duration} seconds")
             self.display_app(app, each_duration)
 
@@ -130,8 +130,9 @@ class DisplayManager:
         Display apps in a random order, one at a time. Displays each one for 
         `each_duration` seconds.
         """
-        while True:
-            app = random.choice(apps)
+        apps_shuffled = apps.copy()
+        random.shuffle(apps_shuffled)
+        for app in apps_shuffled:
             self.display_app(app, each_duration)
 
 
