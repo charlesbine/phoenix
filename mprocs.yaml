@@ -6,10 +6,12 @@ procs:
   display:
     shell:
       $select: os
-      macos: |
-        pyenv shell 3.9
-        poetry shell
-        streamlit run pheonix/webapp/dashboard.py
+      macos: echo "skipping display on macos"
       $else: |
         export PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.9/dist-packages/
         sudo -E /home/charles/.cache/pypoetry/virtualenvs/pheonix-hnbBLJzU-py3.9/bin/python pheonix/display.py
+  dashboard:
+    shell: |
+      pyenv shell 3.9
+      poetry shell
+      poetry run streamlit -- run pheonix/webapp/dashboard.py --browser.gatherUsageStats=false --server.port=7002 --server.address=0.0.0.0 --server.headless=true
