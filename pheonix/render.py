@@ -40,7 +40,7 @@ def run_app(name: str):
         raise ValueError(f"File {app.filename} does not exist.")
 
     if app.uses_preprocessor:
-        logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")\
+        logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
         try:
             module = importlib.import_module(
                 f"pheonix.preprocessors.{app.python_filename.stem}")
