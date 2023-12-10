@@ -152,10 +152,23 @@ def display_image(image, duration: int):
 
 def animate(image, delay=None, duration: Optional[int] = None):
     start = end = time.perf_counter()
+
+    # prerocessing the animation
+    canvases = []
+    for frame in ImageSequence.Iterator(image):
+        canvas = matrix.CreateFrameCanvas()
+        # maybe:
+        # frame.thumnail(matrix.width, matrix.height, Image.ANTIALIAS)
+        canvas.SetImage(frame.convert("RGB"))
+        canvases.append(canvas)
+
+    # can close the image now that we've processed the frames
+    # to save some memory
+    image.close()
+
     while end - start < duration:
-        for frame in ImageSequence.Iterator(image):
-            delay = frame.info["duration"] / 1000 if delay is None else delay
-            still(frame, duration=delay)
+        for canvas in canvases:
+            canvas = matrix.SwapOnVSync(canvas, framerate_fraction=10)
 
         # we put this outside the for to let the full animation play before ending it
         end = time.perf_counter()
@@ -166,6 +179,7 @@ def still(image, duration=IMAGE_REFRESH_PERIOD):
     # Make image fit our screen.
     # image.thumbnail((matrix.width, matrix.height), Image.ANTIALIAS)
     matrix.Clear()
+    matrix.CreateFrameCanvas().SetImage(image.convert("RGB"))
     matrix.SetImage(image.convert("RGB"))
     time.sleep(duration)
 
