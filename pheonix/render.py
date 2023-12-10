@@ -7,6 +7,7 @@ import time
 from loguru import logger
 
 from pheonix.app_db import get_app_by_name, upsert, read_all_apps, AppConfig
+from pheonix.types import AppStatus
 
 
 #: should we also generate a 5x magnified version ? It is used for display in the UI's
@@ -18,7 +19,7 @@ RENDER_WIDTH = 64
 RENDER_HEIGHT = 64
 
 # this controls how often we check for new apps to render
-# useful if we have a bunch of slow updating apps and want to guarantee that 
+# useful if we have a bunch of slow updating apps and want to guarantee that
 # adding a new quick updating app will not be queued for a long time
 MAX_TIME_BETWEEN_UPDATES = datetime.timedelta(seconds=30)
 
@@ -39,25 +40,36 @@ def run_app(name: str):
         raise ValueError(f"File {app.filename} does not exist.")
 
     if app.uses_preprocessor:
-        logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
-        module = importlib.import_module(
-            f"pheonix.preprocessors.{app.python_filename.stem}")
-        data = module.main()
-        if data is None:
+        logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")\
+        try:
+            module = importlib.import_module(
+                f"pheonix.preprocessors.{app.python_filename.stem}")
+            data = module.main()
+        except Exception as e:
+            logger.error(f"[{app.name}] Preprocessor raised an exception: {e}")
+            logger.exception(e)
+            data = None
+
+        if data is None or data is AppStatus.SKIP:
+            # TODO: change this to only if returned AppStatus.SKIP
             logger.warning(f"[{app.name}] Preprocessor returned None, skipping.")
+
+            # remove the data files so the display doesn't try to use them
             if app.output_filename.exists():
                 logger.info(f"[{app.name}] Removing old data file {app.output_filename}")
                 app.output_filename.unlink()
             if app.output_filename_large.exists():
                 logger.info(f"[{app.name}] Removing old data file {app.output_filename_large}")
                 app.output_filename_large.unlink()
+            # return ?
+        # TODO: support other AppStatus values here
 
-    if not app.uses_preprocessor or data is not None:
+    if not app.uses_preprocessor or (data is not None and data is not AppStatus.SKIP):
         logger.info(f"[{name}] running applet")
-        subprocess.run(get_app_generation_command(app), 
+        subprocess.run(get_app_generation_command(app),
                                    check=True, env=os.environ)
         if RUN_LARGE:
-            subprocess.run(get_app_generation_command(app, large=True), 
+            subprocess.run(get_app_generation_command(app, large=True),
                                        check=True, env=os.environ)
 
     # update the last update time
@@ -76,12 +88,12 @@ def get_app_generation_command(app: AppConfig, large: bool = False):
     command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
 
     # TODO: add the command line args from the app config eg "timezone=UTC" for clock
-
+    # these should be read from a dict or somethign in the database?
     return command
 
 
 def run_all_apps():
-    """ Run all apps. The app database is read at every iteration, so apps can be 
+    """ Run all apps. The app database is read at every iteration, so apps can be
     added or removed while this is running. """
     while True:
         all_apps = read_all_apps()
@@ -107,7 +119,7 @@ def run_all_apps():
                          "will check again then.")
             time.sleep(time_to_next_update.total_seconds())
             continue
-       
+
         # set any negative number to 0
         clipped_time_to_next_update = max(time_to_next_update.total_seconds(), 0)
 
@@ -119,8 +131,6 @@ def run_all_apps():
         time.sleep(clipped_time_to_next_update)
         run_app(next_app_to_run.name)
 
-
-    
 
 
 if __name__ == "__main__":
