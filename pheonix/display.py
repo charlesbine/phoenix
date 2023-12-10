@@ -168,7 +168,8 @@ def animate(image, delay=None, duration: Optional[int] = None):
 
     while end - start < duration:
         for canvas in canvases:
-            canvas = matrix.SwapOnVSync(canvas, framerate_fraction=10)
+            canvas = matrix.SwapOnVSync(canvas)
+            # canvas = matrix.SwapOnVSync(canvas, framerate_fraction=10)
 
         # we put this outside the for to let the full animation play before ending it
         end = time.perf_counter()
