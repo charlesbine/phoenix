@@ -42,9 +42,9 @@ colorOpt = [
     ),
 ]
 
-DEFAULT_EVENT_NAME = "Emma's Birthday"
-DEFAULT_COLOR_OPT = colorOpt[6]
-DEFAULT_TIME_STR = "2023-04-23T00:00:00+07:00"
+DEFAULT_EVENT_NAME = "Coundown to 2024!"
+DEFAULT_COLOR_OPT = colorOpt[4]
+DEFAULT_TIME_STR = "2024-01-01T00:00:00+07:00"
 
 
 
