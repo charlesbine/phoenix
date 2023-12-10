@@ -155,20 +155,25 @@ def animate(image, delay=None, duration: Optional[int] = None):
 
     # prerocessing the animation
     canvases = []
+    durations = []
     for frame in ImageSequence.Iterator(image):
         canvas = matrix.CreateFrameCanvas()
         # maybe:
         # frame.thumnail(matrix.width, matrix.height, Image.ANTIALIAS)
         canvas.SetImage(frame.convert("RGB"))
         canvases.append(canvas)
+        durations.append(frame.info["duration"] / 1000 if delay is None else delay)
 
     # can close the image now that we've processed the frames
     # to save some memory
     image.close()
 
     while end - start < duration:
-        for canvas in canvases:
+        for canvas, cur_delay in zip(canvases, durations):
             canvas = matrix.SwapOnVSync(canvas)
+            time.sleep(cur_delay)
+            # when we get newer version with this PR
+            # https://github.com/hzeller/rpi-rgb-led-matrix/pull/1447/commits
             # canvas = matrix.SwapOnVSync(canvas, framerate_fraction=10)
 
         # we put this outside the for to let the full animation play before ending it
