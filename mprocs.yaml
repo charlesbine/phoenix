@@ -1,0 +1,15 @@
+procs:
+  server:
+    shell: "poetry run pheonix server"
+  renderer:
+    shell: "poetry run pheonix render"
+  display:
+    shell:
+      $select: os
+      macos: |
+        pyenv shell 3.9
+        poetry shell
+        streamlit run pheonix/webapp/dashboard.py
+      $else: |
+        export PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.9/dist-packages/
+        sudo -E /home/charles/.cache/pypoetry/virtualenvs/pheonix-hnbBLJzU-py3.9/bin/python pheonix/display.py
