@@ -19,7 +19,7 @@ IS_RASP = socket.gethostname() == "raspberrypi"
 if IS_RASP:
     import sys
     sys.path.append("/usr/local/lib/python3.9/dist-packages/")
-    
+
     from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
     # Configuration for the matrix
@@ -62,10 +62,12 @@ class DisplayManager:
                 logger.error("No active apps found.")
                 # TODO: display a default clock or something
                 raise RuntimeError("no active apps found")
-            
+
             if all(app.is_stale() for app in active_apps):
                 # all apps are stale, so we wait for a bit to avoid an infinite loop
                 logger.warning(f"All apps are stale, waiting for {ALL_APPS_STALE_WAIT_TIME}s")
+                if IS_RASP:
+                    matrix.Clear()
                 time.sleep(ALL_APPS_STALE_WAIT_TIME)
                 # we continue to refresh the apps
                 continue
@@ -118,7 +120,7 @@ class DisplayManager:
 
     def display_apps_in_cycle(self, apps: list[AppConfig], each_duration: int):
         """
-        Display apps in a cycle, one at a time. Displays each one for 
+        Display apps in a cycle, one at a time. Displays each one for
         `each_duration` seconds.
         """
         for app in apps:
@@ -127,7 +129,7 @@ class DisplayManager:
 
     def display_apps_in_random_order(self, apps: list[AppConfig], each_duration: int):
         """
-        Display apps in a random order, one at a time. Displays each one for 
+        Display apps in a random order, one at a time. Displays each one for
         `each_duration` seconds.
         """
         apps_shuffled = apps.copy()
