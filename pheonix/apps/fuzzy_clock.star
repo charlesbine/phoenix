@@ -84,6 +84,7 @@ def main(config):
 
     # Add some left padding for ~style~.
     texts = [render.Text(" " * i + s, font="6x13") for i, s in enumerate(fuzzed)]
+    # texts = [render.Marquee(render.Text(" " * i + s, font="6x13")) for i, s in enumerate(fuzzed)]
 
     return render.Root(
         child = render.Padding(

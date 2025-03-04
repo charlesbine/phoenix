@@ -1,7 +1,9 @@
-import enum
+from enum import Enum
 
-class AppStatus(enum.Enum):
+
+class AppStatus(Enum):
     """Application status"""
+
     SKIP = "skip"
     PRIORITIZE = "prioritize"
     NORMAL = "normal"

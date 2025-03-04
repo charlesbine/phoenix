@@ -138,3 +138,6 @@ pheonix/data
 *.ipynb
 .DS_Store
 .vscode
+
+
+pheonix/app_single

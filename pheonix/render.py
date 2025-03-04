@@ -3,6 +3,10 @@ import importlib
 import os
 import subprocess
 import time
+import tempfile
+import shutil
+import pathlib
+from typing import Optional
 
 from loguru import logger
 
@@ -42,17 +46,16 @@ def run_app(name: str):
     if app.uses_preprocessor:
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
         try:
-            module = importlib.import_module(
-                f"pheonix.preprocessors.{app.python_filename.stem}")
+            module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
             data = module.main()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(f"[{app.name}] Preprocessor raised an exception: {e}")
             logger.exception(e)
             data = None
 
         if data is None or data is AppStatus.SKIP:
             # TODO: change this to only if returned AppStatus.SKIP
-            logger.warning(f"[{app.name}] Preprocessor returned None, skipping.")
+            logger.warning(f"[{app.name}] Preprocessor returned None or AppStatus.SKIP, skipping.")
 
             # remove the data files so the display doesn't try to use them
             if app.output_filename.exists():
@@ -61,25 +64,41 @@ def run_app(name: str):
             if app.output_filename_large.exists():
                 logger.info(f"[{app.name}] Removing old data file {app.output_filename_large}")
                 app.output_filename_large.unlink()
-            # return ?
+            return
         # TODO: support other AppStatus values here
 
-    if not app.uses_preprocessor or (data is not None and data is not AppStatus.SKIP):
-        logger.info(f"[{name}] running applet")
-        subprocess.run(get_app_generation_command(app),
-                                   check=True, env=os.environ)
-        if RUN_LARGE:
-            subprocess.run(get_app_generation_command(app, large=True),
-                                       check=True, env=os.environ)
+    logger.info(f"[{name}] running applet")
+    run_app_generation(app)
+    if RUN_LARGE:
+        run_app_generation(app, large=True)
 
     # update the last update time
     upsert(name, last_updated=datetime.datetime.now())
 
 
+def run_app_generation(app: AppConfig, large: bool = False):
+    """Run the command to generate the app.
 
-def get_app_generation_command(app: AppConfig, large: bool = False):
+    This will copy the app file temporarily to a temp file, workaround for a pixlet bug
+    https://discuss.tidbyt.com/t/strange-behavior-with-pixlet/6525
+    """
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_file = pathlib.Path(temp_dir) / app.filename.name
+        shutil.copy(app.filename, temp_file)
+
+        command = get_app_generation_command(app, large, str(temp_file))
+        logger.debug(f"[{app.name}] Running command: {' '.join(command)}")
+        subprocess.run(command, check=True, env=os.environ)
+
+
+def get_app_generation_command(app: AppConfig, large: bool = False, app_file: Optional[str] = None):
     """Return the command to generate the app."""
-    command = ["pixlet", "render", str(app.filename)]
+
+    if app_file is None:
+        app_file = str(app.filename)
+
+    command = ["pixlet", "render", app_file]
     if large:
         command.extend(["-o", str(app.output_filename_large), "-m", "5"])
     else:
@@ -93,15 +112,15 @@ def get_app_generation_command(app: AppConfig, large: bool = False):
 
 
 def run_all_apps():
-    """ Run all apps. The app database is read at every iteration, so apps can be
-    added or removed while this is running. """
+    """Run all apps. The app database is read at every iteration, so apps can be
+    added or removed while this is running."""
     while True:
         all_apps = read_all_apps()
         all_enabled = [app for app in all_apps if app.enabled]
 
         def expected_next_update_time(app: AppConfig) -> datetime.datetime:
-            """ When should this app be updated next? If the app has never been updated,
-            then we assume it should be updated now. """
+            """When should this app be updated next? If the app has never been updated,
+            then we assume it should be updated now."""
             if app.last_updated is None:
                 return datetime.datetime.now()
             return app.last_updated + app.refresh_interval
@@ -114,9 +133,11 @@ def run_all_apps():
             # if the next app is too far in the future, then we'll just wait for the
             # max time between updates
             time_to_next_update = MAX_TIME_BETWEEN_UPDATES
-            logger.debug("Nothing to update in the next "
-                         f"{MAX_TIME_BETWEEN_UPDATES.total_seconds()} seconds, "
-                         "will check again then.")
+            logger.debug(
+                "Nothing to update in the next "
+                f"{MAX_TIME_BETWEEN_UPDATES.total_seconds()} seconds, "
+                "will check again then."
+            )
             time.sleep(time_to_next_update.total_seconds())
             continue
 
@@ -130,8 +151,3 @@ def run_all_apps():
 
         time.sleep(clipped_time_to_next_update)
         run_app(next_app_to_run.name)
-
-
-
-if __name__ == "__main__":
-    run_all_apps()
