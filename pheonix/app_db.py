@@ -27,6 +27,10 @@ class AppConfig(pydantic.BaseModel):
     active: bool = True
     # enabled means it should be rendered
     enabled: bool = True
+    # kwargs to pass to pixlet render as command line args, which
+    # will be passed to the `main` function as the `config` argument
+    # eg "timezone=UTC" for clock,
+    pixlet_config_kwargs: dict = {}
 
     #: the ratio of the refresh interval after which the app is considered stale
     STALE_TOLERANCE_MULTIPLIER: ClassVar[float] = 1.5
@@ -38,11 +42,11 @@ class AppConfig(pydantic.BaseModel):
     @property
     def python_filename(self) -> Path:
         return utils.preprocessors_dir() / (self.name + ".py")
-    
+
     @property
     def uses_preprocessor(self) -> bool:
         return self.python_filename.exists()
-    
+
     @property
     def data_file(self) -> Path:
         if not self.uses_preprocessor:
@@ -56,10 +60,10 @@ class AppConfig(pydantic.BaseModel):
     @property
     def output_filename_large(self) -> Path:
         return utils.output_dir() / (self.name + ".large.webp")
-    
+
     def is_stale(self) -> bool:
         if self.last_updated is None:
-            # if we've never updated, then it's stale 
+            # if we've never updated, then it's stale
             return True
         time_since_last_update = datetime.datetime.now() - self.last_updated
         return time_since_last_update > self.STALE_TOLERANCE_MULTIPLIER * self.refresh_interval
@@ -70,9 +74,9 @@ class AppConfig(pydantic.BaseModel):
             return pd.Timedelta(refresh_interval).to_pytimedelta()
         elif isinstance(refresh_interval, datetime.time):
             date = datetime.date.today()
-            return datetime.datetime.combine(
-                date, refresh_interval
-            ) - datetime.datetime.combine(date, datetime.time(0))
+            return datetime.datetime.combine(date, refresh_interval) - datetime.datetime.combine(
+                date, datetime.time(0)
+            )
         return refresh_interval
 
 

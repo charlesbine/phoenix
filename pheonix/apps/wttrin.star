@@ -9,7 +9,6 @@ def main():
     if rep.status_code != 200:
         fail("wttr.in request failed with status %d", rep.status_code)
     weather_text = rep.body()
-    print("weather_text: ", weather_text)
     weather_lines = weather_text.splitlines()
 
     # Normalize and pad each line to ensure consistent visual width

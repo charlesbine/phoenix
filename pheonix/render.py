@@ -104,6 +104,9 @@ def get_app_generation_command(app: AppConfig, large: bool = False, app_file: Op
     else:
         command.extend(["-o", str(app.output_filename)])
 
+    for key, value in app.pixlet_config_kwargs.items():
+        command.extend([f"{key}={value}"])
+
     command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
 
     # TODO: add the command line args from the app config eg "timezone=UTC" for clock
