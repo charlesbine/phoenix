@@ -2,12 +2,13 @@ procs:
   renderer:
     shell: "uv run pheonix render"
   display:
+    autorestart: true
     shell:
       $select: os
       macos: echo "skipping display on macos"
       $else: |
         export PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.9/dist-packages/
-        sudo -E /home/charles/.cache/pypoetry/virtualenvs/pheonix-hnbBLJzU-py3.9/bin/python pheonix/display.py
+        sudo -E ulimit -v 500000 /home/charles/.cache/pypoetry/virtualenvs/pheonix-hnbBLJzU-py3.9/bin/python pheonix/display.py
   dashboard:
     shell: "uv run -- streamlit run pheonix/webapp/dashboard.py --browser.gatherUsageStats=false --server.port=7002 --server.address=0.0.0.0 --server.headless=true"
   server:
