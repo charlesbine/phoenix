@@ -18,6 +18,7 @@ IS_RASP = socket.gethostname() == "raspberrypi"
 
 if IS_RASP:
     import sys
+
     sys.path.append("/usr/local/lib/python3.9/dist-packages/")
 
     from rgbmatrix import RGBMatrix, RGBMatrixOptions
@@ -82,9 +83,7 @@ class DisplayManager:
                 self.display_apps_in_random_order(active_apps, config.cycle_interval)
             elif config.layout_mode == "single":
                 if len(active_apps) > 1:
-                    logger.warning(
-                        "More than one app is active, but display mode is single"
-                    )
+                    logger.warning("More than one app is active, but display mode is single")
                 self.display_app(active_apps[0], config.cycle_interval)
             else:
                 raise ValueError(f"Unknown display mode {config.layout_mode}")
@@ -94,18 +93,14 @@ class DisplayManager:
 
         app = get_app_by_name(app.name)
 
-        image_path = (
-            app.output_filename if not self.debug else app.output_filename_large
-        )
+        image_path = app.output_filename if not self.debug else app.output_filename_large
 
         if not app.output_filename.exists():
             logger.error(f"Output file {app.output_filename} does not exist")
             return
 
         if app.is_stale():
-            logger.warning(
-                f"App {app.name} is stale. Last updated {app.last_updated}. Skipping."
-            )
+            logger.warning(f"App {app.name} is stale. Last updated {app.last_updated}. Skipping.")
             return
 
         logger.info(f"Displaying {app.name} for {duration} seconds, {image_path=}")

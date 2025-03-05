@@ -41,7 +41,7 @@ def get_temperature():
     try:
         output = subprocess.run(["vcgencmd", "measure_temp"], capture_output=True, text=True)
         # Expected output format: "temp=48.0'C\n"
-        return output.stdout.decode().split("=")[1].split("'")[0]
+        return output.stdout.split("=")[1].split("'")[0]
     except Exception:
         return "N/A"
 

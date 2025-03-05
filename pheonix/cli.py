@@ -66,6 +66,59 @@ def render(applet, list):
 
 
 @cli.command()
+@click.argument("name", required=True)
+@click.option("--enabled/--disabled", default=True)
+@click.option("--config", "-c", multiple=True, help="Key-value pairs in the format key=value")
+def new(name: str, enabled: bool, config, **kwargs):
+    """Create a new applet.
+
+    Example:
+        pheonix new clock --enabled -c timezone=America/New_York -c color=blue
+    """
+    from pheonix.app_db import create_new_app
+
+    # Process config key-value pairs
+    config_dict = {}
+    for item in config:
+        if "=" not in item:
+            click.echo(
+                f"Warning: Ignoring invalid config item '{item}'. Format should be key=value",
+                err=True,
+            )
+            continue
+
+        key, value = item.split("=", 1)
+        config_dict[key.strip()] = value.strip()
+
+    if config_dict:
+        click.echo(f"Adding configuration: {config_dict}")
+
+    # Merge config_dict with kwargs
+    kwargs.update(config_dict)
+
+    # Create the new app
+    try:
+        app = create_new_app(name, enabled=enabled, **kwargs)
+        click.echo(f"Successfully created applet: {click.style(name, fg='green', bold=True)}")
+
+        # Show a summary of the created app
+        click.echo("\nApplet details:")
+        click.echo(f"  Name: {click.style(app.name, bold=True)}")
+        click.echo(
+            f"  Status: {click.style('enabled' if app.enabled else 'disabled', fg='green' if app.enabled else 'red')}"
+        )
+        click.echo(f"  File: {app.filename}")
+
+        if config_dict:
+            click.echo("  Configuration:")
+            for key, value in config_dict.items():
+                click.echo(f"    {key}: {value}")
+    except Exception as e:
+        click.echo(f"Error creating applet: {e}", err=True)
+        raise click.Abort()
+
+
+@cli.command()
 def display():
     from pheonix.display import DisplayManager
 

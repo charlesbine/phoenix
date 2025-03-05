@@ -6,7 +6,8 @@ load("schema.star", "schema")
 LOCAL_SERVER = "http://127.0.0.1:8000"
 ENDPOINT = "programming_excuses.json"
 
-font = "CG-pixel-3x5-mono"
+# font = "CG-pixel-3x5-mono"
+font = "tb-8"
 
 def main(config):
     quote = get_quote(config)
@@ -51,7 +52,6 @@ def split_word(word, span, join_word = False):
 
 
 def get_quote(config):
-    #get tv quote
     endpoint = LOCAL_SERVER + "/" + ENDPOINT
     rep = http.get(endpoint)
     if rep.status_code != 200:

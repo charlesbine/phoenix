@@ -116,6 +116,15 @@ def upsert(name: str, **kwargs):
         DB.update(json.loads(config.json()), App.name == name)
 
 
+def create_new_app(name: str, **kwargs):
+    App = Query()
+    app = DB.get(App.name == name)
+    if app is not None:
+        raise ValueError(f"App {name} already exists")
+    upsert(name, **kwargs)
+    return get_app_by_name(name)
+
+
 def update(name: str, **kwargs):
     App = Query()
     app = DB.get(App.name == name)
