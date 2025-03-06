@@ -11,7 +11,7 @@ from typing import Optional
 from loguru import logger
 
 from pheonix.app_db import get_app_by_name, upsert, read_all_apps, AppConfig
-from pheonix.types import AppStatus
+from pheonix.types import AppStatus, PreprocessorResult
 
 
 #: should we also generate a 5x magnified version ? It is used for display in the UI's
@@ -47,16 +47,22 @@ def run_app(name: str):
         logger.info(f"[{app.name}] Running preprocessor {app.python_filename}")
         try:
             module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
-            data = module.main()
+            result = module.main()
+            assert isinstance(result, PreprocessorResult)
+            logger.info(f"[{app.name}] Preprocessor returned {result.status} (priority={result.priority}) with data: {result.data}")
         except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(f"[{app.name}] Preprocessor raised an exception: {e}")
             logger.exception(e)
-            data = None
+            result = PreprocessorResult(None, AppStatus.ERROR)
 
-        if data is None or data is AppStatus.SKIP:
-            # TODO: change this to only if returned AppStatus.SKIP
-            logger.warning(f"[{app.name}] Preprocessor returned None or AppStatus.SKIP, skipping.")
+        status = result.status
 
+        # Disable the app if the preprocessor returned an error or disable status
+        if status in (AppStatus.DISABLE, AppStatus.ERROR):
+            logger.warning(f"[{app.name}] Preprocessor returned {status}, disabling.")
+            upsert(app.name, enabled=False, priority=0)
+
+        if status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
             # remove the data files so the display doesn't try to use them
             if app.output_filename.exists():
                 logger.info(f"[{app.name}] Removing old data file {app.output_filename}")
@@ -64,8 +70,17 @@ def run_app(name: str):
             if app.output_filename_large.exists():
                 logger.info(f"[{app.name}] Removing old data file {app.output_filename_large}")
                 app.output_filename_large.unlink()
+
+            logger.warning(f"[{app.name}] Preprocessor returned {status}, skipping.")
             return
-        # TODO: support other AppStatus values here
+
+        if status == AppStatus.PRIORITIZE:
+            logger.warning(f"[{app.name}] Preprocessor returned AppStatus.PRIORITIZE, prioritizing.")
+            upsert(app.name, priority=result.priority)
+        else:
+            logger.info(f"[{app.name}] Reverting to normal priority.")
+            upsert(app.name, priority=0)
+
 
     logger.info(f"[{name}] running applet")
     run_app_generation(app)
@@ -89,11 +104,18 @@ def run_app_generation(app: AppConfig, large: bool = False):
 
         command = get_app_generation_command(app, large, str(temp_file))
         logger.debug(f"[{app.name}] Running command: {' '.join(command)}")
-        subprocess.run(command, check=True, env=os.environ)
+        out = subprocess.run(command, env=os.environ, text=True, check=False)
+        if out.returncode != 0:
+            logger.error(f"[{app.name}] Command failed with return code {out.returncode}")
+            logger.error(f"[{app.name}] Command output: {out.stdout}")
+            logger.error(f"[{app.name}] Command stderr: {out.stderr}")
+            raise RuntimeError(f"[{app.name}] Command failed with return code {out.returncode}")
 
 
 def get_app_generation_command(app: AppConfig, large: bool = False, app_file: Optional[str] = None):
-    """Return the command to generate the app."""
+    """
+    Return the command to be sent to pixlet to render the app.
+    """
 
     if app_file is None:
         app_file = str(app.filename)
@@ -109,8 +131,6 @@ def get_app_generation_command(app: AppConfig, large: bool = False, app_file: Op
 
     command.extend(["-w", str(RENDER_WIDTH), "-t", str(RENDER_HEIGHT)])
 
-    # TODO: add the command line args from the app config eg "timezone=UTC" for clock
-    # these should be read from a dict or somethign in the database?
     return command
 
 
@@ -120,6 +140,7 @@ def run_all_apps():
     while True:
         all_apps = read_all_apps()
         all_enabled = [app for app in all_apps if app.enabled]
+        all_enabled.sort(key=lambda app: app.priority, reverse=True)
 
         def expected_next_update_time(app: AppConfig) -> datetime.datetime:
             """When should this app be updated next? If the app has never been updated,

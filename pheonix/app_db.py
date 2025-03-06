@@ -31,6 +31,8 @@ class AppConfig(pydantic.BaseModel):
     # will be passed to the `main` function as the `config` argument
     # eg "timezone=UTC" for clock,
     pixlet_config_kwargs: dict = {}
+    # priority for apps that are enabled, higher is higher priority
+    priority: int = 0
 
     #: the ratio of the refresh interval after which the app is considered stale
     STALE_TOLERANCE_MULTIPLIER: ClassVar[float] = 1.5

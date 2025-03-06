@@ -5,6 +5,7 @@ import subprocess
 from datetime import datetime
 
 from pheonix import app_db
+from pheonix.types import AppStatus, PreprocessorResult
 
 APPLET_NAME = "system_load"
 
@@ -31,7 +32,11 @@ def main():
     }
 
     app.data_file.write_text(json.dumps(data))
-    return data
+
+    if temperature > 80 or mem_available < 200:
+        return PreprocessorResult(data, AppStatus.PRIORITIZE, priority=50)
+
+    return PreprocessorResult(data)
 
 
 def get_temperature():

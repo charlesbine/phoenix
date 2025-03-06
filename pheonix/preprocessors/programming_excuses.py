@@ -4,6 +4,8 @@ from random import choice
 import json
 
 from pheonix import app_db
+from pheonix.types import PreprocessorResult
+
 
 ENDPOINT = "http://programmingexcuses.com/"
 APPLET_NAME = "programming_excuses"
@@ -14,7 +16,7 @@ def main():
     excuse = choice(QUOTES)
     # code to save the encoded file to the data file
     app.data_file.write_text(json.dumps({"excuse": excuse}))
-    return excuse
+    return PreprocessorResult(excuse)
 
 
 def get_quote() -> str:

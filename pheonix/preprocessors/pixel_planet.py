@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 from random import choice
 
-from pheonix import utils
 from pheonix import app_db
+from pheonix.types import PreprocessorResult
+
 
 APPLET_NAME = "pixel_planet"
 
@@ -14,10 +15,10 @@ def main():
     planet_dir = Path(__file__).parent / APPLET_NAME
     selected_file = choice(list(planet_dir.glob("*.gif")))
     # code to base64 encode the selected file
-    encoded = base64.b64encode(selected_file.read_bytes())    
+    encoded = base64.b64encode(selected_file.read_bytes())
     # code to save the encoded file to the data file
     app.data_file.write_text(json.dumps({"image": encoded.decode()}))
-    return str(selected_file.stem)
+    return PreprocessorResult(str(selected_file.stem))
 
 
 if __name__ == "__main__":
