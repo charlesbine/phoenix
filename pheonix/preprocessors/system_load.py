@@ -33,7 +33,7 @@ def main():
 
     app.data_file.write_text(json.dumps(data))
 
-    if temperature > 80 or mem_available < 200:
+    if isinstance(temperature, float) and temperature > 80 or isinstance(mem_available, int) and mem_available < 200:
         return PreprocessorResult(data, AppStatus.PRIORITIZE, priority=50)
 
     return PreprocessorResult(data)
@@ -69,7 +69,7 @@ def get_memory_info():
     """
     mem_info = {}
     try:
-        with open("/prqoc/meminfo", "r") as f:
+        with open("/proc/meminfo", "r") as f:
             for line in f:
                 parts = line.split(":")
                 if len(parts) >= 2:

@@ -67,6 +67,30 @@ def render(applet, list):
 
 @cli.command()
 @click.argument("name", required=True)
+def enable(name: str):
+    """Enable an applet.
+
+    Example:
+        pheonix enable clock
+    """
+    from pheonix.app_db import upsert
+    upsert(name, enabled=True)
+
+
+@cli.command()
+@click.argument("name", required=True)
+def disable(name: str):
+    """Disable an applet.
+
+    Example:
+        pheonix disable clock
+    """
+    from pheonix.app_db import upsert
+    upsert(name, enabled=False)
+
+
+@cli.command()
+@click.argument("name", required=True)
 @click.option("--enabled/--disabled", default=True)
 @click.option("--config", "-c", multiple=True, help="Key-value pairs in the format key=value")
 def new(name: str, enabled: bool, config, **kwargs):
