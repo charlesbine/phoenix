@@ -49,7 +49,7 @@ def run_app(name: str):
             module = importlib.import_module(f"pheonix.preprocessors.{app.python_filename.stem}")
             result = module.main()
             assert isinstance(result, PreprocessorResult)
-            logger.info(f"[{app.name}] Preprocessor returned {result.status} (priority={result.priority}) with data: {result.data}")
+            logger.debug(f"[{app.name}] Preprocessor returned {result.status} (priority={result.priority}) with data: {result.data}")
         except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(f"[{app.name}] Preprocessor raised an exception: {e}")
             logger.exception(e)
@@ -75,10 +75,10 @@ def run_app(name: str):
             return
 
         if status == AppStatus.PRIORITIZE:
-            logger.warning(f"[{app.name}] Preprocessor returned AppStatus.PRIORITIZE, prioritizing.")
+            logger.debug(f"[{app.name}] Preprocessor returned AppStatus.PRIORITIZE, prioritizing.")
             upsert(app.name, priority=result.priority)
         else:
-            logger.info(f"[{app.name}] Reverting to normal priority.")
+            logger.debug(f"[{app.name}] Reverting to normal priority.")
             upsert(app.name, priority=0)
 
 
