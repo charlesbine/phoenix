@@ -3,7 +3,7 @@
     "1": {
       "name": "clock",
       "refresh_interval": 10.0,
-      "last_updated": "2025-03-06T11:37:15.180279",
+      "last_updated": "2025-03-14T21:01:27.923347",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -54,7 +54,7 @@
     "8": {
       "name": "wttrin",
       "refresh_interval": 600.0,
-      "last_updated": "2025-03-06T11:41:47.648168",
+      "last_updated": "2025-03-14T20:57:52.444644",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -63,7 +63,7 @@
     "9": {
       "name": "fuzzy_clock",
       "refresh_interval": 60.0,
-      "last_updated": "2025-03-06T11:37:15.117464",
+      "last_updated": "2025-03-14T21:01:27.974275",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -86,13 +86,13 @@
     "13": {
       "name": "countdown_clock",
       "refresh_interval": 60.0,
-      "last_updated": "2025-03-06T11:41:47.759498",
+      "last_updated": "2025-03-14T21:00:28.085946",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {
-        "event": "Emma's Bday",
-        "eventColor": "#EE82EE",
-        "event_time": "2025-04-23T17:17:00-06:00"
+        "event": "Miami Music Week",
+        "eventColor": "#2a9d8f",
+        "event_time": "2025-03-27T07:23:00-05:00"
       },
       "priority": 0
     },
@@ -120,7 +120,7 @@
     "18": {
       "name": "pixel_planet",
       "refresh_interval": 10.0,
-      "last_updated": "2025-03-06T11:41:27.997261",
+      "last_updated": "2025-03-14T21:01:27.799839",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -129,7 +129,7 @@
     "19": {
       "name": "programming_excuses",
       "refresh_interval": 60.0,
-      "last_updated": "2025-03-06T11:41:46.470576",
+      "last_updated": "2025-03-14T21:00:27.776202",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -138,16 +138,16 @@
     "20": {
       "name": "system_load",
       "refresh_interval": 10.0,
-      "last_updated": "2025-03-04T15:44:18.183272",
+      "last_updated": "2025-03-14T21:01:27.861470",
       "active": true,
-      "enabled": false,
+      "enabled": true,
       "pixlet_config_kwargs": {},
-      "priority": 0
+      "priority": 50
     },
     "21": {
       "name": "maps",
       "refresh_interval": 60.0,
-      "last_updated": "2025-03-06T11:41:48.699993",
+      "last_updated": "2025-03-14T21:00:32.083734",
       "active": true,
       "enabled": true,
       "pixlet_config_kwargs": {},
@@ -160,6 +160,15 @@
       "active": false,
       "enabled": false,
       "pixlet_config_kwargs": {}
+    },
+    "23": {
+      "name": "aquarium",
+      "refresh_interval": 60.0,
+      "last_updated": "2025-03-14T21:01:27.114017",
+      "active": true,
+      "enabled": true,
+      "pixlet_config_kwargs": {},
+      "priority": 0
     }
   }
 }
