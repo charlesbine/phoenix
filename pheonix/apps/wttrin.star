@@ -53,6 +53,7 @@ def normalize_special_chars(text):
         "↙": "<",
         "°": "*",
         "’": "'",
+        "―": "-",
         # Add more replacements as needed
     }
 
