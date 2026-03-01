@@ -1,0 +1,45 @@
+"""Central path definitions for all Phoenix directories and file locations."""
+
+from pathlib import Path
+
+PACKAGE_DIR = Path(__file__).parent
+APPS_DIR = PACKAGE_DIR / "apps"
+DATA_DIR = PACKAGE_DIR / "data"
+OUTPUTS_DIR = PACKAGE_DIR / "outputs"
+PREPROCESSORS_DIR = PACKAGE_DIR / "preprocessors"
+ASSETS_DIR = PREPROCESSORS_DIR / "assets"
+TEMPLATES_DIR = PACKAGE_DIR / "templates"
+
+DB_PATH = PACKAGE_DIR / "phoenix.db"
+
+COMMUNITY_DIR = PACKAGE_DIR.parent / "community"
+
+
+def ensure_dirs() -> None:
+    """Create runtime directories if they don't exist."""
+    for d in (DATA_DIR, OUTPUTS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def star_path(name: str) -> Path:
+    return APPS_DIR / f"{name}.star"
+
+
+def output_path(name: str) -> Path:
+    return OUTPUTS_DIR / f"{name}.webp"
+
+
+def output_path_large(name: str) -> Path:
+    return OUTPUTS_DIR / f"{name}.large.webp"
+
+
+def data_path(name: str) -> Path:
+    return DATA_DIR / f"{name}.json"
+
+
+def preprocessor_module(name: str) -> str:
+    return f"phoenix.preprocessors.{name}"
+
+
+def has_preprocessor(name: str) -> bool:
+    return (PREPROCESSORS_DIR / f"{name}.py").exists()

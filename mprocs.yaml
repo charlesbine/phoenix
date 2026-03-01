@@ -1,21 +1,13 @@
 procs:
   renderer:
-    shell: "uv run pheonix render"
+    shell: "uv run phoenix render"
+    autostart: true
+
   display:
+    shell: "uv run phoenix display"
+    autostart: true
     autorestart: true
-    shell:
-      $select: os
-      macos: echo "skipping display on macos"
-      $else: |
-        export PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.9/dist-packages/
-        date -Is >> display_restarts.log
-        sudo -E bash -c "ulimit -v 500000; exec /home/charles/.cache/pypoetry/virtualenvs/pheonix-hnbBLJzU-py3.9/bin/python pheonix/display.py"
+
   dashboard:
-    shell: "uv run -- streamlit run pheonix/webapp/dashboard.py --browser.gatherUsageStats=false --server.port=7002 --server.address=0.0.0.0 --server.headless=true"
-  server:
-    shell: "uv run pheonix server"
-  system_load:
-    shell:
-      $select: os
-      macos: echo "skipping system_load on macos"
-      $else: "uv run python temp.py"
+    shell: "uv run phoenix dashboard"
+    autostart: true

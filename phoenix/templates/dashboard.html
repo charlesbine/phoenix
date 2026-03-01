@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Phoenix Dashboard</h1>
+
+<form class="config-bar" action="/api/config" method="post">
+    <div>
+        <label>Layout</label><br>
+        <select name="layout_mode">
+            <option value="cycle" {% if config.layout_mode == 'cycle' %}selected{% endif %}>Cycle</option>
+            <option value="random" {% if config.layout_mode == 'random' %}selected{% endif %}>Random</option>
+            <option value="single" {% if config.layout_mode == 'single' %}selected{% endif %}>Single</option>
+        </select>
+    </div>
+    <div>
+        <label>Interval (sec)</label><br>
+        <input type="number" name="cycle_interval" value="{{ config.cycle_interval }}" min="1" max="300" style="width: 70px;">
+    </div>
+    <button type="submit">Update</button>
+</form>
+
+{% macro app_card(app) %}
+<div class="app-card">
+    <img src="/static/outputs/{{ app.name }}.large.webp?t={{ now.timestamp()|int }}" alt="{{ app.name }}"
+         onerror="this.style.display='none'">
+    <div class="name">{{ app.name }}</div>
+    <div class="meta">{{ app.last_updated|humanize_time }}</div>
+    <div class="actions">
+        {% if app.enabled %}
+        <form action="/api/apps/{{ app.name }}/disable" method="post" style="display:inline">
+            <button class="btn btn-disable" type="submit">Disable</button>
+        </form>
+        {% else %}
+        <form action="/api/apps/{{ app.name }}/enable" method="post" style="display:inline">
+            <button class="btn btn-enable" type="submit">Enable</button>
+        </form>
+        {% endif %}
+
+        {% if app.active %}
+        <form action="/api/apps/{{ app.name }}/deactivate" method="post" style="display:inline">
+            <button class="btn btn-activate" type="submit">Remove</button>
+        </form>
+        {% else %}
+        <form action="/api/apps/{{ app.name }}/activate" method="post" style="display:inline">
+            <button class="btn btn-activate" type="submit">Add to cycle</button>
+        </form>
+        {% endif %}
+
+        <form action="/api/apps/{{ app.name }}/render" method="post" style="display:inline">
+            <button class="btn btn-render" type="submit">Render</button>
+        </form>
+    </div>
+</div>
+{% endmacro %}
+
+<h2>Active Apps</h2>
+{% if active_apps %}
+<div class="app-grid">
+    {% for app in active_apps %}{{ app_card(app) }}{% endfor %}
+</div>
+{% else %}
+<p class="empty">No active apps</p>
+{% endif %}
+
+{% if enabled_apps %}
+<h2>Enabled (not in cycle)</h2>
+<div class="app-grid">
+    {% for app in enabled_apps %}{{ app_card(app) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if disabled_apps %}
+<h2>Disabled</h2>
+<div class="app-grid">
+    {% for app in disabled_apps %}{{ app_card(app) }}{% endfor %}
+</div>
+{% endif %}
+{% endblock %}
