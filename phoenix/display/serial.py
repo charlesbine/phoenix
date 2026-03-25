@@ -8,6 +8,7 @@ from pathlib import Path
 import serial
 from PIL import Image, ImageSequence
 
+from phoenix.db import ConfigDatabase
 from phoenix.paths import DATA_DIR
 from phoenix.settings import get_settings
 
@@ -23,6 +24,7 @@ class SerialDisplayBackend:
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._config_db = ConfigDatabase()
         self._port: serial.Serial | None = None
         self._web_output = DATA_DIR / "output"
         self._web_output.mkdir(parents=True, exist_ok=True)
@@ -105,9 +107,16 @@ class SerialDisplayBackend:
         frame = image.convert("RGB").resize((64, 64), Image.Resampling.LANCZOS)
         return frame.tobytes()
 
+    def _get_brightness(self) -> int:
+        """Read brightness from DB config (live-updated via dashboard)."""
+        try:
+            return self._config_db.get().brightness
+        except Exception:
+            return 255
+
     def _display_still(self, image: Image.Image, duration: int) -> None:
         rgb = self._image_to_rgb_bytes(image)
-        brightness = self._settings.serial_brightness
+        brightness = self._get_brightness()
         if not self._send_frame(rgb, brightness):
             time.sleep(RECONNECT_DELAY)
             return
@@ -124,9 +133,9 @@ class SerialDisplayBackend:
         if not frames:
             return
 
-        brightness = self._settings.serial_brightness
         start = time.perf_counter()
         while time.perf_counter() - start < duration:
+            brightness = self._get_brightness()
             for rgb, delay in zip(frames, durations):
                 if time.perf_counter() - start >= duration:
                     return

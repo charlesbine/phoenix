@@ -1,9 +1,10 @@
 load("render.star", "render")
 load("http.star", "http")
 load("encoding/base64.star", "base64")
-load("cache.star", "cache")
 
+CACHE_PROXY = "http://127.0.0.1:7002/proxy"
 COINDESK_PRICE_URL = "https://api.coindesk.com/v1/bpi/currentprice.json"
+CACHE_TTL = 240  # 4 minutes
 
 BTC_ICON = base64.decode("""
 iVBORw0KGgoAAAANSUhEUgAAABEAAAARCAYAAAA7bUf6AAAAlklEQVQ4T2NkwAH+H2T/jy7FaP+
@@ -13,17 +14,10 @@ AYozjsoBoE45OZi5DRBSnkCAMLhlPBiQGHlAAAAAElFTkSuQmCC
 """)
 
 def main():
-    rate_cached = cache.get("btc_rate")
-    if rate_cached != None:
-        print("Hit! Displaying cached data.")
-        rate = int(rate_cached)
-    else:
-        print("Miss! Calling CoinDesk API.")
-        rep = http.get(COINDESK_PRICE_URL)
-        if rep.status_code != 200:
-            fail("Coindesk request failed with status %d", rep.status_code)
-        rate = rep.json()["bpi"]["USD"]["rate_float"]
-        cache.set("btc_rate", str(int(rate)), ttl_seconds = 240)
+    rep = http.get(CACHE_PROXY, params={"url": COINDESK_PRICE_URL, "ttl": str(CACHE_TTL)})
+    if rep.status_code != 200:
+        fail("Coindesk request failed with status %d", rep.status_code)
+    rate = rep.json()["bpi"]["USD"]["rate_float"]
 
     return render.Root(
         child = render.Box(

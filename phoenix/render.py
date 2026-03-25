@@ -8,15 +8,64 @@ import tempfile
 from datetime import datetime, timedelta
 from time import sleep
 
+from PIL import Image
+
 from phoenix.db import AppDatabase
 from phoenix.models import AppConfig, AppStatus, PreprocessorResult
-from phoenix.paths import ensure_dirs, output_path, output_path_large, star_path
+from phoenix.paths import (
+    APPS_DIR,
+    app_type,
+    ensure_dirs,
+    output_path,
+    output_path_large,
+    python_app_path,
+    star_path,
+    static_app_path,
+)
 from phoenix.preprocessors import get_preprocessor
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 MAX_TIME_BETWEEN_UPDATES = timedelta(seconds=30)
+
+
+def _render_dispatch(app: AppConfig, settings: Settings) -> None:
+    """Render an app based on its type (star, python, or static)."""
+    kind = app_type(app.name)
+    ensure_dirs()
+
+    if kind == "star":
+        logger.info("[%s] Rendering starlark applet", app.name)
+        _run_pixlet(app, settings, large=False)
+        _run_pixlet(app, settings, large=True)
+    elif kind == "python":
+        logger.info("[%s] Rendering python applet", app.name)
+        _run_python_app(app, settings)
+    elif kind == "static":
+        logger.info("[%s] Copying static image", app.name)
+        _copy_static_app(app, settings)
+    else:
+        raise ValueError(f"No .star, .py, or image file found for '{app.name}' in {APPS_DIR}")
+
+
+def render_preview(name: str, settings: Settings) -> None:
+    """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
+    kind = app_type(name)
+    if kind == "unknown":
+        raise ValueError(f"No app file found for '{name}' in {APPS_DIR}")
+
+    # Run preprocessor if one exists (needed for apps that depend on data files)
+    preprocessor = get_preprocessor(name)
+    if preprocessor is not None:
+        logger.info("[%s] Running preprocessor for preview", name)
+        try:
+            preprocessor(settings)
+        except Exception:
+            logger.warning("[%s] Preprocessor failed during preview, continuing anyway", name)
+
+    app = AppConfig(name=name)
+    _render_dispatch(app, settings)
 
 
 def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
@@ -29,9 +78,9 @@ def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
         logger.debug("[%s] Skipping disabled app", name)
         return
 
-    app_star = star_path(name)
-    if not app_star.exists():
-        raise ValueError(f"Starlark file not found: {app_star}")
+    kind = app_type(name)
+    if kind == "unknown":
+        raise ValueError(f"No app file found for '{name}' in {APPS_DIR}")
 
     # Run preprocessor if one exists
     preprocessor = get_preprocessor(name)
@@ -49,12 +98,7 @@ def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
         if result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
             return
 
-    # Render normal and large versions
-    ensure_dirs()
-    logger.info("[%s] Rendering applet", name)
-    _run_pixlet(app, settings, large=False)
-    _run_pixlet(app, settings, large=True)
-
+    _render_dispatch(app, settings)
     app_db.upsert(name, last_updated=datetime.now())
 
 
@@ -101,6 +145,8 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
             run_app(next_app.name, settings, app_db)
         except Exception:
             logger.exception("[%s] Render failed", next_app.name)
+            # Update last_updated so we don't retry immediately
+            app_db.upsert(next_app.name, last_updated=datetime.now())
 
 
 def _handle_preprocessor_result(name: str, result: PreprocessorResult, app_db: AppDatabase) -> None:
@@ -155,4 +201,80 @@ def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False) -> None
         proc = subprocess.run(cmd, env=os.environ, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             logger.error("[%s] pixlet failed (rc=%d): %s", app.name, proc.returncode, proc.stderr)
-            raise RuntimeError(f"pixlet render failed for {app.name}")
+            # Extract the useful part of stderr (last line of traceback usually has the error)
+            stderr_lines = [l.strip() for l in proc.stderr.strip().splitlines() if l.strip()]
+            detail = stderr_lines[-1] if stderr_lines else "unknown error"
+            raise RuntimeError(f"[{app.name}] {detail}")
+
+
+def _run_python_app(app: AppConfig, settings: Settings) -> None:
+    """Run a Python applet that generates its own output.
+
+    The Python file must define a render(settings, config, output, output_large) function.
+    """
+    mod_path = python_app_path(app.name)
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"phoenix.apps.{app.name}", mod_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"[{app.name}] Could not load {mod_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    render_fn = getattr(mod, "render", None)
+    if render_fn is None:
+        raise RuntimeError(f"[{app.name}] {mod_path} has no render() function")
+
+    render_fn(
+        settings=settings,
+        config=app.pixlet_config,
+        output=output_path(app.name),
+        output_large=output_path_large(app.name),
+    )
+
+    # Verify outputs were created
+    if not output_path(app.name).exists():
+        raise RuntimeError(f"[{app.name}] render() did not create {output_path(app.name)}")
+
+
+def _copy_static_app(app: AppConfig, settings: Settings) -> None:
+    """Copy a static image (webp, gif, png) to the outputs directory, with magnified version."""
+    src = static_app_path(app.name)
+    if src is None:
+        raise RuntimeError(f"[{app.name}] No static image found")
+
+    out = output_path(app.name)
+    out_large = output_path_large(app.name)
+
+    # Convert/copy to webp at native size
+    with Image.open(src) as img:
+        # For animated images, copy as-is
+        if getattr(img, "is_animated", False):
+            shutil.copy(src, out)
+            # Create magnified version
+            frames = []
+            durations = []
+            for frame in __import__("PIL.ImageSequence", fromlist=["Iterator"]).Iterator(img):
+                resized = frame.convert("RGBA").resize(
+                    (settings.render_width * settings.magnification,
+                     settings.render_height * settings.magnification),
+                    Image.Resampling.NEAREST,
+                )
+                frames.append(resized)
+                durations.append(frame.info.get("duration", 100))
+            if frames:
+                frames[0].save(
+                    out_large, "WEBP", save_all=True, append_images=frames[1:],
+                    duration=durations, loop=0,
+                )
+        else:
+            # Static image
+            rgb = img.convert("RGBA")
+            small = rgb.resize((settings.render_width, settings.render_height), Image.Resampling.LANCZOS)
+            small.save(out, "WEBP")
+            large = rgb.resize(
+                (settings.render_width * settings.magnification,
+                 settings.render_height * settings.magnification),
+                Image.Resampling.NEAREST,
+            )
+            large.save(out_large, "WEBP")

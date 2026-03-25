@@ -1,11 +1,12 @@
 load("render.star", "render")
 load("http.star", "http")
-load("cache.star", "cache")
 
+CACHE_PROXY = "http://127.0.0.1:7002/proxy"
 API_ENDPOINT = "https://wttr.in/nyc?m0qFAT"
+CACHE_TTL = 900  # 15 minutes — weather doesn't change that fast
 
 def main():
-    rep = http.get(API_ENDPOINT)
+    rep = http.get(CACHE_PROXY, params={"url": API_ENDPOINT, "ttl": str(CACHE_TTL)})
     if rep.status_code != 200:
         fail("wttr.in request failed with status %d", rep.status_code)
     weather_text = rep.body()
