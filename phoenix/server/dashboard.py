@@ -3,11 +3,15 @@
 import asyncio
 import humanize
 from datetime import datetime
-from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from urllib.parse import unquote
+
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, ensure_dirs
+from phoenix.cache import cache_get
+from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, app_type, ensure_dirs
+from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
 
 
@@ -35,6 +39,9 @@ def create_app() -> FastAPI:
             "last_updated": a.last_updated.isoformat() if a.last_updated else None,
             "last_updated_human": humanize.naturaltime(datetime.now() - a.last_updated) if a.last_updated else "never",
             "priority": a.priority,
+            "sort_order": a.sort_order,
+            "pixlet_config": a.pixlet_config,
+            "app_type": app_type(a.name),
         }
 
     # -- SPA entry point --
@@ -55,11 +62,55 @@ def create_app() -> FastAPI:
     async def available_apps():
         svc = get_svc()
         known = {a.name for a in svc.list_apps()}
-        return sorted(p.stem for p in APPS_DIR.glob("*.star") if p.stem not in known)
+        # Find all app files: .star, .py, .webp, .gif, .png
+        names = set()
+        for ext in ("*.star", "*.py", "*.webp", "*.gif", "*.png", "*.apng"):
+            for p in APPS_DIR.glob(ext):
+                if p.stem not in known and not p.stem.startswith("__"):
+                    names.add(p.stem)
+        return sorted(names)
+
+    @app.post("/api/preview-all")
+    async def preview_all_apps():
+        """Preview all available (unregistered) applets."""
+        svc = get_svc()
+        known = {a.name for a in svc.list_apps()}
+        names = set()
+        for ext in ("*.star", "*.py", "*.webp", "*.gif", "*.png", "*.apng"):
+            for p in APPS_DIR.glob(ext):
+                if p.stem not in known and not p.stem.startswith("__"):
+                    names.add(p.stem)
+        available = sorted(names)
+        results = []
+        for name in available:
+            try:
+                await asyncio.to_thread(svc.render_preview, name)
+                results.append({"name": name, "preview": True})
+            except Exception as e:
+                results.append({"name": name, "error": str(e)})
+        return results
+
+    @app.put("/api/reorder")
+    async def reorder_apps(request: Request):
+        """Set sort_order for active apps. Body: {"order": ["app1", "app2", ...]}"""
+        body = await request.json()
+        names = body.get("order", [])
+        svc = get_svc()
+        for i, name in enumerate(names):
+            svc.app_db.upsert(name, sort_order=i)
+        return {"ok": True}
 
     @app.get("/api/apps/{name}")
     async def get_app(name: str):
         return _serialize_app(get_svc().get_app(name))
+
+    @app.get("/api/apps/{name}/schema")
+    async def get_app_schema(name: str):
+        from phoenix.paths import star_path
+        path = star_path(name)
+        if not path.exists():
+            return []
+        return parse_schema(path) or []
 
     @app.post("/api/apps/{name}/enable")
     async def enable_app(name: str):
@@ -81,6 +132,12 @@ def create_app() -> FastAPI:
     async def add_app(name: str):
         return _serialize_app(get_svc().create_app(name))
 
+    @app.put("/api/apps/{name}/config")
+    async def update_app_config(name: str, request: Request):
+        body = await request.json()
+        svc = get_svc()
+        return _serialize_app(svc.app_db.upsert(name, pixlet_config=body))
+
     @app.post("/api/apps/{name}/render")
     async def render_app(name: str):
         try:
@@ -89,15 +146,60 @@ def create_app() -> FastAPI:
         except Exception as e:
             return {"error": str(e)}
 
+    @app.post("/api/apps/{name}/preview")
+    async def preview_app(name: str):
+        """Render a preview for any app (even if not in DB or disabled)."""
+        try:
+            await asyncio.to_thread(get_svc().render_preview, name)
+            return {"name": name, "preview": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Cache proxy --
+
+    @app.get("/proxy")
+    async def proxy(
+        url: str = Query(..., description="URL to fetch"),
+        ttl: int = Query(300, description="Cache TTL in seconds"),
+    ):
+        url = unquote(url)
+        try:
+            status_code, body, content_type = cache_get(url, ttl)
+            return Response(content=body, status_code=status_code, media_type=content_type)
+        except Exception as e:
+            return Response(content=str(e).encode(), status_code=502)
+
+    @app.get("/api/cache/stats")
+    async def cache_stats():
+        from phoenix.cache import _connect
+        import time
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT url, fetched_at, ttl, length(body) as size FROM http_cache ORDER BY fetched_at DESC"
+            ).fetchall()
+            now = time.time()
+            return [
+                {
+                    "url": r["url"],
+                    "age_seconds": round(now - r["fetched_at"]),
+                    "ttl": r["ttl"],
+                    "fresh": (now - r["fetched_at"]) < r["ttl"],
+                    "size_bytes": r["size"],
+                }
+                for r in rows
+            ]
+
+    # -- Config --
+
     @app.get("/api/config")
     async def get_config():
         cfg = get_svc().get_display_config()
-        return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval}
+        return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval, "brightness": cfg.brightness}
 
     @app.put("/api/config")
     async def update_config(request: Request):
         body = await request.json()
         cfg = get_svc().update_display_config(**body)
-        return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval}
+        return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval, "brightness": cfg.brightness}
 
     return app

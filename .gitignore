@@ -28,3 +28,4 @@ htmlcov/
 # Build
 dist/
 build/
+phoenix/cache.db

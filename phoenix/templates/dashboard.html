@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phoenix</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='6' y='1' width='4' height='2' fill='%23ff6b35'/><rect x='5' y='3' width='6' height='2' fill='%23ff4500'/><rect x='4' y='5' width='8' height='2' fill='%23ff6b35'/><rect x='3' y='7' width='10' height='2' fill='%23ffa500'/><rect x='4' y='9' width='8' height='2' fill='%23ff4500'/><rect x='5' y='11' width='6' height='2' fill='%23ff6b35'/><rect x='6' y='13' width='4' height='2' fill='%23ffa500'/></svg>">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -28,11 +29,9 @@
             border: 1px solid #30363d;
             border-radius: 8px;
             padding: 1rem 1.5rem;
-            margin-bottom: 1.5rem;
             display: flex;
-            align-items: center;
-            gap: 1.5rem;
-            flex-wrap: wrap;
+            flex-direction: column;
+            gap: 0.75rem;
         }
         .config-bar label { color: #8b949e; font-size: 0.85rem; }
         .config-bar select, .config-bar input[type=number] {
@@ -65,8 +64,8 @@
             margin-bottom: 0.5rem;
         }
         .live-preview img {
-            width: 192px;
-            height: 192px;
+            width: 320px;
+            height: 320px;
             image-rendering: pixelated;
             background: #000;
             border-radius: 4px;
@@ -122,6 +121,40 @@
         .btn-cycle { background: #8957e5; }
         .btn-add { background: #238636; }
 
+        .config-editor {
+            margin-top: 0.4rem;
+            text-align: left;
+            border-top: 1px solid #30363d;
+            padding-top: 0.4rem;
+        }
+        .config-editor .config-row {
+            display: flex;
+            gap: 0.3rem;
+            margin-bottom: 0.25rem;
+            align-items: center;
+        }
+        .config-editor input {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            flex: 1;
+            min-width: 0;
+        }
+        .config-editor input.key { flex: 0.4; }
+        .config-editor .remove-btn {
+            background: none;
+            border: none;
+            color: #da3633;
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 0 0.2rem;
+        }
+        .btn-config { background: #30363d; }
+        .btn-config.has-config { background: #1f6feb; }
+
         .empty { color: #484f58; font-style: italic; padding: 0.5rem 0; font-size: 0.9rem; }
 
         .available-card {
@@ -137,6 +170,21 @@
             min-height: 80px;
         }
         .available-card .name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; color: #8b949e; }
+
+        .section-header {
+            display: flex;
+            align-items: baseline;
+            gap: 0.75rem;
+            margin: 1.5rem 0 0.75rem;
+        }
+        .section-header h2 { margin: 0; }
+
+        .app-card[draggable="true"] { cursor: grab; }
+        .app-card[draggable="true"]:active { cursor: grabbing; }
+        .app-card.drag-over {
+            border-color: #58a6ff;
+            border-style: dashed;
+        }
 
         .spinner {
             display: inline-block;
@@ -186,6 +234,9 @@
             return res.json();
         }
 
+        // Global image cache buster — incremented on renders
+        let globalImgKey = Date.now();
+
         // --- Components ---
 
         function LivePreview() {
@@ -205,15 +256,32 @@
         function ConfigBar({ config, onUpdate }) {
             const [mode, setMode] = useState(config.layout_mode);
             const [interval, setInterval_] = useState(config.cycle_interval);
+            const [brightness, setBrightness] = useState(config.brightness ?? 255);
 
             useEffect(() => {
                 setMode(config.layout_mode);
                 setInterval_(config.cycle_interval);
+                setBrightness(config.brightness ?? 255);
             }, [config]);
 
             const save = async () => {
-                const updated = await api('/config', 'PUT', { layout_mode: mode, cycle_interval: interval });
+                const updated = await api('/config', 'PUT', {
+                    layout_mode: mode, cycle_interval: interval, brightness
+                });
                 onUpdate(updated);
+            };
+
+            // Debounced brightness update
+            const brightnessTimer = useRef(null);
+            const updateBrightness = (val) => {
+                setBrightness(val);
+                clearTimeout(brightnessTimer.current);
+                brightnessTimer.current = setTimeout(async () => {
+                    const updated = await api('/config', 'PUT', {
+                        layout_mode: mode, cycle_interval: interval, brightness: val
+                    });
+                    onUpdate(updated);
+                }, 150);
             };
 
             return html`
@@ -231,21 +299,149 @@
                         <input type="number" value=${interval} min="1" max="300" style="width: 70px"
                                onChange=${e => setInterval_(parseInt(e.target.value) || 10)} />
                     </div>
+                    <div style="width: 100%">
+                        <label>Brightness: ${brightness}</label><br/>
+                        <input type="range" min="0" max="255" value=${brightness}
+                               style="width: 100%; accent-color: #58a6ff;"
+                               onInput=${e => updateBrightness(parseInt(e.target.value))} />
+                    </div>
                     <button class="btn btn-enable" onClick=${save}>Update</button>
                 </div>
             `;
         }
 
-        function AppCard({ app, onAction }) {
+        function ConfigEditor({ appName, config, onSave }) {
+            const [schema, setSchema] = useState(null);
+            const [values, setValues] = useState({...config});
+            const [dirty, setDirty] = useState(false);
+            const [extraEntries, setExtraEntries] = useState([]);
+
+            useEffect(() => {
+                api('/apps/' + appName + '/schema').then(s => setSchema(s));
+            }, [appName]);
+
+            // Only sync from props when not actively editing
+            useEffect(() => {
+                if (!dirty) setValues({...config});
+            }, [config]);
+
+            const set = (key, val) => {
+                setValues(v => ({...v, [key]: val}));
+                setDirty(true);
+            };
+            const save = () => {
+                const merged = {...values};
+                extraEntries.forEach(([k, v]) => { if (k.trim()) merged[k.trim()] = v; });
+                onSave(merged);
+                setDirty(false);
+            };
+
+            const schemaKeys = (schema || []).map(f => f.id);
+            const extraKeys = Object.keys(values).filter(k => !schemaKeys.includes(k));
+
+            const renderField = (field) => {
+                const val = values[field.id] || field.default || '';
+                if (field.type === 'toggle') {
+                    return html`
+                        <div class="config-row" key=${field.id}>
+                            <label style="flex:1; font-size: 0.75rem; color: #8b949e">${field.name}</label>
+                            <input type="checkbox" checked=${val === 'true'}
+                                   onChange=${e => set(field.id, e.target.checked ? 'true' : 'false')} />
+                        </div>
+                    `;
+                }
+                if (field.type === 'dropdown' && field.options) {
+                    return html`
+                        <div class="config-row" key=${field.id}>
+                            <label style="flex:0.4; font-size: 0.75rem; color: #8b949e">${field.name}</label>
+                            <select style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem; border-radius:3px; font-size:0.7rem;"
+                                    value=${val} onChange=${e => set(field.id, e.target.value)}>
+                                ${field.options.map(o => html`<option value=${o.value}>${o.display}</option>`)}
+                            </select>
+                        </div>
+                    `;
+                }
+                if (field.type === 'datetime') {
+                    return html`
+                        <div class="config-row" key=${field.id}>
+                            <label style="flex:0.4; font-size: 0.75rem; color: #8b949e">${field.name}</label>
+                            <input type="datetime-local" value=${val ? val.slice(0, 16) : ''}
+                                   style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
+                                   onChange=${e => set(field.id, e.target.value + ':00Z')} />
+                        </div>
+                    `;
+                }
+                if (field.type === 'color') {
+                    return html`
+                        <div class="config-row" key=${field.id}>
+                            <label style="flex:0.4; font-size: 0.75rem; color: #8b949e">${field.name}</label>
+                            <input type="color" value=${val || '#000000'} style="flex:0; width:2rem; height:1.5rem; padding:0; border:none; background:none;"
+                                   onChange=${e => set(field.id, e.target.value)} />
+                        </div>
+                    `;
+                }
+                // text, location, and everything else: plain text input
+                return html`
+                    <div class="config-row" key=${field.id}>
+                        <label style="flex:0.4; font-size: 0.75rem; color: #8b949e">${field.name}</label>
+                        <input value=${val} placeholder=${field.desc || field.id}
+                               onInput=${e => set(field.id, e.target.value)} />
+                    </div>
+                `;
+            };
+
+            if (schema === null) return html`<div class="config-editor"><span class="spinner" /></div>`;
+
+            return html`
+                <div class="config-editor">
+                    ${schema.length > 0
+                        ? schema.map(renderField)
+                        : html`<div style="font-size:0.7rem; color:#484f58; margin-bottom:0.3rem">No schema — add custom keys below</div>`
+                    }
+                    ${extraKeys.map(k => html`
+                        <div class="config-row" key=${k}>
+                            <input class="key" value=${k} disabled style="opacity:0.6" />
+                            <input value=${values[k] || ''} onInput=${e => set(k, e.target.value)} />
+                            <button class="remove-btn" onClick=${() => {
+                                const next = {...values};
+                                delete next[k];
+                                setValues(next);
+                                setDirty(true);
+                            }}>x</button>
+                        </div>
+                    `)}
+                    <div style="display: flex; gap: 0.3rem; margin-top: 0.3rem;">
+                        <button class="btn btn-config" onClick=${() => setExtraEntries([...extraEntries, ['', '']])}>+ Custom</button>
+                        ${dirty && html`<button class="btn btn-enable" onClick=${save}>Save</button>`}
+                    </div>
+                    ${extraEntries.map(([k, v], i) => html`
+                        <div class="config-row" key=${'extra-' + i}>
+                            <input class="key" value=${k} placeholder="key"
+                                   onInput=${e => { const n = [...extraEntries]; n[i] = [e.target.value, v]; setExtraEntries(n); setDirty(true); }} />
+                            <input value=${v} placeholder="value"
+                                   onInput=${e => { const n = [...extraEntries]; n[i] = [k, e.target.value]; setExtraEntries(n); setDirty(true); }} />
+                            <button class="remove-btn" onClick=${() => { setExtraEntries(extraEntries.filter((_, j) => j !== i)); setDirty(true); }}>x</button>
+                        </div>
+                    `)}
+                </div>
+            `;
+        }
+
+        function AppCard({ app, onAction, draggable, onDragStart, onDragOver, onDragEnd, onDrop, imgTick }) {
             const [rendering, setRendering] = useState(false);
-            const [imgKey, setImgKey] = useState(Date.now());
+            const [renderKey, setRenderKey] = useState(0);
+            const [dragOver, setDragOver] = useState(false);
+            const [showConfig, setShowConfig] = useState(false);
+
+            // Image cache key: combines the polling tick with manual render bumps
+            const imgKey = (imgTick || 0) + renderKey;
 
             const action = async (act) => {
                 if (act === 'render') setRendering(true);
                 try {
                     const result = await api('/apps/' + app.name + '/' + act, 'POST');
                     if (result.error) throw new Error(result.error);
-                    if (act === 'render') setImgKey(Date.now());
+                    if (act === 'render') setRenderKey(Date.now());
                     onAction();
                 } catch(e) {
                     onAction(e.message);
@@ -254,8 +450,24 @@
                 }
             };
 
+            const saveConfig = async (cfg) => {
+                await api('/apps/' + app.name + '/config', 'PUT', cfg);
+                onAction();
+            };
+
+            const dragProps = draggable ? {
+                draggable: true,
+                onDragStart: e => { e.dataTransfer.effectAllowed = 'move'; onDragStart(app.name); },
+                onDragOver: e => { e.preventDefault(); setDragOver(true); onDragOver(app.name); },
+                onDragLeave: () => setDragOver(false),
+                onDrop: e => { e.preventDefault(); setDragOver(false); onDrop(app.name); },
+                onDragEnd,
+            } : {};
+
+            const hasConfig = app.pixlet_config && Object.keys(app.pixlet_config).length > 0;
+
             return html`
-                <div class="app-card">
+                <div class=${'app-card' + (dragOver ? ' drag-over' : '')} ...${dragProps}>
                     <img src=${'/static/outputs/' + app.name + '.large.webp?t=' + imgKey}
                          alt=${app.name} onError=${e => e.target.style.opacity = '0.15'} />
                     <div class="name">${app.name}</div>
@@ -272,24 +484,52 @@
                         <button class="btn btn-render" disabled=${rendering} onClick=${() => action('render')}>
                             ${rendering ? html`<span class="spinner" />` : 'Render'}
                         </button>
+                        <button class=${'btn btn-config' + (hasConfig ? ' has-config' : '')}
+                                onClick=${() => setShowConfig(!showConfig)}>
+                            ${showConfig ? 'Close' : 'Config'}
+                        </button>
                     </div>
+                    ${showConfig && html`<${ConfigEditor} appName=${app.name} config=${app.pixlet_config} onSave=${saveConfig} />`}
                 </div>
             `;
         }
 
-        function AvailableCard({ name, onAdd }) {
+        function AvailableCard({ name, onAdd, onError, imgTick }) {
             const [adding, setAdding] = useState(false);
+            const [previewing, setPreviewing] = useState(false);
+            const [renderKey, setRenderKey] = useState(0);
+            const imgKey = (imgTick || 0) + renderKey;
             const add = async () => {
                 setAdding(true);
                 await api('/apps/' + name + '/add', 'POST');
                 onAdd();
             };
+            const preview = async () => {
+                setPreviewing(true);
+                try {
+                    const result = await api('/apps/' + name + '/preview', 'POST');
+                    if (result.error) {
+                        onError(result.error);
+                    } else {
+                        setRenderKey(Date.now());
+                    }
+                } finally {
+                    setPreviewing(false);
+                }
+            };
             return html`
-                <div class="available-card">
-                    <div class="name">${name}</div>
-                    <button class="btn btn-add" disabled=${adding} onClick=${add}>
-                        ${adding ? html`<span class="spinner" />` : 'Add'}
-                    </button>
+                <div class="app-card">
+                    <img src=${'/static/outputs/' + name + '.large.webp?t=' + imgKey}
+                         alt=${name} onError=${e => e.target.style.opacity = '0.15'} />
+                    <div class="name" style="color: #8b949e">${name}</div>
+                    <div class="actions" style="margin-top: 0.4rem">
+                        <button class="btn btn-render" disabled=${previewing} onClick=${preview}>
+                            ${previewing ? html`<span class="spinner" />` : 'Preview'}
+                        </button>
+                        <button class="btn btn-add" disabled=${adding} onClick=${add}>
+                            ${adding ? html`<span class="spinner" />` : 'Add'}
+                        </button>
+                    </div>
                 </div>
             `;
         }
@@ -308,6 +548,10 @@
             const [available, setAvailable] = useState([]);
             const [config, setConfig] = useState({ layout_mode: 'cycle', cycle_interval: 10 });
             const [error, setError] = useState(null);
+            const [previewingAll, setPreviewingAll] = useState(false);
+            const [imgTick, setImgTick] = useState(Date.now());
+            const dragFrom = useRef(null);
+            const dragTo = useRef(null);
 
             const refresh = useCallback(async (err) => {
                 if (err) setError(err);
@@ -319,6 +563,7 @@
                 setApps(a);
                 setAvailable(av);
                 setConfig(c);
+                setImgTick(Date.now());
             }, []);
 
             useEffect(() => { refresh(); }, []);
@@ -329,9 +574,39 @@
                 return () => clearInterval(id);
             }, [refresh]);
 
-            const active = apps.filter(a => a.enabled && a.active);
+            const active = apps
+                .filter(a => a.enabled && a.active)
+                .sort((a, b) => a.sort_order - b.sort_order);
             const enabled = apps.filter(a => a.enabled && !a.active);
             const disabled = apps.filter(a => !a.enabled);
+
+            // --- Drag to reorder ---
+            const handleDrop = async (targetName) => {
+                const from = dragFrom.current;
+                const to = targetName;
+                if (!from || from === to) return;
+                const names = active.map(a => a.name);
+                const fromIdx = names.indexOf(from);
+                const toIdx = names.indexOf(to);
+                if (fromIdx < 0 || toIdx < 0) return;
+                names.splice(fromIdx, 1);
+                names.splice(toIdx, 0, from);
+                await api('/reorder', 'PUT', { order: names });
+                refresh();
+            };
+
+            // --- Preview all ---
+            const previewAll = async () => {
+                setPreviewingAll(true);
+                try {
+                    const results = await api('/preview-all', 'POST');
+                    const errors = results.filter(r => r.error);
+                    if (errors.length) setError(errors.map(e => e.name).join(', ') + ' failed');
+                    refresh();
+                } finally {
+                    setPreviewingAll(false);
+                }
+            };
 
             return html`
                 <h1>Phoenix</h1>
@@ -343,23 +618,36 @@
 
                 <h2>Active Apps</h2>
                 ${active.length
-                    ? html`<div class="app-grid">${active.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} />`)}</div>`
+                    ? html`<div class="app-grid">${active.map(a => html`
+                        <${AppCard} key=${a.name} app=${a} onAction=${refresh} imgTick=${imgTick}
+                            draggable=${true}
+                            onDragStart=${name => { dragFrom.current = name; }}
+                            onDragOver=${name => { dragTo.current = name; }}
+                            onDragEnd=${() => { dragFrom.current = null; dragTo.current = null; }}
+                            onDrop=${handleDrop}
+                        />
+                    `)}</div>`
                     : html`<p class="empty">No active apps</p>`
                 }
 
                 ${enabled.length > 0 && html`
                     <h2>Enabled (not in cycle)</h2>
-                    <div class="app-grid">${enabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} />`)}</div>
+                    <div class="app-grid">${enabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} imgTick=${imgTick} />`)}</div>
                 `}
 
                 ${disabled.length > 0 && html`
                     <h2>Disabled</h2>
-                    <div class="app-grid">${disabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} />`)}</div>
+                    <div class="app-grid">${disabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} imgTick=${imgTick} />`)}</div>
                 `}
 
                 ${available.length > 0 && html`
-                    <h2>Available Applets</h2>
-                    <div class="app-grid">${available.map(n => html`<${AvailableCard} key=${n} name=${n} onAdd=${refresh} />`)}</div>
+                    <div class="section-header">
+                        <h2>Available Applets</h2>
+                        <button class="btn btn-render" disabled=${previewingAll} onClick=${previewAll}>
+                            ${previewingAll ? html`<span class="spinner" /> Previewing...` : 'Preview All'}
+                        </button>
+                    </div>
+                    <div class="app-grid">${available.map(n => html`<${AvailableCard} key=${n} name=${n} onAdd=${refresh} onError=${setError} imgTick=${imgTick} />`)}</div>
                 `}
 
                 <${Toast} message=${error} onClose=${() => setError(null)} />

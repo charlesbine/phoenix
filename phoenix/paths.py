@@ -25,6 +25,30 @@ def star_path(name: str) -> Path:
     return APPS_DIR / f"{name}.star"
 
 
+def python_app_path(name: str) -> Path:
+    return APPS_DIR / f"{name}.py"
+
+
+def static_app_path(name: str) -> Path | None:
+    """Find a static image file (webp, gif, png, apng) for an app."""
+    for ext in (".webp", ".gif", ".png", ".apng"):
+        p = APPS_DIR / f"{name}{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def app_type(name: str) -> str:
+    """Determine the app type: 'star', 'python', 'static', or 'unknown'."""
+    if star_path(name).exists():
+        return "star"
+    if python_app_path(name).exists():
+        return "python"
+    if static_app_path(name) is not None:
+        return "static"
+    return "unknown"
+
+
 def output_path(name: str) -> Path:
     return OUTPUTS_DIR / f"{name}.webp"
 

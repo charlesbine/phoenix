@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     render_height: int = 64
     magnification: int = 5
 
-    # Dashboard (also serves preprocessor data at /data/)
+    # Dashboard (also serves preprocessor data, cache proxy at /proxy)
     dashboard_port: int = 7002
 
     # Spotify

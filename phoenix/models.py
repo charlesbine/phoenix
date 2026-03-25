@@ -31,6 +31,7 @@ class AppConfig(BaseModel):
     last_updated: datetime | None = None
     pixlet_config: dict[str, str] = {}
     priority: int = 0
+    sort_order: int = 0
 
     def is_stale(self, factor: float = 1.5) -> bool:
         if self.last_updated is None:
@@ -49,3 +50,4 @@ class AppConfig(BaseModel):
 class DisplayConfig(BaseModel):
     layout_mode: Literal["cycle", "single", "random"] = "cycle"
     cycle_interval: int = 10
+    brightness: int = 255  # 0-255

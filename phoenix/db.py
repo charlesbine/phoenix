@@ -28,13 +28,15 @@ CREATE TABLE IF NOT EXISTS apps (
     refresh_interval REAL NOT NULL DEFAULT 60.0,
     last_updated TEXT,
     pixlet_config TEXT NOT NULL DEFAULT '{}',
-    priority INTEGER NOT NULL DEFAULT 0
+    priority INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS display_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     layout_mode TEXT NOT NULL DEFAULT 'cycle',
-    cycle_interval INTEGER NOT NULL DEFAULT 10
+    cycle_interval INTEGER NOT NULL DEFAULT 10,
+    brightness INTEGER NOT NULL DEFAULT 255
 );
 """
 
@@ -52,6 +54,13 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
         conn.row_factory = sqlite3.Row
         if path not in _initialized:
             conn.executescript(_SCHEMA)
+            # Migrations
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(apps)").fetchall()]
+            if "sort_order" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            config_cols = [r[1] for r in conn.execute("PRAGMA table_info(display_config)").fetchall()]
+            if "brightness" not in config_cols:
+                conn.execute("ALTER TABLE display_config ADD COLUMN brightness INTEGER NOT NULL DEFAULT 255")
             _initialized.add(path)
         yield conn
     finally:
@@ -67,6 +76,7 @@ def _row_to_app(row: sqlite3.Row) -> AppConfig:
         last_updated=datetime.fromisoformat(row["last_updated"]) if row["last_updated"] else None,
         pixlet_config=json.loads(row["pixlet_config"]),
         priority=row["priority"],
+        sort_order=row["sort_order"] if "sort_order" in row.keys() else 0,
     )
 
 
@@ -125,8 +135,8 @@ class AppDatabase:
     def _insert(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -134,8 +144,8 @@ class AppDatabase:
     def _replace(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -150,6 +160,7 @@ class AppDatabase:
             config.last_updated.isoformat() if config.last_updated else None,
             json.dumps(config.pixlet_config),
             config.priority,
+            config.sort_order,
         )
 
 
@@ -165,12 +176,16 @@ class ConfigDatabase:
             if row is None:
                 config = DisplayConfig()
                 conn.execute(
-                    "INSERT INTO display_config (id, layout_mode, cycle_interval) VALUES (1, ?, ?)",
-                    (config.layout_mode, config.cycle_interval),
+                    "INSERT INTO display_config (id, layout_mode, cycle_interval, brightness) VALUES (1, ?, ?, ?)",
+                    (config.layout_mode, config.cycle_interval, config.brightness),
                 )
                 conn.commit()
                 return config
-            return DisplayConfig(layout_mode=row["layout_mode"], cycle_interval=row["cycle_interval"])
+            return DisplayConfig(
+                layout_mode=row["layout_mode"],
+                cycle_interval=row["cycle_interval"],
+                brightness=row["brightness"] if "brightness" in row.keys() else 255,
+            )
 
     def update(self, **kwargs: object) -> DisplayConfig:
         current = self.get()
@@ -179,8 +194,8 @@ class ConfigDatabase:
         config = DisplayConfig(**merged)
         with _connect(self._path) as conn:
             conn.execute(
-                "UPDATE display_config SET layout_mode = ?, cycle_interval = ? WHERE id = 1",
-                (config.layout_mode, config.cycle_interval),
+                "UPDATE display_config SET layout_mode = ?, cycle_interval = ?, brightness = ? WHERE id = 1",
+                (config.layout_mode, config.cycle_interval, config.brightness),
             )
             conn.commit()
         logger.info("Display config updated: %s", config)

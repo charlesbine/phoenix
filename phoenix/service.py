@@ -60,6 +60,11 @@ class PhoenixService:
 
         run_app(name, self.settings, self.app_db)
 
+    def render_preview(self, name: str) -> None:
+        from phoenix.render import render_preview
+
+        render_preview(name, self.settings)
+
     def render_all(self) -> None:
         from phoenix.render import run_all_apps
 

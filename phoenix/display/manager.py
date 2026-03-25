@@ -50,6 +50,7 @@ class DisplayManager:
             logger.debug("Display mode: %s, active: %s", config.layout_mode, [a.name for a in active])
 
             if config.layout_mode == "cycle":
+                active.sort(key=lambda a: a.sort_order)
                 self._display_cycle(active, config.cycle_interval)
             elif config.layout_mode == "random":
                 shuffled = active.copy()
