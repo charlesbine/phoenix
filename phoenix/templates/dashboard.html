@@ -152,6 +152,7 @@
             font-size: 0.8rem;
             padding: 0 0.2rem;
         }
+        .btn-delete { background: #6e1b1b; }
         .btn-config { background: #30363d; }
         .btn-config.has-config { background: #1f6feb; }
 
@@ -241,14 +242,24 @@
 
         function LivePreview() {
             const [src, setSrc] = useState('/data/output/current_display.webp?t=0');
+            const [appName, setAppName] = useState('');
             useEffect(() => {
-                const id = setInterval(() => setSrc('/data/output/current_display.webp?t=' + Date.now()), 2000);
+                const refresh = async () => {
+                    setSrc('/data/output/current_display.webp?t=' + Date.now());
+                    try {
+                        const r = await api('/now-playing');
+                        setAppName(r.app || '');
+                    } catch {}
+                };
+                refresh();
+                const id = setInterval(refresh, 2000);
                 return () => clearInterval(id);
             }, []);
             return html`
                 <div class="live-preview">
                     <div class="label">Now Playing</div>
                     <img src=${src} alt="Live display" />
+                    ${appName && html`<div class="now-playing">${appName.replace(/_/g, ' ')}</div>`}
                 </div>
             `;
         }
@@ -455,6 +466,17 @@
                 onAction();
             };
 
+            const deleteApp = async () => {
+                if (!confirm('Remove ' + app.name + ' from the database?')) return;
+                await api('/apps/' + app.name, 'DELETE');
+                onAction();
+            };
+
+            const saveRefreshInterval = async (seconds) => {
+                await api('/apps/' + app.name + '/refresh-interval', 'PUT', { refresh_interval: seconds });
+                onAction();
+            };
+
             const dragProps = draggable ? {
                 draggable: true,
                 onDragStart: e => { e.dataTransfer.effectAllowed = 'move'; onDragStart(app.name); },
@@ -488,8 +510,19 @@
                                 onClick=${() => setShowConfig(!showConfig)}>
                             ${showConfig ? 'Close' : 'Config'}
                         </button>
+                        <button class="btn btn-delete" onClick=${deleteApp}>Delete</button>
                     </div>
-                    ${showConfig && html`<${ConfigEditor} appName=${app.name} config=${app.pixlet_config} onSave=${saveConfig} />`}
+                    ${showConfig && html`
+                        <${ConfigEditor} appName=${app.name} config=${app.pixlet_config} onSave=${saveConfig} />
+                        <div class="config-editor" style="border-top: none; padding-top: 0;">
+                            <div class="config-row">
+                                <label style="flex:0.6; font-size: 0.75rem; color: #8b949e">Refresh (sec)</label>
+                                <input type="number" min="10" max="86400" value=${app.refresh_interval}
+                                       style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
+                                       onChange=${e => saveRefreshInterval(parseInt(e.target.value) || 60)} />
+                            </div>
+                        </div>
+                    `}
                 </div>
             `;
         }
