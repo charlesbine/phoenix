@@ -8,8 +8,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PHOENIX_", env_file=".env")
 
-    # Platform: "matrix" on Raspberry Pi, "web" for dev/web viewing
-    platform: Literal["matrix", "web"] = "web"
+    # Platform: "matrix" on Raspberry Pi, "serial" for Matrix Portal M4, "web" for dev/web viewing
+    platform: Literal["matrix", "serial", "web"] = "web"
+
+    # Serial display (Matrix Portal M4)
+    serial_port: str = "/dev/ttyACM0"  # Linux (Pi); on macOS use /dev/cu.usbmodem101
+    serial_brightness: int = 255  # 0-255, sent to M4 with each frame
 
     # Rendering
     render_width: int = 64
