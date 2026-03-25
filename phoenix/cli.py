@@ -155,6 +155,10 @@ def display():
         from phoenix.display.matrix import MatrixDisplayBackend
 
         backend = MatrixDisplayBackend()
+    elif settings.platform == "serial":
+        from phoenix.display.serial import SerialDisplayBackend
+
+        backend = SerialDisplayBackend()
     else:
         from phoenix.display.web import WebDisplayBackend
 
