@@ -77,6 +77,9 @@ class SerialDisplayBackend:
         src = large_path if large_path.exists() else image_path
         try:
             shutil.copy(src, self._current_display)
+            # Write current app name for dashboard
+            app_name = image_path.stem.removesuffix(".large")
+            (self._web_output / "current_app.txt").write_text(app_name)
         except Exception:
             pass
 

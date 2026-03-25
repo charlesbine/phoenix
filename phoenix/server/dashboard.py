@@ -112,6 +112,11 @@ def create_app() -> FastAPI:
             return []
         return parse_schema(path) or []
 
+    @app.delete("/api/apps/{name}")
+    async def delete_app(name: str):
+        get_svc().app_db.delete(name)
+        return {"ok": True}
+
     @app.post("/api/apps/{name}/enable")
     async def enable_app(name: str):
         return _serialize_app(get_svc().enable_app(name))
@@ -131,6 +136,15 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/add")
     async def add_app(name: str):
         return _serialize_app(get_svc().create_app(name))
+
+    @app.put("/api/apps/{name}/refresh-interval")
+    async def update_refresh_interval(name: str, request: Request):
+        body = await request.json()
+        seconds = body.get("refresh_interval")
+        if seconds is not None:
+            from datetime import timedelta
+            return _serialize_app(get_svc().app_db.upsert(name, refresh_interval=timedelta(seconds=float(seconds))))
+        return {"error": "missing refresh_interval"}
 
     @app.put("/api/apps/{name}/config")
     async def update_app_config(name: str, request: Request):
@@ -154,6 +168,13 @@ def create_app() -> FastAPI:
             return {"name": name, "preview": True}
         except Exception as e:
             return {"error": str(e)}
+
+    @app.get("/api/now-playing")
+    async def now_playing():
+        txt = DATA_DIR / "output" / "current_app.txt"
+        if txt.exists():
+            return {"app": txt.read_text().strip()}
+        return {"app": None}
 
     # -- Cache proxy --
 

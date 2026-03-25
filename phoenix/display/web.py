@@ -29,6 +29,8 @@ class WebDisplayBackend:
 
         try:
             shutil.copy(src, self.current_display)
+            app_name = image_path.stem.removesuffix(".large")
+            (WEB_OUTPUT_DIR / "current_app.txt").write_text(app_name)
         except Exception:
             logger.exception("Error copying to web display")
 
