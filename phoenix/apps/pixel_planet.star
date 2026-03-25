@@ -1,0 +1,20 @@
+load("render.star", "render")
+load("http.star", "http")
+load("encoding/base64.star", "base64")
+
+LOCAL_SERVER = "http://127.0.0.1:7002/data"
+ENDPOINT = "pixel_planet.json"
+
+def main():
+    endpoint = LOCAL_SERVER + "/" + ENDPOINT
+    rep = http.get(endpoint)
+    if rep.status_code != 200:
+        fail("Request to %s failed with %d", endpoint, rep.status_code)
+
+    json = rep.json()
+
+    image = json["image"]
+
+    return render.Root(
+        render.Image(src=base64.decode(image), width=64, height=64)
+    )

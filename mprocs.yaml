@@ -1,0 +1,13 @@
+procs:
+  renderer:
+    shell: "uv run phoenix render"
+    autostart: true
+
+  display:
+    shell: "uv run phoenix display"
+    autostart: true
+    autorestart: true
+
+  dashboard:
+    shell: "uv run phoenix dashboard"
+    autostart: true
