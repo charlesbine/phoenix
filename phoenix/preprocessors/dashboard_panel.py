@@ -115,6 +115,47 @@ def _build_headers(source: dict) -> dict[str, str]:
     return headers
 
 
+def _fetch_mqtt_source(source: dict) -> dict:
+    """Read the last MQTT message for the configured topic."""
+    from phoenix.mqtt import get_message, get_mqtt_client
+    topic = source.get("topic", "")
+    if not topic:
+        return {}
+    # Ensure we're subscribed to this topic
+    try:
+        client = get_mqtt_client()
+        client.subscribe(topic)
+    except Exception:
+        pass
+    msg = get_message(topic)
+    return msg or {}
+
+
+def _fetch_ha_source(source: dict, settings: Settings) -> dict:
+    """Fetch entity state from Home Assistant's REST API."""
+    entity_id = source.get("entity_id", "")
+    if not entity_id or not settings.ha_url or not settings.ha_token:
+        return {}
+    url = f"{settings.ha_url.rstrip('/')}/api/states/{entity_id}"
+    ttl = int(source.get("ttl", 60))
+    try:
+        from phoenix.cache import cache_get
+        headers = {"Authorization": f"Bearer {settings.ha_token}"}
+        status, body, _ = cache_get(url, ttl, headers=headers)
+        if status != 200:
+            logger.warning("[ha] %s returned %d", entity_id, status)
+            return {}
+        data = json.loads(body)
+        # HA returns: {"entity_id": "...", "state": "72.5", "attributes": {...}}
+        # Flatten for easy JSONPath access
+        result = {"state": data.get("state"), "entity_id": data.get("entity_id")}
+        result.update(data.get("attributes", {}))
+        return result
+    except Exception:
+        logger.warning("[ha] Failed to fetch %s", entity_id)
+        return {}
+
+
 def _fetch_http_source(source: dict) -> dict:
     """Fetch data from an HTTP JSON endpoint through the cache proxy."""
     url = source.get("url", "")
@@ -218,6 +259,10 @@ def run_panel(panel_id: str, settings: Settings) -> PreprocessorResult:
             fetched = _fetch_http_source(source)
         except Exception:
             logger.warning("[panel:%s] Failed to fetch HTTP source", panel_id)
+    elif source_type == "mqtt":
+        fetched = _fetch_mqtt_source(source)
+    elif source_type == "ha":
+        fetched = _fetch_ha_source(source, settings)
 
     panel_data = _build_panel_data(panel, fetched)
     out = data_path(f"dashboard_panel_{panel_id}")

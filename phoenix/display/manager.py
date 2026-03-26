@@ -1,5 +1,6 @@
 """Display manager — picks which apps to show and delegates to a backend."""
 
+import json
 import logging
 import random
 import time
@@ -7,7 +8,9 @@ import time
 from phoenix.db import AppDatabase, ConfigDatabase
 from phoenix.display.backend import DisplayBackend
 from phoenix.models import AppConfig
-from phoenix.paths import output_path
+from phoenix.mqtt import pop_notification
+from phoenix.paths import DATA_DIR, OUTPUTS_DIR, output_path, star_path, ensure_dirs
+from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,9 @@ class DisplayManager:
     def run(self) -> None:
         """Main display loop."""
         while True:
+            # Check for notifications before each cycle
+            self._check_notifications()
+
             apps = self.app_db.list_apps()
             active = [a for a in apps if a.enabled and a.active]
 
@@ -63,6 +69,8 @@ class DisplayManager:
 
     def _display_cycle(self, apps: list[AppConfig], duration: int) -> None:
         for app in apps:
+            # Check for notifications between each app
+            self._check_notifications()
             self._display_app(app, duration)
 
     def _display_app(self, app: AppConfig, duration: int) -> None:
@@ -82,3 +90,40 @@ class DisplayManager:
 
         logger.info("Displaying %s for %ds", fresh.name, duration)
         self.backend.display_image(path, duration)
+
+    def _check_notifications(self) -> None:
+        """Check for pending notifications and display them."""
+        while True:
+            notif = pop_notification()
+            if notif is None:
+                return
+            self._display_notification(notif)
+
+    def _display_notification(self, notif: dict) -> None:
+        """Render and display a notification."""
+        logger.info("[notify] Displaying: %s (duration=%ds)", notif["text"][:60], notif["duration"])
+
+        # Write notification data as panel JSON
+        ensure_dirs()
+        panel_data = {
+            "layout": notif.get("layout", "marquee"),
+            "title": "",
+            "text": notif["text"],
+            "color": notif.get("color", "#FFFFFF"),
+        }
+        data_file = DATA_DIR / "dashboard_panel__notification.json"
+        data_file.write_text(json.dumps(panel_data))
+
+        # Render via pixlet using the dashboard_panel template
+        try:
+            from phoenix.render import _run_pixlet
+            from phoenix.models import AppConfig as AC
+
+            app = AC(name="panel__notification", pixlet_config={"instance_id": "_notification"})
+            _run_pixlet(app, Settings(), large=False, star_override=star_path("dashboard_panel"))
+
+            notif_output = output_path("panel__notification")
+            if notif_output.exists():
+                self.backend.display_image(notif_output, notif["duration"])
+        except Exception:
+            logger.exception("[notify] Failed to render notification")

@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     # Dashboard (also serves preprocessor data, cache proxy at /proxy)
     dashboard_port: int = 7002
 
+    # MQTT
+    mqtt_broker: str = ""  # e.g. europa.local — leave empty to disable
+    mqtt_port: int = 8883
+    mqtt_tls: bool = True
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_notify_topic: str = "phoenix/notify"
+
+    # Home Assistant
+    ha_url: str = ""  # e.g. http://homeassistant.local:8123
+    ha_token: str = ""  # Long-lived access token
+
     # Spotify
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
