@@ -156,6 +156,88 @@
         .btn-config { background: #30363d; }
         .btn-config.has-config { background: #1f6feb; }
 
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            animation: fadeIn 0.15s;
+        }
+        .modal {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 480px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+        }
+        .modal h2 {
+            color: #c9d1d9;
+            font-size: 1.1rem;
+            margin: 0 0 1rem;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .modal .field { margin-bottom: 0.75rem; }
+        .modal .field label {
+            display: block;
+            font-size: 0.8rem;
+            color: #8b949e;
+            margin-bottom: 0.25rem;
+        }
+        .modal .field input,
+        .modal .field select {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .modal .field input:focus,
+        .modal .field select:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .modal .field-row {
+            display: flex;
+            gap: 0.4rem;
+            margin-bottom: 0.3rem;
+            align-items: center;
+        }
+        .modal .field-row input,
+        .modal .field-row select {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            padding: 0.35rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            flex: 1;
+            min-width: 0;
+        }
+        .modal .actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            justify-content: flex-end;
+        }
+        .modal .actions .btn {
+            padding: 0.4rem 1rem;
+            font-size: 0.85rem;
+        }
+        .modal .divider {
+            border-top: 1px solid #30363d;
+            margin: 0.75rem 0;
+        }
+
         .empty { color: #484f58; font-style: italic; padding: 0.5rem 0; font-size: 0.9rem; }
 
         .available-card {
@@ -567,6 +649,390 @@
             `;
         }
 
+        // Stable field wrapper — defined outside component to avoid remount
+        const F = ({label, children}) => html`<div class="field"><label>${label}</label>${children}</div>`;
+
+        const LAYOUTS = [
+            { value: 'big_number', label: 'Big Number' },
+            { value: 'key_value', label: 'Key/Value List' },
+            { value: 'marquee', label: 'Scrolling Text' },
+            { value: 'multi_stat', label: 'Multi Stat' },
+        ];
+
+        function PanelBuilder({ onCreated, onError }) {
+            const [open, setOpen] = useState(false);
+            const [creating, setCreating] = useState(false);
+            const [id, setId] = useState('');
+            const [title, setTitle] = useState('');
+            const [layout, setLayout] = useState('big_number');
+            const [sourceType, setSourceType] = useState('static');
+            const [url, setUrl] = useState('');
+            const [ttl, setTtl] = useState(300);
+            const [authType, setAuthType] = useState('none');
+            const [authToken, setAuthToken] = useState('');
+            const [authHeader, setAuthHeader] = useState('X-API-Key');
+            const [value, setValue] = useState('');
+            const [unit, setUnit] = useState('');
+            const [color, setColor] = useState('#FFFFFF');
+            const [text, setText] = useState('');
+            const [items, setItems] = useState([{ key: '', value: '' }]);
+            const [stats, setStats] = useState([{ label: '', value: '', color: '#FFFFFF' }]);
+            const [valuePath, setValuePath] = useState('');
+            const [valueTransform, setValueTransform] = useState('');
+            const [textPath, setTextPath] = useState('');
+            const [itemMappings, setItemMappings] = useState([{ key: '', value_path: '', unit: '' }]);
+            const [statMappings, setStatMappings] = useState([{ label: '', value_path: '', unit: '', color: '#FFFFFF' }]);
+
+            const [previewUrl, setPreviewUrl] = useState('');
+            const [previewing, setPreviewing] = useState(false);
+            const previewTimer = useRef(null);
+
+            const refreshPreview = () => {
+                clearTimeout(previewTimer.current);
+                previewTimer.current = setTimeout(async () => {
+                    const config = { color };
+                    const data_source = { type: sourceType };
+                    if (sourceType === 'http') {
+                        data_source.url = url; data_source.ttl = ttl; data_source.mappings = {};
+                        if (authType !== 'none') {
+                            data_source.auth = { type: authType, token: authToken };
+                            if (authType === 'api_key') data_source.auth.header = authHeader;
+                        }
+                        if (layout === 'big_number') { data_source.mappings.value = valuePath; if (valueTransform) data_source.mappings.transform = valueTransform; config.unit = unit; }
+                        else if (layout === 'key_value') { data_source.mappings.items = itemMappings.filter(m => m.key); }
+                        else if (layout === 'marquee') { data_source.mappings.text = textPath; }
+                        else if (layout === 'multi_stat') { data_source.mappings.stats = statMappings.filter(m => m.label); }
+                    } else {
+                        if (layout === 'big_number') { config.value = value || '42'; config.unit = unit; }
+                        else if (layout === 'key_value') { config.items = items.filter(i => i.key).length ? items.filter(i => i.key) : [{key:'Label', value:'Value'}]; }
+                        else if (layout === 'marquee') { config.text = text || 'Preview text...'; }
+                        else if (layout === 'multi_stat') { config.stats = stats.filter(s => s.label).length ? stats.filter(s => s.label) : [{label:'Stat', value:'0', color:'#FFFFFF'}]; }
+                    }
+                    setPreviewing(true);
+                    try {
+                        const r = await fetch('/api/panels/preview', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ layout, title: title || 'Preview', config, data_source }),
+                        });
+                        const result = await r.json();
+                        if (result.preview_url) setPreviewUrl(result.preview_url);
+                    } finally { setPreviewing(false); }
+                }, 500);
+            };
+
+            // Auto-preview on any change (debounced 500ms in refreshPreview)
+            const depsKey = [open, layout, sourceType, title, value, unit, color, text, url, ttl, valuePath, textPath,
+                authType, authToken, authHeader,
+                JSON.stringify(items), JSON.stringify(stats), JSON.stringify(itemMappings), JSON.stringify(statMappings)].join('|');
+            useEffect(() => { if (open) refreshPreview(); }, [depsKey]);
+
+            const reset = () => {
+                setId(''); setTitle(''); setValue(''); setUnit(''); setText('');
+                setColor('#FFFFFF'); setUrl(''); setTtl(300); setValuePath(''); setTextPath('');
+                setAuthType('none'); setAuthToken(''); setAuthHeader('X-API-Key');
+                setLayout('big_number'); setSourceType('static');
+                setItems([{ key: '', value: '' }]); setStats([{ label: '', value: '', color: '#FFFFFF' }]);
+                setItemMappings([{ key: '', value_path: '', unit: '' }]);
+                setStatMappings([{ label: '', value_path: '', unit: '', color: '#FFFFFF' }]);
+            };
+
+            const close = () => { setOpen(false); reset(); };
+
+            const create = async () => {
+                if (!id.trim()) { onError('Panel ID is required'); return; }
+                setCreating(true);
+                try {
+                    const config = { color };
+                    const data_source = { type: sourceType };
+                    if (sourceType === 'http') {
+                        data_source.url = url;
+                        data_source.ttl = ttl;
+                        data_source.mappings = {};
+                        if (authType !== 'none') {
+                            data_source.auth = { type: authType, token: authToken };
+                            if (authType === 'api_key') data_source.auth.header = authHeader;
+                        }
+                        if (layout === 'big_number') { data_source.mappings.value = valuePath; if (valueTransform) data_source.mappings.transform = valueTransform; config.unit = unit; }
+                        else if (layout === 'key_value') { data_source.mappings.items = itemMappings.filter(m => m.key); }
+                        else if (layout === 'marquee') { data_source.mappings.text = textPath; }
+                        else if (layout === 'multi_stat') { data_source.mappings.stats = statMappings.filter(m => m.label); }
+                    } else {
+                        if (layout === 'big_number') { config.value = value; config.unit = unit; }
+                        else if (layout === 'key_value') { config.items = items.filter(i => i.key); }
+                        else if (layout === 'marquee') { config.text = text; }
+                        else if (layout === 'multi_stat') { config.stats = stats.filter(s => s.label); }
+                    }
+                    const result = await api('/panels', 'POST', {
+                        id: id.trim().toLowerCase().replace(/\s+/g, '_'),
+                        layout, title, config, data_source,
+                    });
+                    if (result.error) { onError(result.error); return; }
+                    close();
+                    onCreated();
+                } finally { setCreating(false); }
+            };
+
+            if (!open) {
+                return html`<button class="btn btn-enable" onClick=${() => setOpen(true)}>+ New Panel</button>`;
+            }
+
+            return html`
+                <div class="modal-overlay" onClick=${e => { if (e.target === e.currentTarget) close(); }}>
+                    <div class="modal">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+                            <h2 style="margin:0">Create Dashboard Panel</h2>
+                            <div style="flex-shrink:0; margin-left:1rem; text-align:center;">
+                                <div style="position:relative; display:inline-block;">
+                                    <img src=${previewUrl || ''} alt="Preview"
+                                         style="width:128px; height:128px; image-rendering:pixelated; background:#000; border-radius:6px; border:1px solid #30363d; display:block;"
+                                         onError=${e => e.target.style.opacity = '0.15'} />
+                                    ${previewing && html`<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center;"><span class="spinner" /></div>`}
+                                </div>
+                                <button class="btn btn-render" style="margin-top:0.4rem" disabled=${previewing} onClick=${refreshPreview}>
+                                    ${previewing ? 'Rendering...' : 'Preview'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <${F} label="Panel ID">
+                            <input value=${id} placeholder="e.g. btc_price, home_temps"
+                                   onInput=${e => setId(e.target.value)} />
+                        <//>
+                        <${F} label="Display Title">
+                            <input value=${title} placeholder="What appears above the data"
+                                   onInput=${e => setTitle(e.target.value)} />
+                        <//>
+
+                        <div style="display:flex; gap:0.75rem;">
+                            <${F} label="Layout">
+                                <select value=${layout} onChange=${e => setLayout(e.target.value)}>
+                                    ${LAYOUTS.map(l => html`<option value=${l.value}>${l.label}</option>`)}
+                                </select>
+                            <//>
+                            <${F} label="Data Source">
+                                <select value=${sourceType} onChange=${e => setSourceType(e.target.value)}>
+                                    <option value="static">Static Values</option>
+                                    <option value="http">HTTP JSON</option>
+                                </select>
+                            <//>
+                            <${F} label="Color">
+                                <input type="color" value=${color} style="height:2.1rem; padding:0.2rem;"
+                                       onChange=${e => setColor(e.target.value)} />
+                            <//>
+                        </div>
+
+                        ${sourceType === 'http' && html`
+                            <div class="divider" />
+                            <${F} label="JSON URL">
+                                <input value=${url} placeholder="https://api.example.com/data.json"
+                                       onInput=${e => setUrl(e.target.value)} />
+                            <//>
+                            <${F} label="Cache TTL (seconds)">
+                                <input type="number" value=${ttl} min="10"
+                                       onChange=${e => setTtl(parseInt(e.target.value) || 300)} />
+                            <//>
+                            <${F} label="Authentication">
+                                <select value=${authType} onChange=${e => setAuthType(e.target.value)}>
+                                    <option value="none">None</option>
+                                    <option value="bearer">Bearer Token</option>
+                                    <option value="api_key">API Key Header</option>
+                                    <option value="basic">Basic Auth</option>
+                                </select>
+                            <//>
+                            ${authType === 'bearer' && html`
+                                <${F} label="Token">
+                                    <input type="text" autocomplete="off" data-1p-ignore value=${authToken} placeholder="your-token-here"
+                                           onInput=${e => setAuthToken(e.target.value)} />
+                                <//>
+                            `}
+                            ${authType === 'api_key' && html`
+                                <${F} label="Header Name">
+                                    <input value=${authHeader} placeholder="X-API-Key"
+                                           onInput=${e => setAuthHeader(e.target.value)} />
+                                <//>
+                                <${F} label="API Key">
+                                    <input type="text" autocomplete="off" data-1p-ignore value=${authToken} placeholder="your-api-key"
+                                           onInput=${e => setAuthToken(e.target.value)} />
+                                <//>
+                            `}
+                            ${authType === 'basic' && html`
+                                <${F} label="Username:Password">
+                                    <input type="text" autocomplete="off" data-1p-ignore value=${authToken} placeholder="user:pass"
+                                           onInput=${e => setAuthToken(e.target.value)} />
+                                <//>
+                            `}
+                        `}
+
+                        <div class="divider" />
+
+                        ${layout === 'big_number' && html`
+                            ${sourceType === 'static'
+                                ? html`<${F} label="Value"><input value=${value} placeholder="72" onInput=${e => setValue(e.target.value)} /><//>`
+                                : html`
+                                    <${F} label="Value JSONPath"><input value=${valuePath} placeholder="data.temperature" onInput=${e => setValuePath(e.target.value)} /><//>
+                                    <${F} label="Transform"><input value=${valueTransform} placeholder="/ 100 | round 2 | format $%.2f" onInput=${e => setValueTransform(e.target.value)} /><//>
+                                `
+                            }
+                            <${F} label="Unit"><input value=${unit} placeholder="°F" onInput=${e => setUnit(e.target.value)} /><//>
+                        `}
+
+                        ${layout === 'marquee' && html`
+                            ${sourceType === 'static'
+                                ? html`<${F} label="Text"><input value=${text} placeholder="Scrolling message..." onInput=${e => setText(e.target.value)} /><//>`
+                                : html`<${F} label="Text JSONPath"><input value=${textPath} placeholder="data.headline" onInput=${e => setTextPath(e.target.value)} /><//>`
+                            }
+                        `}
+
+                        ${layout === 'key_value' && html`
+                            <label style="font-size:0.8rem; color:#8b949e; display:block; margin-bottom:0.3rem;">Rows</label>
+                            ${(sourceType === 'static' ? items : itemMappings).map((item, i) => html`
+                                <div class="field-row" key=${i}>
+                                    <input value=${item.key || item.key} placeholder="Label"
+                                           onInput=${e => {
+                                               if (sourceType === 'static') { const n = [...items]; n[i] = {...n[i], key: e.target.value}; setItems(n); }
+                                               else { const n = [...itemMappings]; n[i] = {...n[i], key: e.target.value}; setItemMappings(n); }
+                                           }} />
+                                    <input value=${sourceType === 'static' ? item.value : item.value_path} placeholder=${sourceType === 'static' ? 'Value' : 'json.path'}
+                                           onInput=${e => {
+                                               if (sourceType === 'static') { const n = [...items]; n[i] = {...n[i], value: e.target.value}; setItems(n); }
+                                               else { const n = [...itemMappings]; n[i] = {...n[i], value_path: e.target.value}; setItemMappings(n); }
+                                           }} />
+                                    ${sourceType === 'http' && html`
+                                        <input style="max-width:4rem" value=${item.unit || ''} placeholder="unit"
+                                               onInput=${e => { const n = [...itemMappings]; n[i] = {...n[i], unit: e.target.value}; setItemMappings(n); }} />
+                                    `}
+                                    <button class="remove-btn" style="color:#da3633; background:none; border:none; cursor:pointer; font-size:1rem;"
+                                            onClick=${() => {
+                                                if (sourceType === 'static') setItems(items.filter((_, j) => j !== i));
+                                                else setItemMappings(itemMappings.filter((_, j) => j !== i));
+                                            }}>x</button>
+                                </div>
+                            `)}
+                            <button class="btn btn-config" style="margin-top:0.2rem" onClick=${() => sourceType === 'static'
+                                ? setItems([...items, { key: '', value: '' }])
+                                : setItemMappings([...itemMappings, { key: '', value_path: '', unit: '' }])
+                            }>+ Add Row</button>
+                        `}
+
+                        ${layout === 'multi_stat' && html`
+                            <label style="font-size:0.8rem; color:#8b949e; display:block; margin-bottom:0.3rem;">Stats</label>
+                            ${(sourceType === 'static' ? stats : statMappings).map((s, i) => html`
+                                <div class="field-row" key=${i}>
+                                    <input value=${s.label} placeholder="Label"
+                                           onInput=${e => {
+                                               if (sourceType === 'static') { const n = [...stats]; n[i] = {...n[i], label: e.target.value}; setStats(n); }
+                                               else { const n = [...statMappings]; n[i] = {...n[i], label: e.target.value}; setStatMappings(n); }
+                                           }} />
+                                    <input value=${sourceType === 'static' ? s.value : s.value_path} placeholder=${sourceType === 'static' ? 'Value' : 'json.path'}
+                                           onInput=${e => {
+                                               if (sourceType === 'static') { const n = [...stats]; n[i] = {...n[i], value: e.target.value}; setStats(n); }
+                                               else { const n = [...statMappings]; n[i] = {...n[i], value_path: e.target.value}; setStatMappings(n); }
+                                           }} />
+                                    ${sourceType === 'http' && html`
+                                        <input style="max-width:4rem" value=${s.unit || ''} placeholder="unit"
+                                               onInput=${e => { const n = [...statMappings]; n[i] = {...n[i], unit: e.target.value}; setStatMappings(n); }} />
+                                    `}
+                                    <input type="color" value=${s.color} style="flex:0; width:2rem; min-width:2rem;"
+                                           onChange=${e => {
+                                               if (sourceType === 'static') { const n = [...stats]; n[i] = {...n[i], color: e.target.value}; setStats(n); }
+                                               else { const n = [...statMappings]; n[i] = {...n[i], color: e.target.value}; setStatMappings(n); }
+                                           }} />
+                                    <button class="remove-btn" style="color:#da3633; background:none; border:none; cursor:pointer; font-size:1rem;"
+                                            onClick=${() => {
+                                                if (sourceType === 'static') setStats(stats.filter((_, j) => j !== i));
+                                                else setStatMappings(statMappings.filter((_, j) => j !== i));
+                                            }}>x</button>
+                                </div>
+                            `)}
+                            <button class="btn btn-config" style="margin-top:0.2rem" onClick=${() => sourceType === 'static'
+                                ? setStats([...stats, { label: '', value: '', color: '#FFFFFF' }])
+                                : setStatMappings([...statMappings, { label: '', value_path: '', unit: '', color: '#FFFFFF' }])
+                            }>+ Add Stat</button>
+                        `}
+
+                        <div class="actions">
+                            <button class="btn btn-config" onClick=${close}>Cancel</button>
+                            <button class="btn btn-enable" disabled=${creating} onClick=${create}>
+                                ${creating ? html`<span class="spinner" /> Creating...` : 'Create Panel'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function PanelCard({ panel, onAction, onError, imgTick }) {
+            const [deleting, setDeleting] = useState(false);
+            const [editing, setEditing] = useState(false);
+            const [editConfig, setEditConfig] = useState(JSON.stringify(panel.config || {}, null, 2));
+            const [editSource, setEditSource] = useState(JSON.stringify(panel.data_source || {}, null, 2));
+            const [editTitle, setEditTitle] = useState(panel.title);
+            const [saving, setSaving] = useState(false);
+
+            const del_ = async () => {
+                if (!confirm('Delete panel ' + panel.id + '?')) return;
+                setDeleting(true);
+                await api('/panels/' + panel.id, 'DELETE');
+                onAction();
+            };
+            const save = async () => {
+                setSaving(true);
+                try {
+                    const result = await api('/panels/' + panel.id, 'PUT', {
+                        title: editTitle,
+                        config: JSON.parse(editConfig),
+                        data_source: JSON.parse(editSource),
+                    });
+                    if (result.error) { onError(result.error); return; }
+                    setEditing(false);
+                    onAction();
+                } catch(e) { onError(e.message); }
+                finally { setSaving(false); }
+            };
+
+            if (editing) {
+                const taStyle = "width:100%; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.4rem; border-radius:6px; font-size:0.75rem; font-family:monospace; resize:vertical;";
+                return html`
+                    <div class="modal-overlay" onClick=${e => { if (e.target === e.currentTarget) setEditing(false); }}>
+                        <div class="modal">
+                            <h2 style="margin:0 0 1rem">Edit: ${panel.id}</h2>
+                            <${F} label="Title">
+                                <input value=${editTitle} onInput=${e => setEditTitle(e.target.value)} />
+                            <//>
+                            <${F} label="Config (JSON)">
+                                <textarea rows="4" style=${taStyle} value=${editConfig}
+                                          onInput=${e => setEditConfig(e.target.value)} />
+                            <//>
+                            <${F} label="Data Source (JSON)">
+                                <textarea rows="8" style=${taStyle} value=${editSource}
+                                          onInput=${e => setEditSource(e.target.value)} />
+                            <//>
+                            <div class="actions">
+                                <button class="btn btn-config" onClick=${() => setEditing(false)}>Cancel</button>
+                                <button class="btn btn-enable" disabled=${saving} onClick=${save}>
+                                    ${saving ? html`<span class="spinner" />` : 'Save & Re-render'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return html`
+                <div class="app-card">
+                    <img src=${'/static/outputs/panel_' + panel.id + '.large.webp?t=' + (imgTick || 0)}
+                         alt=${panel.id} onError=${e => e.target.style.opacity = '0.15'} />
+                    <div class="name">${panel.title || panel.id}</div>
+                    <div class="meta">${panel.layout} · ${panel.data_source?.type || 'static'}</div>
+                    <div class="actions">
+                        <button class="btn btn-config" onClick=${() => setEditing(true)}>Edit</button>
+                        <button class="btn btn-delete" disabled=${deleting} onClick=${del_}>Delete</button>
+                    </div>
+                </div>
+            `;
+        }
+
         function Toast({ message, onClose }) {
             useEffect(() => {
                 const t = setTimeout(onClose, 4000);
@@ -579,6 +1045,7 @@
         function App() {
             const [apps, setApps] = useState([]);
             const [available, setAvailable] = useState([]);
+            const [panels, setPanels] = useState([]);
             const [config, setConfig] = useState({ layout_mode: 'cycle', cycle_interval: 10 });
             const [error, setError] = useState(null);
             const [previewingAll, setPreviewingAll] = useState(false);
@@ -588,14 +1055,16 @@
 
             const refresh = useCallback(async (err) => {
                 if (err) setError(err);
-                const [a, av, c] = await Promise.all([
+                const [a, av, c, p] = await Promise.all([
                     api('/apps'),
                     api('/apps/available'),
                     api('/config'),
+                    api('/panels'),
                 ]);
                 setApps(a);
                 setAvailable(av);
                 setConfig(c);
+                setPanels(p);
                 setImgTick(Date.now());
             }, []);
 
@@ -672,6 +1141,15 @@
                     <h2>Disabled</h2>
                     <div class="app-grid">${disabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} imgTick=${imgTick} />`)}</div>
                 `}
+
+                <div class="section-header">
+                    <h2>Dashboard Panels</h2>
+                    <${PanelBuilder} onCreated=${refresh} onError=${setError} />
+                </div>
+                ${panels.length > 0
+                    ? html`<div class="app-grid">${panels.map(p => html`<${PanelCard} key=${p.id} panel=${p} onAction=${refresh} onError=${setError} imgTick=${imgTick} />`)}</div>`
+                    : html`<p class="empty">No panels yet — create one above</p>`
+                }
 
                 ${available.length > 0 && html`
                     <div class="section-header">

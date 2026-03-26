@@ -60,10 +60,11 @@ def _url_hash(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:32]
 
 
-def cache_get(url: str, ttl: int = DEFAULT_TTL) -> tuple[int, bytes, str]:
+def cache_get(url: str, ttl: int = DEFAULT_TTL, headers: dict[str, str] | None = None) -> tuple[int, bytes, str]:
     """Fetch a URL through the cache. Returns (status_code, body, content_type)."""
     now = time.time()
-    h = _url_hash(url)
+    # Include headers in cache key so different auth tokens get separate cache entries
+    h = _url_hash(url + (str(sorted(headers.items())) if headers else ""))
 
     # Check cache
     with _connect() as conn:
@@ -78,7 +79,7 @@ def cache_get(url: str, ttl: int = DEFAULT_TTL) -> tuple[int, bytes, str]:
     # Cache miss or stale — try to fetch fresh
     try:
         with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(url)
+            resp = client.get(url, headers=headers or {})
         content_type = resp.headers.get("content-type", "application/octet-stream")
         _store(h, url, resp.status_code, resp.content, content_type, ttl)
         logger.debug("[cache] MISS — fetched fresh %s (%d)", url, resp.status_code)

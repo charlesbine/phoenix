@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from phoenix.cache import cache_get
+from phoenix.db import PanelDatabase
 from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, app_type, ensure_dirs
 from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
@@ -155,8 +156,15 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/render")
     async def render_app(name: str):
         try:
-            await asyncio.to_thread(get_svc().render_app, name)
-            return _serialize_app(get_svc().get_app(name))
+            svc = get_svc()
+            app_obj = svc.app_db.get(name)
+            if app_obj and not app_obj.enabled:
+                # Disabled apps use preview path (render_app skips disabled)
+                await asyncio.to_thread(svc.render_preview, name)
+            else:
+                await asyncio.to_thread(svc.render_app, name)
+            fresh = svc.app_db.get(name)
+            return _serialize_app(fresh) if fresh else {"ok": True}
         except Exception as e:
             return {"error": str(e)}
 
@@ -168,6 +176,126 @@ def create_app() -> FastAPI:
             return {"name": name, "preview": True}
         except Exception as e:
             return {"error": str(e)}
+
+    # -- Dashboard panels --
+
+    def get_panel_db() -> PanelDatabase:
+        return PanelDatabase()
+
+    @app.get("/api/panels")
+    async def list_panels():
+        return get_panel_db().list_panels()
+
+    @app.post("/api/panels")
+    async def create_panel(request: Request):
+        body = await request.json()
+        panel_id = body.get("id", "").strip().lower().replace(" ", "_")
+        if not panel_id:
+            return {"error": "id is required"}
+        panel_db = get_panel_db()
+        if panel_db.get(panel_id):
+            return {"error": f"Panel '{panel_id}' already exists"}
+
+        panel = panel_db.create(
+            panel_id=panel_id,
+            layout=body.get("layout", "big_number"),
+            title=body.get("title", ""),
+            config=body.get("config", {}),
+            data_source=body.get("data_source", {}),
+        )
+
+        # Register as an app so it appears in the display cycle
+        svc = get_svc()
+        app_name = f"panel_{panel_id}"
+        try:
+            svc.create_app(app_name, pixlet_config={"instance_id": panel_id})
+        except ValueError:
+            pass  # Already exists
+
+        # Render initial preview
+        try:
+            await asyncio.to_thread(svc.render_preview, app_name)
+        except Exception:
+            pass
+
+        return panel
+
+    @app.post("/api/panels/preview")
+    async def preview_panel(request: Request):
+        """Render a preview of a panel config without saving it."""
+        import json as json_mod
+        from phoenix.paths import data_path, star_path, output_path_large
+        from phoenix.render import _run_pixlet
+        from phoenix.models import AppConfig
+        from phoenix.paths import ensure_dirs as _ensure
+
+        _ensure()
+        body = await request.json()
+        preview_id = "_preview"
+
+        # Build panel data from the request body (same as preprocessor would)
+        from phoenix.preprocessors.dashboard_panel import _build_panel_data, _fetch_http_source
+        panel = {
+            "layout": body.get("layout", "big_number"),
+            "title": body.get("title", ""),
+            "config": body.get("config", {}),
+            "data_source": body.get("data_source", {}),
+        }
+        source = panel["data_source"]
+        fetched = {}
+        if source.get("type") == "http" and source.get("url"):
+            try:
+                fetched = _fetch_http_source(source)
+            except Exception:
+                pass
+        panel_data = _build_panel_data(panel, fetched)
+        data_path(f"dashboard_panel_{preview_id}").write_text(json_mod.dumps(panel_data))
+
+        # Render
+        try:
+            app = AppConfig(name=f"panel_{preview_id}", pixlet_config={"instance_id": preview_id})
+            await asyncio.to_thread(_run_pixlet, app, get_svc().settings, True, star_path("dashboard_panel"))
+            return {"preview_url": f"/static/outputs/panel_{preview_id}.large.webp?t={__import__('time').time()}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/panels/{panel_id}")
+    async def get_panel(panel_id: str):
+        panel = get_panel_db().get(panel_id)
+        if panel is None:
+            return {"error": "not found"}
+        return panel
+
+    @app.put("/api/panels/{panel_id}")
+    async def update_panel(panel_id: str, request: Request):
+        body = await request.json()
+        panel_db = get_panel_db()
+        try:
+            panel = panel_db.update(panel_id, **body)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        # Re-render
+        svc = get_svc()
+        app_name = f"panel_{panel_id}"
+        try:
+            await asyncio.to_thread(svc.render_preview, app_name)
+        except Exception:
+            pass
+
+        return panel
+
+    @app.delete("/api/panels/{panel_id}")
+    async def delete_panel(panel_id: str):
+        panel_db = get_panel_db()
+        panel_db.delete(panel_id)
+        # Also remove the app
+        svc = get_svc()
+        try:
+            svc.app_db.delete(f"panel_{panel_id}")
+        except Exception:
+            pass
+        return {"ok": True}
 
     @app.get("/api/now-playing")
     async def now_playing():

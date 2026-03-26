@@ -1,0 +1,40 @@
+FROM python:3.13-slim AS base
+
+# Install pixlet
+ARG PIXLET_VERSION=0.34.0
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates bash && \
+    ARCH=$(case ${TARGETARCH} in arm64) echo "arm64" ;; amd64) echo "amd64" ;; *) echo "amd64" ;; esac) && \
+    curl -fsSL "https://github.com/tidbyt/pixlet/releases/download/v${PIXLET_VERSION}/pixlet_${PIXLET_VERSION}_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin pixlet && \
+    chmod +x /usr/local/bin/pixlet && \
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Install dependencies first (cache layer)
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-group dev --no-install-project --no-group dev
+
+# Copy project
+COPY phoenix/ phoenix/
+
+# Install the project itself
+RUN uv sync --frozen --no-dev --no-group dev
+
+# Data directories (mount as volumes for persistence)
+VOLUME ["/app/phoenix/data", "/app/phoenix/outputs"]
+
+ENV UV_NO_GROUP=dev
+
+EXPOSE 7002
+
+# Run all three services via a simple process manager
+# We don't need mprocs in the container — just a shell script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
