@@ -58,6 +58,10 @@ def create_app() -> FastAPI:
     async def index():
         return FileResponse(TEMPLATES_DIR / "dashboard.html")
 
+    @app.get("/display", response_class=HTMLResponse)
+    async def display_fullscreen():
+        return FileResponse(TEMPLATES_DIR / "display.html")
+
     # -- JSON API --
 
     @app.get("/api/apps")

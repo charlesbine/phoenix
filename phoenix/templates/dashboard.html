@@ -100,6 +100,19 @@
             border-radius: 4px;
             margin-bottom: 0.4rem;
         }
+        .app-card .img-placeholder {
+            width: 128px;
+            height: 128px;
+            background: #161b22;
+            border: 1px dashed #30363d;
+            border-radius: 4px;
+            margin-bottom: 0.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #484f58;
+            font-size: 0.7rem;
+        }
         .app-card .name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.2rem; }
         .app-card .meta { font-size: 0.7rem; color: #8b949e; margin-bottom: 0.4rem; }
         .app-card .actions { display: flex; gap: 0.3rem; justify-content: center; flex-wrap: wrap; }
@@ -534,7 +547,6 @@
                 try {
                     const result = await api('/apps/' + app.name + '/' + act, 'POST');
                     if (result.error) throw new Error(result.error);
-                    if (result.info) { onAction(result.info); return; }
                     if (act === 'render') setRenderKey(Date.now());
                     onAction();
                 } catch(e) {
@@ -578,8 +590,7 @@
 
             return html`
                 <div class=${'app-card' + (dragOver ? ' drag-over' : '')} ...${dragProps}>
-                    <img src=${'/static/outputs/' + app.name + '.large.webp?t=' + imgKey}
-                         alt=${app.name} onError=${e => e.target.style.opacity = '0.15'} />
+                    <${AppImg} src=${'/static/outputs/' + app.name + '.large.webp?t=' + imgKey} alt=${app.name} />
                     <div class="name">${app.name}</div>
                     <div class="meta">${app.last_updated_human}</div>
                     <div class="actions">
@@ -642,7 +653,7 @@
                     if (result.error) {
                         onError(result.error);
                     } else if (result.info) {
-                        onError(result.info);
+                        setRenderKey(Date.now());  // still refresh the image area
                     } else {
                         setRenderKey(Date.now());
                     }
@@ -652,8 +663,7 @@
             };
             return html`
                 <div class="app-card">
-                    <img src=${'/static/outputs/' + name + '.large.webp?t=' + imgKey}
-                         alt=${name} onError=${e => e.target.style.opacity = '0.15'} />
+                    <${AppImg} src=${'/static/outputs/' + name + '.large.webp?t=' + imgKey} alt=${name} />
                     <div class="name" style="color: #8b949e">${name}</div>
                     <div class="actions" style="margin-top: 0.4rem">
                         <button class="btn btn-render" disabled=${previewing} onClick=${preview}>
@@ -669,6 +679,14 @@
 
         // Stable field wrapper — defined outside component to avoid remount
         const F = ({label, children}) => html`<div class="field"><label>${label}</label>${children}</div>`;
+
+        // Image with placeholder fallback
+        function AppImg({ src, alt }) {
+            const [failed, setFailed] = useState(false);
+            useEffect(() => setFailed(false), [src]);
+            if (failed) return html`<div class="img-placeholder">No preview</div>`;
+            return html`<img src=${src} alt=${alt} onError=${() => setFailed(true)} />`;
+        }
 
         const LAYOUTS = [
             { value: 'big_number', label: 'Big Number' },
@@ -1092,8 +1110,7 @@
 
             return html`
                 <div class="app-card">
-                    <img src=${'/static/outputs/panel_' + panel.id + '.large.webp?t=' + (imgTick || 0)}
-                         alt=${panel.id} onError=${e => e.target.style.opacity = '0.15'} />
+                    <${AppImg} src=${'/static/outputs/panel_' + panel.id + '.large.webp?t=' + (imgTick || 0)} alt=${panel.id} />
                     <div class="name">${panel.title || panel.id}</div>
                     <div class="meta">${panel.layout} · ${panel.data_source?.type || 'static'}</div>
                     <div class="actions">
