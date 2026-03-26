@@ -835,7 +835,11 @@
                                 </select>
                             <//>
                             <${F} label="Data Source">
-                                <select value=${sourceType} onChange=${e => setSourceType(e.target.value)}>
+                                <select value=${sourceType} onChange=${e => {
+                                    const v = e.target.value;
+                                    setSourceType(v);
+                                    if (v === 'ha' && !valuePath) setValuePath('state');
+                                }}>
                                     <option value="static">Static Values</option>
                                     <option value="http">HTTP JSON</option>
                                     <option value="mqtt">MQTT Topic</option>
@@ -919,7 +923,7 @@
                             ${sourceType === 'static'
                                 ? html`<${F} label="Value"><input value=${value} placeholder="72" onInput=${e => setValue(e.target.value)} /><//>`
                                 : html`
-                                    <${F} label="Value JSONPath"><input value=${valuePath} placeholder="data.temperature" onInput=${e => setValuePath(e.target.value)} /><//>
+                                    <${F} label="Value JSONPath"><input value=${valuePath} placeholder=${sourceType === 'ha' ? 'state' : 'data.temperature'} onInput=${e => setValuePath(e.target.value)} /><//>
                                     <${F} label="Transform"><input value=${valueTransform} placeholder="/ 100 | round 2 | format $%.2f" onInput=${e => setValueTransform(e.target.value)} /><//>
                                 `
                             }
