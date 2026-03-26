@@ -273,9 +273,9 @@ def _run_python_app(app: AppConfig, settings: Settings) -> None:
         output_large=output_path_large(app.name),
     )
 
-    # Verify outputs were created
+    # No output = app chose to skip (e.g., no data to display)
     if not output_path(app.name).exists():
-        raise RuntimeError(f"[{app.name}] render() did not create {output_path(app.name)}")
+        logger.info("[%s] render() produced no output (conditional skip)", app.name)
 
 
 def _copy_static_app(app: AppConfig, settings: Settings) -> None:

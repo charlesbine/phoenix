@@ -58,6 +58,10 @@ def create_app() -> FastAPI:
     async def index():
         return FileResponse(TEMPLATES_DIR / "dashboard.html")
 
+    @app.get("/display", response_class=HTMLResponse)
+    async def display_fullscreen():
+        return FileResponse(TEMPLATES_DIR / "display.html")
+
     # -- JSON API --
 
     @app.get("/api/apps")
@@ -145,6 +149,14 @@ def create_app() -> FastAPI:
     async def add_app(name: str):
         return _serialize_app(get_svc().create_app(name))
 
+    @app.put("/api/apps/{name}/priority")
+    async def update_priority(name: str, request: Request):
+        body = await request.json()
+        priority = body.get("priority")
+        if priority is not None:
+            return _serialize_app(get_svc().app_db.upsert(name, priority=int(priority)))
+        return {"error": "missing priority"}
+
     @app.put("/api/apps/{name}/refresh-interval")
     async def update_refresh_interval(name: str, request: Request):
         body = await request.json()
@@ -162,14 +174,16 @@ def create_app() -> FastAPI:
 
     @app.post("/api/apps/{name}/render")
     async def render_app(name: str):
+        from phoenix.paths import output_path as _output_path
         try:
             svc = get_svc()
             app_obj = svc.app_db.get(name)
             if app_obj and not app_obj.enabled:
-                # Disabled apps use preview path (render_app skips disabled)
                 await asyncio.to_thread(svc.render_preview, name)
             else:
                 await asyncio.to_thread(svc.render_app, name)
+            if not _output_path(name).exists():
+                return {"info": f"{name}: no output (conditional skip — no data to display)"}
             fresh = svc.app_db.get(name)
             return _serialize_app(fresh) if fresh else {"ok": True}
         except Exception as e:
@@ -178,8 +192,11 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/preview")
     async def preview_app(name: str):
         """Render a preview for any app (even if not in DB or disabled)."""
+        from phoenix.paths import output_path as _output_path
         try:
             await asyncio.to_thread(get_svc().render_preview, name)
+            if not _output_path(name).exists():
+                return {"info": f"{name}: no output (conditional skip — no data to display)"}
             return {"name": name, "preview": True}
         except Exception as e:
             return {"error": str(e)}
