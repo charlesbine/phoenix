@@ -83,12 +83,16 @@ def main(config):
     fuzzed = fuzzy_time(config, now.hour, now.minute)
 
     # Add some left padding for ~style~.
-    texts = [render.Text(" " * i + s, font="6x13") for i, s in enumerate(fuzzed)]
-    # texts = [render.Marquee(render.Text(" " * i + s, font="6x13")) for i, s in enumerate(fuzzed)]
+    # Use large font when it fits, drop to smaller font for long words like TWENTY-FIVE
+    texts = []
+    for i, s in enumerate(fuzzed):
+        line = " " * i + s
+        font = "6x13" if len(line) * 6 <= 56 else "5x8"
+        texts.append(render.Text(line, font = font))
 
     return render.Root(
         child = render.Padding(
-            pad = 4,
+            pad = 3,
             child = render.Column(
                 children = texts,
             ),
