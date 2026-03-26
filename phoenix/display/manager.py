@@ -37,6 +37,12 @@ class DisplayManager:
             # Check for notifications before each cycle
             self._check_notifications()
 
+            # If brightness is 0, display is "off" — skip rendering
+            config = self.config_db.get()
+            if config.brightness == 0:
+                time.sleep(1)
+                continue
+
             apps = self.app_db.list_apps()
             active = [a for a in apps if a.enabled and a.active]
 
