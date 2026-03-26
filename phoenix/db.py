@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS apps (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS dashboard_panels (
+    id TEXT PRIMARY KEY,
+    layout TEXT NOT NULL DEFAULT 'big_number',
+    title TEXT NOT NULL DEFAULT '',
+    config TEXT NOT NULL DEFAULT '{}',
+    data_source TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS display_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     layout_mode TEXT NOT NULL DEFAULT 'cycle',
@@ -200,3 +209,69 @@ class ConfigDatabase:
             conn.commit()
         logger.info("Display config updated: %s", config)
         return config
+
+
+class PanelDatabase:
+    """CRUD for dashboard panels."""
+
+    def __init__(self, path: str | Path | None = None):
+        self._path = str(path or DB_PATH)
+        with _connect(self._path):
+            pass
+
+    def list_panels(self) -> list[dict]:
+        with _connect(self._path) as conn:
+            rows = conn.execute("SELECT * FROM dashboard_panels ORDER BY created_at").fetchall()
+            return [self._row_to_dict(r) for r in rows]
+
+    def get(self, panel_id: str) -> dict | None:
+        with _connect(self._path) as conn:
+            row = conn.execute("SELECT * FROM dashboard_panels WHERE id = ?", (panel_id,)).fetchone()
+            return self._row_to_dict(row) if row else None
+
+    def create(self, panel_id: str, layout: str, title: str, config: dict, data_source: dict) -> dict:
+        with _connect(self._path) as conn:
+            conn.execute(
+                "INSERT INTO dashboard_panels (id, layout, title, config, data_source) VALUES (?, ?, ?, ?, ?)",
+                (panel_id, layout, title, json.dumps(config), json.dumps(data_source)),
+            )
+            conn.commit()
+        return self.get(panel_id)  # type: ignore
+
+    def update(self, panel_id: str, **kwargs: object) -> dict:
+        panel = self.get(panel_id)
+        if panel is None:
+            raise ValueError(f"Panel '{panel_id}' not found")
+        for key in ("layout", "title", "config", "data_source"):
+            if key in kwargs:
+                val = kwargs[key]
+                if isinstance(val, dict):
+                    val = json.dumps(val)
+                panel[key] = val
+        with _connect(self._path) as conn:
+            conn.execute(
+                """UPDATE dashboard_panels SET layout = ?, title = ?, config = ?, data_source = ?
+                   WHERE id = ?""",
+                (panel["layout"], panel["title"],
+                 json.dumps(panel["config"]) if isinstance(panel["config"], dict) else panel["config"],
+                 json.dumps(panel["data_source"]) if isinstance(panel["data_source"], dict) else panel["data_source"],
+                 panel_id),
+            )
+            conn.commit()
+        return self.get(panel_id)  # type: ignore
+
+    def delete(self, panel_id: str) -> None:
+        with _connect(self._path) as conn:
+            conn.execute("DELETE FROM dashboard_panels WHERE id = ?", (panel_id,))
+            conn.commit()
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "layout": row["layout"],
+            "title": row["title"],
+            "config": json.loads(row["config"]),
+            "data_source": json.loads(row["data_source"]),
+            "created_at": row["created_at"],
+        }

@@ -567,6 +567,261 @@
             `;
         }
 
+        const LAYOUTS = [
+            { value: 'big_number', label: 'Big Number' },
+            { value: 'key_value', label: 'Key/Value List' },
+            { value: 'marquee', label: 'Scrolling Text' },
+            { value: 'multi_stat', label: 'Multi Stat' },
+        ];
+
+        function PanelBuilder({ onCreated, onError }) {
+            const [open, setOpen] = useState(false);
+            const [creating, setCreating] = useState(false);
+            const [id, setId] = useState('');
+            const [title, setTitle] = useState('');
+            const [layout, setLayout] = useState('big_number');
+            const [sourceType, setSourceType] = useState('static');
+            const [url, setUrl] = useState('');
+            const [ttl, setTtl] = useState(300);
+
+            // Static values
+            const [value, setValue] = useState('');
+            const [unit, setUnit] = useState('');
+            const [color, setColor] = useState('#FFFFFF');
+            const [text, setText] = useState('');
+            const [items, setItems] = useState([{ key: '', value: '' }]);
+            const [stats, setStats] = useState([{ label: '', value: '', color: '#FFFFFF' }]);
+
+            // HTTP mappings
+            const [valuePath, setValuePath] = useState('');
+            const [textPath, setTextPath] = useState('');
+            const [itemMappings, setItemMappings] = useState([{ key: '', value_path: '', unit: '' }]);
+            const [statMappings, setStatMappings] = useState([{ label: '', value_path: '', unit: '', color: '#FFFFFF' }]);
+
+            const create = async () => {
+                if (!id.trim()) { onError('Panel ID is required'); return; }
+                setCreating(true);
+                try {
+                    const config = { color };
+                    const data_source = { type: sourceType };
+
+                    if (sourceType === 'http') {
+                        data_source.url = url;
+                        data_source.ttl = ttl;
+                        data_source.mappings = {};
+                        if (layout === 'big_number') {
+                            data_source.mappings.value = valuePath;
+                            config.unit = unit;
+                        } else if (layout === 'key_value') {
+                            data_source.mappings.items = itemMappings.filter(m => m.key);
+                        } else if (layout === 'marquee') {
+                            data_source.mappings.text = textPath;
+                        } else if (layout === 'multi_stat') {
+                            data_source.mappings.stats = statMappings.filter(m => m.label);
+                        }
+                    } else {
+                        if (layout === 'big_number') {
+                            config.value = value;
+                            config.unit = unit;
+                        } else if (layout === 'key_value') {
+                            config.items = items.filter(i => i.key);
+                        } else if (layout === 'marquee') {
+                            config.text = text;
+                        } else if (layout === 'multi_stat') {
+                            config.stats = stats.filter(s => s.label);
+                        }
+                    }
+
+                    const result = await api('/panels', 'POST', {
+                        id: id.trim().toLowerCase().replace(/\s+/g, '_'),
+                        layout, title, config, data_source,
+                    });
+                    if (result.error) { onError(result.error); return; }
+                    setOpen(false);
+                    setId(''); setTitle(''); setValue('');
+                    onCreated();
+                } finally {
+                    setCreating(false);
+                }
+            };
+
+            if (!open) {
+                return html`<button class="btn btn-enable" onClick=${() => setOpen(true)}>+ New Panel</button>`;
+            }
+
+            const inputStyle = "background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.3rem 0.5rem; border-radius:4px; font-size:0.8rem; width:100%;";
+
+            return html`
+                <div class="app-card" style="text-align: left; max-width: 400px;">
+                    <div class="name" style="margin-bottom: 0.5rem;">New Panel</div>
+
+                    <div style="margin-bottom: 0.4rem;">
+                        <label style="font-size:0.75rem; color:#8b949e">ID</label>
+                        <input style=${inputStyle} value=${id} placeholder="e.g. btc_price"
+                               onInput=${e => setId(e.target.value)} />
+                    </div>
+                    <div style="margin-bottom: 0.4rem;">
+                        <label style="font-size:0.75rem; color:#8b949e">Title</label>
+                        <input style=${inputStyle} value=${title} placeholder="Display title"
+                               onInput=${e => setTitle(e.target.value)} />
+                    </div>
+                    <div style="margin-bottom: 0.4rem;">
+                        <label style="font-size:0.75rem; color:#8b949e">Layout</label>
+                        <select style=${inputStyle} value=${layout} onChange=${e => setLayout(e.target.value)}>
+                            ${LAYOUTS.map(l => html`<option value=${l.value}>${l.label}</option>`)}
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 0.4rem;">
+                        <label style="font-size:0.75rem; color:#8b949e">Data Source</label>
+                        <select style=${inputStyle} value=${sourceType} onChange=${e => setSourceType(e.target.value)}>
+                            <option value="static">Static Values</option>
+                            <option value="http">HTTP JSON</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 0.4rem;">
+                        <label style="font-size:0.75rem; color:#8b949e">Color</label>
+                        <input type="color" value=${color} onChange=${e => setColor(e.target.value)} />
+                    </div>
+
+                    ${sourceType === 'http' && html`
+                        <div style="margin-bottom: 0.4rem;">
+                            <label style="font-size:0.75rem; color:#8b949e">URL</label>
+                            <input style=${inputStyle} value=${url} placeholder="https://api.example.com/data.json"
+                                   onInput=${e => setUrl(e.target.value)} />
+                        </div>
+                        <div style="margin-bottom: 0.4rem;">
+                            <label style="font-size:0.75rem; color:#8b949e">Cache TTL (sec)</label>
+                            <input type="number" style=${inputStyle} value=${ttl} min="10"
+                                   onChange=${e => setTtl(parseInt(e.target.value) || 300)} />
+                        </div>
+                    `}
+
+                    ${layout === 'big_number' && html`
+                        ${sourceType === 'static'
+                            ? html`<div style="margin-bottom: 0.4rem;">
+                                <label style="font-size:0.75rem; color:#8b949e">Value</label>
+                                <input style=${inputStyle} value=${value} placeholder="72"
+                                       onInput=${e => setValue(e.target.value)} />
+                            </div>`
+                            : html`<div style="margin-bottom: 0.4rem;">
+                                <label style="font-size:0.75rem; color:#8b949e">Value JSONPath</label>
+                                <input style=${inputStyle} value=${valuePath} placeholder="data.temperature"
+                                       onInput=${e => setValuePath(e.target.value)} />
+                            </div>`
+                        }
+                        <div style="margin-bottom: 0.4rem;">
+                            <label style="font-size:0.75rem; color:#8b949e">Unit</label>
+                            <input style=${inputStyle} value=${unit} placeholder="°F"
+                                   onInput=${e => setUnit(e.target.value)} />
+                        </div>
+                    `}
+
+                    ${layout === 'marquee' && html`
+                        ${sourceType === 'static'
+                            ? html`<div style="margin-bottom: 0.4rem;">
+                                <label style="font-size:0.75rem; color:#8b949e">Text</label>
+                                <input style=${inputStyle} value=${text} placeholder="Scrolling message..."
+                                       onInput=${e => setText(e.target.value)} />
+                            </div>`
+                            : html`<div style="margin-bottom: 0.4rem;">
+                                <label style="font-size:0.75rem; color:#8b949e">Text JSONPath</label>
+                                <input style=${inputStyle} value=${textPath} placeholder="data.headline"
+                                       onInput=${e => setTextPath(e.target.value)} />
+                            </div>`
+                        }
+                    `}
+
+                    ${layout === 'key_value' && html`
+                        <label style="font-size:0.75rem; color:#8b949e">Items</label>
+                        ${sourceType === 'static'
+                            ? items.map((item, i) => html`
+                                <div style="display:flex; gap:0.3rem; margin-bottom:0.2rem;" key=${i}>
+                                    <input style=${inputStyle} value=${item.key} placeholder="Label"
+                                           onInput=${e => { const n = [...items]; n[i] = {...n[i], key: e.target.value}; setItems(n); }} />
+                                    <input style=${inputStyle} value=${item.value} placeholder="Value"
+                                           onInput=${e => { const n = [...items]; n[i] = {...n[i], value: e.target.value}; setItems(n); }} />
+                                </div>
+                            `)
+                            : itemMappings.map((m, i) => html`
+                                <div style="display:flex; gap:0.3rem; margin-bottom:0.2rem;" key=${i}>
+                                    <input style=${inputStyle} value=${m.key} placeholder="Label"
+                                           onInput=${e => { const n = [...itemMappings]; n[i] = {...n[i], key: e.target.value}; setItemMappings(n); }} />
+                                    <input style=${inputStyle} value=${m.value_path} placeholder="json.path"
+                                           onInput=${e => { const n = [...itemMappings]; n[i] = {...n[i], value_path: e.target.value}; setItemMappings(n); }} />
+                                    <input style=${"width:3rem;" + inputStyle} value=${m.unit} placeholder="unit"
+                                           onInput=${e => { const n = [...itemMappings]; n[i] = {...n[i], unit: e.target.value}; setItemMappings(n); }} />
+                                </div>
+                            `)
+                        }
+                        <button class="btn btn-config" onClick=${() => sourceType === 'static'
+                            ? setItems([...items, { key: '', value: '' }])
+                            : setItemMappings([...itemMappings, { key: '', value_path: '', unit: '' }])
+                        }>+ Row</button>
+                    `}
+
+                    ${layout === 'multi_stat' && html`
+                        <label style="font-size:0.75rem; color:#8b949e">Stats</label>
+                        ${sourceType === 'static'
+                            ? stats.map((s, i) => html`
+                                <div style="display:flex; gap:0.3rem; margin-bottom:0.2rem; align-items:center;" key=${i}>
+                                    <input style=${inputStyle} value=${s.label} placeholder="Label"
+                                           onInput=${e => { const n = [...stats]; n[i] = {...n[i], label: e.target.value}; setStats(n); }} />
+                                    <input style=${inputStyle} value=${s.value} placeholder="Value"
+                                           onInput=${e => { const n = [...stats]; n[i] = {...n[i], value: e.target.value}; setStats(n); }} />
+                                    <input type="color" value=${s.color}
+                                           onChange=${e => { const n = [...stats]; n[i] = {...n[i], color: e.target.value}; setStats(n); }} />
+                                </div>
+                            `)
+                            : statMappings.map((m, i) => html`
+                                <div style="display:flex; gap:0.3rem; margin-bottom:0.2rem; align-items:center;" key=${i}>
+                                    <input style=${inputStyle} value=${m.label} placeholder="Label"
+                                           onInput=${e => { const n = [...statMappings]; n[i] = {...n[i], label: e.target.value}; setStatMappings(n); }} />
+                                    <input style=${inputStyle} value=${m.value_path} placeholder="json.path"
+                                           onInput=${e => { const n = [...statMappings]; n[i] = {...n[i], value_path: e.target.value}; setStatMappings(n); }} />
+                                    <input style=${"width:3rem;" + inputStyle} value=${m.unit} placeholder="unit"
+                                           onInput=${e => { const n = [...statMappings]; n[i] = {...n[i], unit: e.target.value}; setStatMappings(n); }} />
+                                    <input type="color" value=${m.color}
+                                           onChange=${e => { const n = [...statMappings]; n[i] = {...n[i], color: e.target.value}; setStatMappings(n); }} />
+                                </div>
+                            `)
+                        }
+                        <button class="btn btn-config" onClick=${() => sourceType === 'static'
+                            ? setStats([...stats, { label: '', value: '', color: '#FFFFFF' }])
+                            : setStatMappings([...statMappings, { label: '', value_path: '', unit: '', color: '#FFFFFF' }])
+                        }>+ Stat</button>
+                    `}
+
+                    <div style="display:flex; gap:0.3rem; margin-top:0.75rem;">
+                        <button class="btn btn-enable" disabled=${creating} onClick=${create}>
+                            ${creating ? html`<span class="spinner" />` : 'Create Panel'}
+                        </button>
+                        <button class="btn btn-config" onClick=${() => setOpen(false)}>Cancel</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function PanelCard({ panel, onAction, onError, imgTick }) {
+            const [deleting, setDeleting] = useState(false);
+            const del_ = async () => {
+                if (!confirm('Delete panel ' + panel.id + '?')) return;
+                setDeleting(true);
+                await api('/panels/' + panel.id, 'DELETE');
+                onAction();
+            };
+            return html`
+                <div class="app-card">
+                    <img src=${'/static/outputs/panel_' + panel.id + '.large.webp?t=' + (imgTick || 0)}
+                         alt=${panel.id} onError=${e => e.target.style.opacity = '0.15'} />
+                    <div class="name">${panel.title || panel.id}</div>
+                    <div class="meta">${panel.layout} · ${panel.data_source?.type || 'static'}</div>
+                    <div class="actions">
+                        <button class="btn btn-delete" disabled=${deleting} onClick=${del_}>Delete</button>
+                    </div>
+                </div>
+            `;
+        }
+
         function Toast({ message, onClose }) {
             useEffect(() => {
                 const t = setTimeout(onClose, 4000);
@@ -579,6 +834,7 @@
         function App() {
             const [apps, setApps] = useState([]);
             const [available, setAvailable] = useState([]);
+            const [panels, setPanels] = useState([]);
             const [config, setConfig] = useState({ layout_mode: 'cycle', cycle_interval: 10 });
             const [error, setError] = useState(null);
             const [previewingAll, setPreviewingAll] = useState(false);
@@ -588,14 +844,16 @@
 
             const refresh = useCallback(async (err) => {
                 if (err) setError(err);
-                const [a, av, c] = await Promise.all([
+                const [a, av, c, p] = await Promise.all([
                     api('/apps'),
                     api('/apps/available'),
                     api('/config'),
+                    api('/panels'),
                 ]);
                 setApps(a);
                 setAvailable(av);
                 setConfig(c);
+                setPanels(p);
                 setImgTick(Date.now());
             }, []);
 
@@ -672,6 +930,15 @@
                     <h2>Disabled</h2>
                     <div class="app-grid">${disabled.map(a => html`<${AppCard} key=${a.name} app=${a} onAction=${refresh} imgTick=${imgTick} />`)}</div>
                 `}
+
+                <div class="section-header">
+                    <h2>Dashboard Panels</h2>
+                    <${PanelBuilder} onCreated=${refresh} onError=${setError} />
+                </div>
+                ${panels.length > 0
+                    ? html`<div class="app-grid">${panels.map(p => html`<${PanelCard} key=${p.id} panel=${p} onAction=${refresh} onError=${setError} imgTick=${imgTick} />`)}</div>`
+                    : html`<p class="empty">No panels yet — create one above</p>`
+                }
 
                 ${available.length > 0 && html`
                     <div class="section-header">

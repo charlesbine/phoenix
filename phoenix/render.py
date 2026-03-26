@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from time import sleep
 
 from PIL import Image
@@ -30,11 +31,26 @@ logger = logging.getLogger(__name__)
 MAX_TIME_BETWEEN_UPDATES = timedelta(seconds=30)
 
 
+def _is_panel(name: str) -> bool:
+    return name.startswith("panel_")
+
+
 def _render_dispatch(app: AppConfig, settings: Settings) -> None:
-    """Render an app based on its type (star, python, or static)."""
-    kind = app_type(app.name)
+    """Render an app based on its type (star, python, static, or panel)."""
     ensure_dirs()
 
+    if _is_panel(app.name):
+        logger.info("[%s] Rendering dashboard panel", app.name)
+        # Panels use the shared dashboard_panel.star template
+        panel_app = AppConfig(
+            name=app.name,
+            pixlet_config={"instance_id": app.name.removeprefix("panel_")},
+        )
+        _run_pixlet(panel_app, settings, large=False, star_override=star_path("dashboard_panel"))
+        _run_pixlet(panel_app, settings, large=True, star_override=star_path("dashboard_panel"))
+        return
+
+    kind = app_type(app.name)
     if kind == "star":
         logger.info("[%s] Rendering starlark applet", app.name)
         _run_pixlet(app, settings, large=False)
@@ -51,6 +67,14 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
 
 def render_preview(name: str, settings: Settings) -> None:
     """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
+    if _is_panel(name):
+        from phoenix.preprocessors.dashboard_panel import run_panel
+        panel_id = name.removeprefix("panel_")
+        run_panel(panel_id, settings)
+        app = AppConfig(name=name)
+        _render_dispatch(app, settings)
+        return
+
     kind = app_type(name)
     if kind == "unknown":
         raise ValueError(f"No app file found for '{name}' in {APPS_DIR}")
@@ -78,11 +102,28 @@ def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
         logger.debug("[%s] Skipping disabled app", name)
         return
 
-    kind = app_type(name)
-    if kind == "unknown":
-        raise ValueError(f"No app file found for '{name}' in {APPS_DIR}")
+    if not _is_panel(name):
+        kind = app_type(name)
+        if kind == "unknown":
+            raise ValueError(f"No app file found for '{name}' in {APPS_DIR}")
 
-    # Run preprocessor if one exists
+    # Run preprocessor if one exists (panels use their own preprocessor)
+    if _is_panel(name):
+        from phoenix.preprocessors.dashboard_panel import run_panel
+        panel_id = name.removeprefix("panel_")
+        logger.info("[%s] Running panel preprocessor", name)
+        try:
+            result = run_panel(panel_id, settings)
+        except Exception:
+            logger.exception("[%s] Panel preprocessor failed", name)
+            result = PreprocessorResult(None, AppStatus.ERROR)
+        _handle_preprocessor_result(name, result, app_db)
+        if result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
+            return
+        _render_dispatch(app, settings)
+        app_db.upsert(name, last_updated=datetime.now())
+        return
+
     preprocessor = get_preprocessor(name)
     if preprocessor is not None:
         logger.info("[%s] Running preprocessor", name)
@@ -169,13 +210,13 @@ def _handle_preprocessor_result(name: str, result: PreprocessorResult, app_db: A
         app_db.upsert(name, priority=0)
 
 
-def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False) -> None:
+def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False, star_override: Path | None = None) -> None:
     """Shell out to pixlet to render a Starlark app to .webp.
 
     Copies the .star file to a temp dir first as a workaround for a pixlet bug:
     https://discuss.tidbyt.com/t/strange-behavior-with-pixlet/6525
     """
-    app_star = star_path(app.name)
+    app_star = star_override or star_path(app.name)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_star = shutil.copy(app_star, tmp)

@@ -1,0 +1,18 @@
+services:
+  phoenix:
+    build: .
+    ports:
+      - "7002:7002"
+    devices:
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    volumes:
+      - phoenix-data:/app/phoenix/data
+      - phoenix-outputs:/app/phoenix/outputs
+    environment:
+      - PHOENIX_PLATFORM=serial
+      - PHOENIX_SERIAL_PORT=/dev/ttyACM0
+    restart: unless-stopped
+
+volumes:
+  phoenix-data:
+  phoenix-outputs:
