@@ -534,6 +534,7 @@
                 try {
                     const result = await api('/apps/' + app.name + '/' + act, 'POST');
                     if (result.error) throw new Error(result.error);
+                    if (result.info) { onAction(result.info); return; }
                     if (act === 'render') setRenderKey(Date.now());
                     onAction();
                 } catch(e) {
@@ -640,6 +641,8 @@
                     const result = await api('/apps/' + name + '/preview', 'POST');
                     if (result.error) {
                         onError(result.error);
+                    } else if (result.info) {
+                        onError(result.info);
                     } else {
                         setRenderKey(Date.now());
                     }
