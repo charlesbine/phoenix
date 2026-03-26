@@ -117,13 +117,28 @@ class SerialDisplayBackend:
         except Exception:
             return 255
 
+    def _has_pending_notification(self) -> bool:
+        """Check if a notification is waiting without consuming it."""
+        from phoenix.mqtt import _connect
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM notifications WHERE displayed = 0 LIMIT 1"
+            ).fetchone()
+            return row is not None
+
     def _display_still(self, image: Image.Image, duration: int) -> None:
         rgb = self._image_to_rgb_bytes(image)
         brightness = self._get_brightness()
         if not self._send_frame(rgb, brightness):
             time.sleep(RECONNECT_DELAY)
             return
-        time.sleep(duration)
+        # Sleep in short intervals so we can interrupt for notifications
+        elapsed = 0.0
+        while elapsed < duration:
+            if self._has_pending_notification():
+                return  # break out — display manager will handle the notification
+            time.sleep(min(0.5, duration - elapsed))
+            elapsed += 0.5
 
     def _display_animation(self, image: Image.Image, duration: int) -> None:
         # Pre-extract all frames and their durations
@@ -142,6 +157,8 @@ class SerialDisplayBackend:
             for rgb, delay in zip(frames, durations):
                 if time.perf_counter() - start >= duration:
                     return
+                if self._has_pending_notification():
+                    return  # break out for notification
                 if not self._send_frame(rgb, brightness):
                     time.sleep(RECONNECT_DELAY)
                     return

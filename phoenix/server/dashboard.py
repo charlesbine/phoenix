@@ -11,14 +11,21 @@ from fastapi.staticfiles import StaticFiles
 
 from phoenix.cache import cache_get
 from phoenix.db import PanelDatabase
+from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
 from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, app_type, ensure_dirs
 from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
+from phoenix.settings import get_settings
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Phoenix Dashboard")
     ensure_dirs()
+
+    # Start MQTT client
+    settings = get_settings()
+    mqtt_client = get_mqtt_client(settings)
+    mqtt_client.start()
 
     # Serve rendered app images
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -296,6 +303,42 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         return {"ok": True}
+
+    # -- Notifications & MQTT --
+
+    @app.post("/api/notify")
+    async def send_notification(request: Request):
+        """Send a notification to the display."""
+        body = await request.json()
+        text = body.get("text", "")
+        if not text:
+            return {"error": "text is required"}
+        push_notification(
+            text=text,
+            color=body.get("color", "#FFFFFF"),
+            duration=body.get("duration", 10),
+            layout=body.get("layout", "marquee"),
+        )
+        return {"ok": True}
+
+    @app.get("/api/notifications")
+    async def get_notifications():
+        return list_notifications()
+
+    @app.get("/api/mqtt/status")
+    async def mqtt_status():
+        return {
+            "connected": mqtt_client.connected,
+            "broker": settings.mqtt_broker or None,
+            "notify_topic": settings.mqtt_notify_topic,
+        }
+
+    @app.get("/api/mqtt/messages/{topic:path}")
+    async def get_mqtt_message(topic: str):
+        msg = get_message(topic)
+        if msg is None:
+            return {"error": "no message for topic"}
+        return msg
 
     @app.get("/api/now-playing")
     async def now_playing():

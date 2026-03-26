@@ -17,6 +17,7 @@ dependencies = [
     "humanize",
     "pyyaml",
     "pyserial",
+    "paho-mqtt>=2.0",
 ]
 
 [project.optional-dependencies]

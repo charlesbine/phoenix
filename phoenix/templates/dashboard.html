@@ -671,6 +671,9 @@
             const [authType, setAuthType] = useState('none');
             const [authToken, setAuthToken] = useState('');
             const [authHeader, setAuthHeader] = useState('X-API-Key');
+            const [mqttTopic, setMqttTopic] = useState('');
+            const [haEntityId, setHaEntityId] = useState('');
+            const [haTtl, setHaTtl] = useState(60);
             const [value, setValue] = useState('');
             const [unit, setUnit] = useState('');
             const [color, setColor] = useState('#FFFFFF');
@@ -692,16 +695,27 @@
                 previewTimer.current = setTimeout(async () => {
                     const config = { color };
                     const data_source = { type: sourceType };
+                    const addMappings = (ds) => {
+                        ds.mappings = {};
+                        if (layout === 'big_number') { ds.mappings.value = valuePath; if (valueTransform) ds.mappings.transform = valueTransform; config.unit = unit; }
+                        else if (layout === 'key_value') { ds.mappings.items = itemMappings.filter(m => m.key); }
+                        else if (layout === 'marquee') { ds.mappings.text = textPath; }
+                        else if (layout === 'multi_stat') { ds.mappings.stats = statMappings.filter(m => m.label); }
+                    };
                     if (sourceType === 'http') {
-                        data_source.url = url; data_source.ttl = ttl; data_source.mappings = {};
+                        data_source.url = url; data_source.ttl = ttl;
                         if (authType !== 'none') {
                             data_source.auth = { type: authType, token: authToken };
                             if (authType === 'api_key') data_source.auth.header = authHeader;
                         }
-                        if (layout === 'big_number') { data_source.mappings.value = valuePath; if (valueTransform) data_source.mappings.transform = valueTransform; config.unit = unit; }
-                        else if (layout === 'key_value') { data_source.mappings.items = itemMappings.filter(m => m.key); }
-                        else if (layout === 'marquee') { data_source.mappings.text = textPath; }
-                        else if (layout === 'multi_stat') { data_source.mappings.stats = statMappings.filter(m => m.label); }
+                        addMappings(data_source);
+                    } else if (sourceType === 'mqtt') {
+                        data_source.topic = mqttTopic;
+                        addMappings(data_source);
+                    } else if (sourceType === 'ha') {
+                        data_source.entity_id = haEntityId;
+                        data_source.ttl = haTtl;
+                        addMappings(data_source);
                     } else {
                         if (layout === 'big_number') { config.value = value || '42'; config.unit = unit; }
                         else if (layout === 'key_value') { config.items = items.filter(i => i.key).length ? items.filter(i => i.key) : [{key:'Label', value:'Value'}]; }
@@ -723,7 +737,7 @@
 
             // Auto-preview on any change (debounced 500ms in refreshPreview)
             const depsKey = [open, layout, sourceType, title, value, unit, color, text, url, ttl, valuePath, textPath,
-                authType, authToken, authHeader,
+                authType, authToken, authHeader, mqttTopic, haEntityId, haTtl,
                 JSON.stringify(items), JSON.stringify(stats), JSON.stringify(itemMappings), JSON.stringify(statMappings)].join('|');
             useEffect(() => { if (open) refreshPreview(); }, [depsKey]);
 
@@ -731,6 +745,7 @@
                 setId(''); setTitle(''); setValue(''); setUnit(''); setText('');
                 setColor('#FFFFFF'); setUrl(''); setTtl(300); setValuePath(''); setTextPath('');
                 setAuthType('none'); setAuthToken(''); setAuthHeader('X-API-Key');
+                setMqttTopic(''); setHaEntityId(''); setHaTtl(60);
                 setLayout('big_number'); setSourceType('static');
                 setItems([{ key: '', value: '' }]); setStats([{ label: '', value: '', color: '#FFFFFF' }]);
                 setItemMappings([{ key: '', value_path: '', unit: '' }]);
@@ -745,18 +760,27 @@
                 try {
                     const config = { color };
                     const data_source = { type: sourceType };
+                    const addCreateMappings = (ds) => {
+                        ds.mappings = {};
+                        if (layout === 'big_number') { ds.mappings.value = valuePath; if (valueTransform) ds.mappings.transform = valueTransform; config.unit = unit; }
+                        else if (layout === 'key_value') { ds.mappings.items = itemMappings.filter(m => m.key); }
+                        else if (layout === 'marquee') { ds.mappings.text = textPath; }
+                        else if (layout === 'multi_stat') { ds.mappings.stats = statMappings.filter(m => m.label); }
+                    };
                     if (sourceType === 'http') {
-                        data_source.url = url;
-                        data_source.ttl = ttl;
-                        data_source.mappings = {};
+                        data_source.url = url; data_source.ttl = ttl;
                         if (authType !== 'none') {
                             data_source.auth = { type: authType, token: authToken };
                             if (authType === 'api_key') data_source.auth.header = authHeader;
                         }
-                        if (layout === 'big_number') { data_source.mappings.value = valuePath; if (valueTransform) data_source.mappings.transform = valueTransform; config.unit = unit; }
-                        else if (layout === 'key_value') { data_source.mappings.items = itemMappings.filter(m => m.key); }
-                        else if (layout === 'marquee') { data_source.mappings.text = textPath; }
-                        else if (layout === 'multi_stat') { data_source.mappings.stats = statMappings.filter(m => m.label); }
+                        addCreateMappings(data_source);
+                    } else if (sourceType === 'mqtt') {
+                        data_source.topic = mqttTopic;
+                        addCreateMappings(data_source);
+                    } else if (sourceType === 'ha') {
+                        data_source.entity_id = haEntityId;
+                        data_source.ttl = haTtl;
+                        addCreateMappings(data_source);
                     } else {
                         if (layout === 'big_number') { config.value = value; config.unit = unit; }
                         else if (layout === 'key_value') { config.items = items.filter(i => i.key); }
@@ -814,6 +838,8 @@
                                 <select value=${sourceType} onChange=${e => setSourceType(e.target.value)}>
                                     <option value="static">Static Values</option>
                                     <option value="http">HTTP JSON</option>
+                                    <option value="mqtt">MQTT Topic</option>
+                                    <option value="ha">Home Assistant</option>
                                 </select>
                             <//>
                             <${F} label="Color">
@@ -862,6 +888,29 @@
                                            onInput=${e => setAuthToken(e.target.value)} />
                                 <//>
                             `}
+                        `}
+
+                        ${sourceType === 'mqtt' && html`
+                            <div class="divider" />
+                            <${F} label="MQTT Topic">
+                                <input value=${mqttTopic} placeholder="home/living/temperature"
+                                       onInput=${e => setMqttTopic(e.target.value)} />
+                            <//>
+                        `}
+
+                        ${sourceType === 'ha' && html`
+                            <div class="divider" />
+                            <${F} label="Entity ID">
+                                <input value=${haEntityId} placeholder="sensor.living_room_temperature"
+                                       onInput=${e => setHaEntityId(e.target.value)} />
+                            <//>
+                            <${F} label="Cache TTL (seconds)">
+                                <input type="number" value=${haTtl} min="5"
+                                       onChange=${e => setHaTtl(parseInt(e.target.value) || 60)} />
+                            <//>
+                            <div style="font-size:0.7rem; color:#484f58; margin-bottom:0.5rem;">
+                                Value paths: state, friendly_name, unit_of_measurement, or any attribute
+                            </div>
                         `}
 
                         <div class="divider" />
