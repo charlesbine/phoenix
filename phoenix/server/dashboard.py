@@ -145,6 +145,14 @@ def create_app() -> FastAPI:
     async def add_app(name: str):
         return _serialize_app(get_svc().create_app(name))
 
+    @app.put("/api/apps/{name}/priority")
+    async def update_priority(name: str, request: Request):
+        body = await request.json()
+        priority = body.get("priority")
+        if priority is not None:
+            return _serialize_app(get_svc().app_db.upsert(name, priority=int(priority)))
+        return {"error": "missing priority"}
+
     @app.put("/api/apps/{name}/refresh-interval")
     async def update_refresh_interval(name: str, request: Request):
         body = await request.json()

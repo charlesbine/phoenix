@@ -57,15 +57,45 @@ class DisplayManager:
 
             if config.layout_mode == "cycle":
                 active.sort(key=lambda a: a.sort_order)
-                self._display_cycle(active, config.cycle_interval)
+                weighted = self._weighted_list(active)
+                self._display_cycle(weighted, config.cycle_interval)
             elif config.layout_mode == "random":
-                shuffled = active.copy()
-                random.shuffle(shuffled)
-                self._display_cycle(shuffled, config.cycle_interval)
+                weighted = self._weighted_list(active)
+                random.shuffle(weighted)
+                self._display_cycle(weighted, config.cycle_interval)
             elif config.layout_mode == "single":
                 self._display_app(active[0], config.cycle_interval)
             else:
                 logger.error("Unknown layout mode: %s", config.layout_mode)
+
+    @staticmethod
+    def _weighted_list(apps: list[AppConfig]) -> list[AppConfig]:
+        """Expand the app list based on priority. Priority 0 = 1 slot, 1 = 2 slots, etc.
+
+        Interleaves high-priority apps evenly rather than bunching them together.
+        E.g., [A(p=2), B(p=0), C(p=0)] → [A, B, A, C, A]
+        """
+        if not apps:
+            return []
+
+        max_priority = max(a.priority for a in apps)
+        if max_priority <= 0:
+            return list(apps)
+
+        # Build slot counts: priority 0 = 1, priority 1 = 2, etc.
+        slots: list[tuple[AppConfig, int]] = [(a, max(1, a.priority + 1)) for a in apps]
+
+        # Interleave: round-robin through apps, each gets shown once per round,
+        # high-priority apps get extra rounds
+        result: list[AppConfig] = []
+        remaining = {i: count for i, (_, count) in enumerate(slots)}
+        while any(v > 0 for v in remaining.values()):
+            for i, (app, _) in enumerate(slots):
+                if remaining[i] > 0:
+                    result.append(app)
+                    remaining[i] -= 1
+
+        return result
 
     def _display_cycle(self, apps: list[AppConfig], duration: int) -> None:
         for app in apps:

@@ -559,6 +559,11 @@
                 onAction();
             };
 
+            const savePriority = async (p) => {
+                await api('/apps/' + app.name + '/priority', 'PUT', { priority: p });
+                onAction();
+            };
+
             const dragProps = draggable ? {
                 draggable: true,
                 onDragStart: e => { e.dataTransfer.effectAllowed = 'move'; onDragStart(app.name); },
@@ -602,6 +607,16 @@
                                 <input type="number" min="10" max="86400" value=${app.refresh_interval}
                                        style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
                                        onChange=${e => saveRefreshInterval(parseInt(e.target.value) || 60)} />
+                            </div>
+                            <div class="config-row">
+                                <label style="flex:0.6; font-size: 0.75rem; color: #8b949e">Priority</label>
+                                <select style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
+                                        value=${app.priority} onChange=${e => savePriority(parseInt(e.target.value))}>
+                                    <option value="0">Normal</option>
+                                    <option value="1">High (2x)</option>
+                                    <option value="2">Higher (3x)</option>
+                                    <option value="3">Highest (4x)</option>
+                                </select>
                             </div>
                         </div>
                     `}
