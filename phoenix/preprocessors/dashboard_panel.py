@@ -240,6 +240,49 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
             stats.append(stat)
         base["stats"] = stats
 
+    elif layout == "sparkline":
+        # Extract array of points
+        points_path = mappings.get("points", "")
+        points_raw = _extract_path(fetched, points_path) if points_path else config.get("points", [])
+
+        # If points is a list of objects, extract value from each
+        value_key = mappings.get("point_value", "")
+        if points_raw and isinstance(points_raw, list) and value_key:
+            points = []
+            for p in points_raw:
+                v = _extract_path(p, value_key) if isinstance(p, dict) else p
+                transform = mappings.get("point_transform", "")
+                if transform and v is not None:
+                    v = _apply_transform(v, transform)
+                if v is not None:
+                    try:
+                        points.append(float(v))
+                    except (ValueError, TypeError):
+                        pass
+        elif points_raw and isinstance(points_raw, list):
+            points = []
+            for v in points_raw:
+                try:
+                    points.append(float(v))
+                except (ValueError, TypeError):
+                    pass
+        else:
+            points = []
+
+        base["points"] = points
+        base["fill"] = config.get("fill", True)
+
+        # Current value (last point or explicit)
+        current_path = mappings.get("value", "")
+        current = _extract_path(fetched, current_path) if current_path else None
+        if current is None and points:
+            current = points[-1]
+        transform = mappings.get("transform", "")
+        if transform and current is not None:
+            current = _apply_transform(current, transform)
+        if current is not None:
+            base["value"] = str(current)
+
     return base
 
 

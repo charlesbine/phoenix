@@ -5,7 +5,7 @@ import logging
 import random
 import time
 
-from phoenix.db import AppDatabase, ConfigDatabase
+from phoenix.db import AppDatabase, ConfigDatabase, PlaylistDatabase
 from phoenix.display.backend import DisplayBackend
 from phoenix.models import AppConfig
 from phoenix.mqtt import pop_notification
@@ -45,6 +45,20 @@ class DisplayManager:
 
             apps = self.app_db.list_apps()
             active = [a for a in apps if a.enabled and a.active]
+
+            # Apply schedule: if a playlist is active, filter to its apps
+            try:
+                playlist_db = PlaylistDatabase()
+                active_playlist = playlist_db.get_active_playlist()
+                if active_playlist:
+                    allowed = set(active_playlist["app_names"])
+                    scheduled = [a for a in active if a.name in allowed]
+                    if scheduled:
+                        active = scheduled
+                        logger.debug("Schedule active: %s (%s)", active_playlist["name"],
+                                     [a.name for a in active])
+            except Exception:
+                pass  # Schedule is optional, don't break display if DB issue
 
             if not active:
                 logger.warning("No active apps, waiting %ds...", NO_APPS_WAIT)

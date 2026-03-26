@@ -1,0 +1,16 @@
+[Unit]
+Description=Phoenix Dashboard (FastAPI + MQTT + cache proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=charles
+WorkingDirectory=/home/charles/pheonix
+ExecStart=/home/charles/.local/bin/uv run phoenix dashboard
+Restart=always
+RestartSec=5
+Environment=PHOENIX_PLATFORM=serial
+
+[Install]
+WantedBy=multi-user.target

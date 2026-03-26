@@ -32,6 +32,21 @@ CREATE TABLE IF NOT EXISTS apps (
     sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS playlists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    app_names TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS schedule_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    days TEXT NOT NULL DEFAULT '["mon","tue","wed","thu","fri","sat","sun"]',
+    FOREIGN KEY (playlist_id) REFERENCES playlists(id)
+);
+
 CREATE TABLE IF NOT EXISTS dashboard_panels (
     id TEXT PRIMARY KEY,
     layout TEXT NOT NULL DEFAULT 'big_number',
@@ -275,3 +290,132 @@ class PanelDatabase:
             "data_source": json.loads(row["data_source"]),
             "created_at": row["created_at"],
         }
+
+
+class PlaylistDatabase:
+    """CRUD for playlists and schedule rules."""
+
+    def __init__(self, path: str | Path | None = None):
+        self._path = str(path or DB_PATH)
+        with _connect(self._path):
+            pass
+
+    # -- Playlists --
+
+    def list_playlists(self) -> list[dict]:
+        with _connect(self._path) as conn:
+            rows = conn.execute("SELECT * FROM playlists ORDER BY name").fetchall()
+            return [{"id": r["id"], "name": r["name"], "app_names": json.loads(r["app_names"])} for r in rows]
+
+    def get_playlist(self, playlist_id: str) -> dict | None:
+        with _connect(self._path) as conn:
+            row = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+            if row is None:
+                return None
+            return {"id": row["id"], "name": row["name"], "app_names": json.loads(row["app_names"])}
+
+    def create_playlist(self, playlist_id: str, name: str, app_names: list[str]) -> dict:
+        with _connect(self._path) as conn:
+            conn.execute(
+                "INSERT INTO playlists (id, name, app_names) VALUES (?, ?, ?)",
+                (playlist_id, name, json.dumps(app_names)),
+            )
+            conn.commit()
+        return self.get_playlist(playlist_id)  # type: ignore
+
+    def update_playlist(self, playlist_id: str, **kwargs: object) -> dict:
+        playlist = self.get_playlist(playlist_id)
+        if playlist is None:
+            raise ValueError(f"Playlist '{playlist_id}' not found")
+        if "name" in kwargs:
+            playlist["name"] = kwargs["name"]
+        if "app_names" in kwargs:
+            playlist["app_names"] = kwargs["app_names"]
+        with _connect(self._path) as conn:
+            conn.execute(
+                "UPDATE playlists SET name = ?, app_names = ? WHERE id = ?",
+                (playlist["name"], json.dumps(playlist["app_names"]), playlist_id),
+            )
+            conn.commit()
+        return self.get_playlist(playlist_id)  # type: ignore
+
+    def delete_playlist(self, playlist_id: str) -> None:
+        with _connect(self._path) as conn:
+            conn.execute("DELETE FROM schedule_rules WHERE playlist_id = ?", (playlist_id,))
+            conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+            conn.commit()
+
+    # -- Schedule rules --
+
+    def list_rules(self) -> list[dict]:
+        with _connect(self._path) as conn:
+            rows = conn.execute(
+                "SELECT r.*, p.name as playlist_name FROM schedule_rules r "
+                "JOIN playlists p ON r.playlist_id = p.id ORDER BY r.start_time"
+            ).fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "playlist_id": r["playlist_id"],
+                    "playlist_name": r["playlist_name"],
+                    "start_time": r["start_time"],
+                    "end_time": r["end_time"],
+                    "days": json.loads(r["days"]),
+                }
+                for r in rows
+            ]
+
+    def create_rule(self, playlist_id: str, start_time: str, end_time: str, days: list[str]) -> dict:
+        with _connect(self._path) as conn:
+            conn.execute(
+                "INSERT INTO schedule_rules (playlist_id, start_time, end_time, days) VALUES (?, ?, ?, ?)",
+                (playlist_id, start_time, end_time, json.dumps(days)),
+            )
+            conn.commit()
+        return self.list_rules()[-1]
+
+    def delete_rule(self, rule_id: int) -> None:
+        with _connect(self._path) as conn:
+            conn.execute("DELETE FROM schedule_rules WHERE id = ?", (rule_id,))
+            conn.commit()
+
+    def get_active_playlist(self) -> dict | None:
+        """Get the playlist that should be active right now based on schedule rules."""
+        from datetime import datetime
+        now = datetime.now()
+        current_time = now.strftime("%H:%M")
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+
+        with _connect(self._path) as conn:
+            rows = conn.execute(
+                "SELECT r.*, p.name, p.app_names FROM schedule_rules r "
+                "JOIN playlists p ON r.playlist_id = p.id"
+            ).fetchall()
+
+        for r in rows:
+            days = json.loads(r["days"])
+            if current_day not in days:
+                continue
+
+            start = r["start_time"]
+            end = r["end_time"]
+
+            # Handle overnight ranges (e.g., 22:00 - 07:00)
+            if start <= end:
+                if start <= current_time < end:
+                    return {
+                        "id": r["playlist_id"],
+                        "name": r["name"],
+                        "app_names": json.loads(r["app_names"]),
+                    }
+            else:
+                # Wraps midnight
+                if current_time >= start or current_time < end:
+                    return {
+                        "id": r["playlist_id"],
+                        "name": r["name"],
+                        "app_names": json.loads(r["app_names"]),
+                    }
+
+        return None

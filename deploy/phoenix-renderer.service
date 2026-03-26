@@ -1,0 +1,16 @@
+[Unit]
+Description=Phoenix Renderer (pixlet rendering loop)
+After=phoenix-dashboard.service
+Requires=phoenix-dashboard.service
+
+[Service]
+Type=simple
+User=charles
+WorkingDirectory=/home/charles/pheonix
+ExecStart=/home/charles/.local/bin/uv run phoenix render
+Restart=always
+RestartSec=5
+Environment=PHOENIX_PLATFORM=serial
+
+[Install]
+WantedBy=multi-user.target

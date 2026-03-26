@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from phoenix.cache import cache_get
-from phoenix.db import PanelDatabase
+from phoenix.db import PanelDatabase, PlaylistDatabase
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
 from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, app_type, ensure_dirs
 from phoenix.schema_parser import parse_schema
@@ -319,6 +319,56 @@ def create_app() -> FastAPI:
             svc.app_db.delete(f"panel_{panel_id}")
         except Exception:
             pass
+        return {"ok": True}
+
+    # -- Playlists & Schedule --
+
+    def get_playlist_db() -> PlaylistDatabase:
+        return PlaylistDatabase()
+
+    @app.get("/api/playlists")
+    async def list_playlists():
+        return get_playlist_db().list_playlists()
+
+    @app.post("/api/playlists")
+    async def create_playlist(request: Request):
+        body = await request.json()
+        pid = body.get("id", "").strip().lower().replace(" ", "_")
+        if not pid:
+            return {"error": "id is required"}
+        return get_playlist_db().create_playlist(pid, body.get("name", pid), body.get("app_names", []))
+
+    @app.put("/api/playlists/{playlist_id}")
+    async def update_playlist(playlist_id: str, request: Request):
+        body = await request.json()
+        return get_playlist_db().update_playlist(playlist_id, **body)
+
+    @app.delete("/api/playlists/{playlist_id}")
+    async def delete_playlist(playlist_id: str):
+        get_playlist_db().delete_playlist(playlist_id)
+        return {"ok": True}
+
+    @app.get("/api/schedule")
+    async def list_schedule():
+        pdb = get_playlist_db()
+        return {
+            "rules": pdb.list_rules(),
+            "active_playlist": pdb.get_active_playlist(),
+        }
+
+    @app.post("/api/schedule")
+    async def create_schedule_rule(request: Request):
+        body = await request.json()
+        return get_playlist_db().create_rule(
+            playlist_id=body["playlist_id"],
+            start_time=body["start_time"],
+            end_time=body["end_time"],
+            days=body.get("days", ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        )
+
+    @app.delete("/api/schedule/{rule_id}")
+    async def delete_schedule_rule(rule_id: int):
+        get_playlist_db().delete_rule(rule_id)
         return {"ok": True}
 
     # -- Notifications & MQTT --

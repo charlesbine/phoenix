@@ -693,6 +693,7 @@
             { value: 'key_value', label: 'Key/Value List' },
             { value: 'marquee', label: 'Scrolling Text' },
             { value: 'multi_stat', label: 'Multi Stat' },
+            { value: 'sparkline', label: 'Sparkline Chart' },
         ];
 
         function PanelBuilder({ onCreated, onError }) {
@@ -718,6 +719,9 @@
             const [stats, setStats] = useState([{ label: '', value: '', color: '#FFFFFF' }]);
             const [valuePath, setValuePath] = useState('');
             const [valueTransform, setValueTransform] = useState('');
+            const [pointsPath, setPointsPath] = useState('');
+            const [pointValueKey, setPointValueKey] = useState('');
+            const [pointTransform, setPointTransform] = useState('');
             const [textPath, setTextPath] = useState('');
             const [itemMappings, setItemMappings] = useState([{ key: '', value_path: '', unit: '' }]);
             const [statMappings, setStatMappings] = useState([{ label: '', value_path: '', unit: '', color: '#FFFFFF' }]);
@@ -737,6 +741,13 @@
                         else if (layout === 'key_value') { ds.mappings.items = itemMappings.filter(m => m.key); }
                         else if (layout === 'marquee') { ds.mappings.text = textPath; }
                         else if (layout === 'multi_stat') { ds.mappings.stats = statMappings.filter(m => m.label); }
+                        else if (layout === 'sparkline') {
+                            ds.mappings.points = pointsPath;
+                            if (pointValueKey) ds.mappings.point_value = pointValueKey;
+                            if (pointTransform) ds.mappings.point_transform = pointTransform;
+                            if (valuePath) ds.mappings.value = valuePath;
+                            if (valueTransform) ds.mappings.transform = valueTransform;
+                        }
                     };
                     if (sourceType === 'http') {
                         data_source.url = url; data_source.ttl = ttl;
@@ -782,6 +793,7 @@
                 setColor('#FFFFFF'); setUrl(''); setTtl(300); setValuePath(''); setTextPath('');
                 setAuthType('none'); setAuthToken(''); setAuthHeader('X-API-Key');
                 setMqttTopic(''); setHaEntityId(''); setHaTtl(60);
+                setPointsPath(''); setPointValueKey(''); setPointTransform('');
                 setLayout('big_number'); setSourceType('static');
                 setItems([{ key: '', value: '' }]); setStats([{ label: '', value: '', color: '#FFFFFF' }]);
                 setItemMappings([{ key: '', value_path: '', unit: '' }]);
@@ -802,6 +814,13 @@
                         else if (layout === 'key_value') { ds.mappings.items = itemMappings.filter(m => m.key); }
                         else if (layout === 'marquee') { ds.mappings.text = textPath; }
                         else if (layout === 'multi_stat') { ds.mappings.stats = statMappings.filter(m => m.label); }
+                        else if (layout === 'sparkline') {
+                            ds.mappings.points = pointsPath;
+                            if (pointValueKey) ds.mappings.point_value = pointValueKey;
+                            if (pointTransform) ds.mappings.point_transform = pointTransform;
+                            if (valuePath) ds.mappings.value = valuePath;
+                            if (valueTransform) ds.mappings.transform = valueTransform;
+                        }
                     };
                     if (sourceType === 'http') {
                         data_source.url = url; data_source.ttl = ttl;
@@ -1040,6 +1059,24 @@
                             }>+ Add Stat</button>
                         `}
 
+                        ${layout === 'sparkline' && sourceType !== 'static' && html`
+                            <${F} label="Points Array JSONPath">
+                                <input value=${pointsPath} placeholder="daily_mrr" onInput=${e => setPointsPath(e.target.value)} />
+                            <//>
+                            <${F} label="Value Key (within each point object)">
+                                <input value=${pointValueKey} placeholder="mrr_cents (leave empty if array of numbers)" onInput=${e => setPointValueKey(e.target.value)} />
+                            <//>
+                            <${F} label="Point Transform">
+                                <input value=${pointTransform} placeholder="/ 100" onInput=${e => setPointTransform(e.target.value)} />
+                            <//>
+                            <${F} label="Current Value JSONPath (optional)">
+                                <input value=${valuePath} placeholder="mrr_cents" onInput=${e => setValuePath(e.target.value)} />
+                            <//>
+                            <${F} label="Current Value Transform">
+                                <input value=${valueTransform} placeholder="/ 100 | round 0 | format $%d" onInput=${e => setValueTransform(e.target.value)} />
+                            <//>
+                        `}
+
                         <div class="actions">
                             <button class="btn btn-config" onClick=${close}>Cancel</button>
                             <button class="btn btn-enable" disabled=${creating} onClick=${create}>
@@ -1047,6 +1084,122 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            `;
+        }
+
+        function ScheduleManager({ apps, playlists, schedule, onUpdate, onError }) {
+            const [showCreate, setShowCreate] = useState(false);
+            const [newName, setNewName] = useState('');
+            const [selectedApps, setSelectedApps] = useState([]);
+            const [rulePlaylist, setRulePlaylist] = useState('');
+            const [ruleStart, setRuleStart] = useState('09:00');
+            const [ruleEnd, setRuleEnd] = useState('17:00');
+            const [ruleDays, setRuleDays] = useState(['mon','tue','wed','thu','fri','sat','sun']);
+            const allApps = apps.filter(a => a.enabled);
+            const allDays = ['mon','tue','wed','thu','fri','sat','sun'];
+
+            const createPlaylist = async () => {
+                if (!newName.trim()) return;
+                const id = newName.trim().toLowerCase().replace(/\s+/g, '_');
+                await api('/playlists', 'POST', { id, name: newName.trim(), app_names: selectedApps });
+                setNewName(''); setSelectedApps([]); setShowCreate(false);
+                onUpdate();
+            };
+            const deletePlaylist = async (id) => {
+                await api('/playlists/' + id, 'DELETE');
+                onUpdate();
+            };
+            const addRule = async () => {
+                if (!rulePlaylist) return;
+                await api('/schedule', 'POST', {
+                    playlist_id: rulePlaylist, start_time: ruleStart, end_time: ruleEnd, days: ruleDays,
+                });
+                onUpdate();
+            };
+            const deleteRule = async (id) => {
+                await api('/schedule/' + id, 'DELETE');
+                onUpdate();
+            };
+            const toggleDay = (d) => {
+                setRuleDays(ruleDays.includes(d) ? ruleDays.filter(x => x !== d) : [...ruleDays, d]);
+            };
+
+            const inputStyle = "background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.3rem 0.5rem; border-radius:4px; font-size:0.8rem;";
+
+            return html`
+                <div style="background:#161b22; border:1px solid #30363d; border-radius:8px; padding:1rem; margin-bottom:0.75rem;">
+                    ${schedule.active_playlist && html`
+                        <div style="margin-bottom:0.75rem; padding:0.5rem; background:#23863622; border:1px solid #238636; border-radius:6px; font-size:0.8rem;">
+                            Active: <strong>${schedule.active_playlist.name}</strong>
+                        </div>
+                    `}
+
+                    <div style="font-size:0.8rem; color:#8b949e; margin-bottom:0.5rem;">Playlists</div>
+                    ${playlists.map(p => html`
+                        <div key=${p.id} style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem; font-size:0.8rem;">
+                            <strong style="color:#c9d1d9">${p.name}</strong>
+                            <span style="color:#484f58">${p.app_names.length} apps</span>
+                            <button class="btn btn-delete" style="margin-left:auto; font-size:0.65rem; padding:0.15rem 0.4rem;"
+                                    onClick=${() => deletePlaylist(p.id)}>x</button>
+                        </div>
+                    `)}
+
+                    ${showCreate ? html`
+                        <div style="margin-top:0.5rem; padding:0.5rem; border:1px dashed #30363d; border-radius:6px;">
+                            <input style=${inputStyle + " width:100%; margin-bottom:0.3rem;"} value=${newName}
+                                   placeholder="Playlist name" onInput=${e => setNewName(e.target.value)} />
+                            <div style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-bottom:0.4rem;">
+                                ${allApps.map(a => html`
+                                    <label key=${a.name} style="font-size:0.7rem; color:${selectedApps.includes(a.name) ? '#c9d1d9' : '#484f58'}; cursor:pointer;">
+                                        <input type="checkbox" checked=${selectedApps.includes(a.name)}
+                                               onChange=${() => setSelectedApps(selectedApps.includes(a.name)
+                                                   ? selectedApps.filter(n => n !== a.name) : [...selectedApps, a.name])} />
+                                        ${' ' + a.name.replace(/_/g, ' ')}
+                                    </label>
+                                `)}
+                            </div>
+                            <div style="display:flex; gap:0.3rem;">
+                                <button class="btn btn-enable" onClick=${createPlaylist}>Create</button>
+                                <button class="btn btn-config" onClick=${() => setShowCreate(false)}>Cancel</button>
+                            </div>
+                        </div>
+                    ` : html`
+                        <button class="btn btn-config" style="margin-top:0.3rem;" onClick=${() => setShowCreate(true)}>+ Playlist</button>
+                    `}
+
+                    ${playlists.length > 0 && html`
+                        <div style="font-size:0.8rem; color:#8b949e; margin-top:0.75rem; margin-bottom:0.5rem;">Schedule Rules</div>
+                        ${schedule.rules.map(r => html`
+                            <div key=${r.id} style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem; font-size:0.8rem;">
+                                <strong style="color:#c9d1d9">${r.playlist_name}</strong>
+                                <span style="color:#8b949e">${r.start_time}–${r.end_time}</span>
+                                <span style="color:#484f58; font-size:0.7rem">${r.days.join(' ')}</span>
+                                <button class="btn btn-delete" style="margin-left:auto; font-size:0.65rem; padding:0.15rem 0.4rem;"
+                                        onClick=${() => deleteRule(r.id)}>x</button>
+                            </div>
+                        `)}
+                        <div style="display:flex; gap:0.3rem; align-items:center; margin-top:0.4rem; flex-wrap:wrap;">
+                            <select style=${inputStyle} value=${rulePlaylist}
+                                    onChange=${e => setRulePlaylist(e.target.value)}>
+                                <option value="">Playlist...</option>
+                                ${playlists.map(p => html`<option value=${p.id}>${p.name}</option>`)}
+                            </select>
+                            <input type="time" style=${inputStyle} value=${ruleStart}
+                                   onChange=${e => setRuleStart(e.target.value)} />
+                            <span style="color:#484f58">to</span>
+                            <input type="time" style=${inputStyle} value=${ruleEnd}
+                                   onChange=${e => setRuleEnd(e.target.value)} />
+                            <button class="btn btn-enable" onClick=${addRule}>+ Rule</button>
+                        </div>
+                        <div style="display:flex; gap:0.2rem; margin-top:0.3rem;">
+                            ${allDays.map(d => html`
+                                <button key=${d} class=${'btn ' + (ruleDays.includes(d) ? 'btn-cycle' : 'btn-config')}
+                                        style="font-size:0.65rem; padding:0.15rem 0.35rem; text-transform:uppercase;"
+                                        onClick=${() => toggleDay(d)}>${d}</button>
+                            `)}
+                        </div>
+                    `}
                 </div>
             `;
         }
@@ -1134,6 +1287,8 @@
             const [apps, setApps] = useState([]);
             const [available, setAvailable] = useState([]);
             const [panels, setPanels] = useState([]);
+            const [playlists, setPlaylists] = useState([]);
+            const [schedule, setSchedule] = useState({ rules: [], active_playlist: null });
             const [config, setConfig] = useState({ layout_mode: 'cycle', cycle_interval: 10 });
             const [error, setError] = useState(null);
             const [previewingAll, setPreviewingAll] = useState(false);
@@ -1143,16 +1298,20 @@
 
             const refresh = useCallback(async (err) => {
                 if (err) setError(err);
-                const [a, av, c, p] = await Promise.all([
+                const [a, av, c, p, pl, sc] = await Promise.all([
                     api('/apps'),
                     api('/apps/available'),
                     api('/config'),
                     api('/panels'),
+                    api('/playlists'),
+                    api('/schedule'),
                 ]);
                 setApps(a);
                 setAvailable(av);
                 setConfig(c);
                 setPanels(p);
+                setPlaylists(pl);
+                setSchedule(sc);
                 setImgTick(Date.now());
             }, []);
 
@@ -1231,6 +1390,10 @@
                 `}
 
                 <div class="section-header">
+                <h2>Schedule</h2>
+                <${ScheduleManager} apps=${apps} playlists=${playlists} schedule=${schedule}
+                    onUpdate=${refresh} onError=${setError} />
+
                     <h2>Dashboard Panels</h2>
                     <${PanelBuilder} onCreated=${refresh} onError=${setError} />
                 </div>
