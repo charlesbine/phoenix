@@ -275,6 +275,7 @@ def render_sparkline(data):
         )
 
     plot_height = 48 if (title or value) else 60
+    y_max = max([v for _, v in plot_data]) if plot_data else 1
     children.append(
         render.Plot(
             data = plot_data,
@@ -283,6 +284,7 @@ def render_sparkline(data):
             color = color,
             color_inverted = "#0d1117",
             fill = fill,
+            y_lim = (0, y_max * 1.05),
         )
     )
 
