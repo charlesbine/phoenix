@@ -17,6 +17,60 @@ from phoenix.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+def _apply_transform(value: object, transform: str) -> object:
+    """Apply a simple transform expression to a value.
+
+    Supported:
+        / 100          — divide
+        * 1000         — multiply
+        + 10           — add
+        - 5            — subtract
+        round 2        — round to N decimal places
+        int            — convert to integer
+        format $%.2f   — Python format string (value inserted as first arg)
+
+    Chain with |:  "/ 100 | round 2 | format $%.2f"
+    """
+    if not transform or value is None:
+        return value
+
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        v = None
+
+    for step in transform.split("|"):
+        step = step.strip()
+        if not step:
+            continue
+
+        if v is not None:
+            if step.startswith("/ "):
+                v = v / float(step[2:])
+            elif step.startswith("* "):
+                v = v * float(step[2:])
+            elif step.startswith("+ "):
+                v = v + float(step[2:])
+            elif step.startswith("- "):
+                v = v - float(step[2:])
+            elif step.startswith("round"):
+                places = int(step.split()[1]) if " " in step else 0
+                v = round(v, places)
+            elif step == "int":
+                v = int(v)
+            elif step.startswith("format "):
+                fmt = step[7:]
+                return fmt % v
+
+        # String operations (work on any value)
+        if step.startswith("prefix "):
+            return step[7:] + str(v if v is not None else value)
+        elif step.startswith("suffix "):
+            return str(v if v is not None else value) + step[7:]
+
+    return v if v is not None else value
+
+
 def _extract_path(data: object, path: str) -> object:
     """Extract a value from nested dicts/lists using dot notation.
 
@@ -38,13 +92,37 @@ def _extract_path(data: object, path: str) -> object:
     return current
 
 
+def _build_headers(source: dict) -> dict[str, str]:
+    """Build HTTP headers from the auth config."""
+    headers: dict[str, str] = {}
+    auth = source.get("auth", {})
+    auth_type = auth.get("type", "")
+
+    if auth_type == "bearer":
+        headers["Authorization"] = f"Bearer {auth.get('token', '')}"
+    elif auth_type == "api_key":
+        header_name = auth.get("header", "X-API-Key")
+        headers[header_name] = auth.get("token", "")
+    elif auth_type == "basic":
+        import base64
+        creds = base64.b64encode(f"{auth.get('username', '')}:{auth.get('password', '')}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+
+    # Also merge any custom headers
+    for k, v in source.get("headers", {}).items():
+        headers[k] = v
+
+    return headers
+
+
 def _fetch_http_source(source: dict) -> dict:
     """Fetch data from an HTTP JSON endpoint through the cache proxy."""
     url = source.get("url", "")
     if not url:
         return {}
     ttl = int(source.get("ttl", 300))
-    status, body, content_type = cache_get(url, ttl)
+    headers = _build_headers(source)
+    status, body, content_type = cache_get(url, ttl, headers=headers if headers else None)
     if status != 200:
         logger.warning("HTTP source returned %d for %s", status, url)
         return {}
@@ -74,6 +152,9 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
     if layout == "big_number":
         value_path = mappings.get("value", "")
         value = _extract_path(fetched, value_path) if value_path else config.get("value", "—")
+        transform = mappings.get("transform", "")
+        if transform and value is not None:
+            value = _apply_transform(value, transform)
         base["value"] = str(value) if value is not None else "—"
         base["unit"] = config.get("unit", "")
 
@@ -83,6 +164,9 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
             key = item_map.get("key", "")
             value_path = item_map.get("value_path", "")
             value = _extract_path(fetched, value_path) if value_path else item_map.get("value", "")
+            transform = item_map.get("transform", "")
+            if transform and value is not None:
+                value = _apply_transform(value, transform)
             unit = item_map.get("unit", "")
             items.append({"key": key, "value": str(value) + unit if value is not None else "—"})
         for item in config.get("items", []):
@@ -92,6 +176,9 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
     elif layout == "marquee":
         text_path = mappings.get("text", "")
         text = _extract_path(fetched, text_path) if text_path else config.get("text", "")
+        transform = mappings.get("transform", "")
+        if transform and text is not None:
+            text = _apply_transform(text, transform)
         base["text"] = str(text) if text else ""
 
     elif layout == "multi_stat":
@@ -100,6 +187,9 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
             label = stat_map.get("label", "")
             value_path = stat_map.get("value_path", "")
             value = _extract_path(fetched, value_path) if value_path else stat_map.get("value", "")
+            transform = stat_map.get("transform", "")
+            if transform and value is not None:
+                value = _apply_transform(value, transform)
             unit = stat_map.get("unit", "")
             stat: dict = {"label": label, "value": str(value) + unit if value is not None else "—"}
             if stat_map.get("color"):
