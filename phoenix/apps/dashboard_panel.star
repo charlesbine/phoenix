@@ -29,6 +29,8 @@ def main(config):
         return render_marquee(data)
     elif layout == "multi_stat":
         return render_multi_stat(data)
+    elif layout == "sparkline":
+        return render_sparkline(data)
     else:
         return render_error("Unknown layout: " + layout)
 
@@ -236,6 +238,59 @@ def render_multi_stat(data):
                 expanded = True,
                 main_align = "space_evenly",
                 cross_align = "center",
+                children = children,
+            ),
+        ),
+    )
+
+
+def render_sparkline(data):
+    """Mini line chart with title and current value."""
+    points = data.get("points", [])
+    title = data.get("title", "")
+    value = str(data.get("value", ""))
+    color = data.get("color", "#5BCEFA")
+    fill = data.get("fill", True)
+
+    if not points:
+        return render_error("No data points")
+
+    plot_data = [(float(i), float(v)) for i, v in enumerate(points)]
+
+    children = []
+
+    # Header row: title + current value
+    if title or value:
+        row_children = []
+        if title:
+            row_children.append(render.Text(title, font = "tom-thumb", color = "#8899AA"))
+        if value:
+            row_children.append(render.Text(value, font = "tom-thumb", color = color))
+        children.append(
+            render.Row(
+                expanded = True,
+                main_align = "space_between",
+                children = row_children,
+            )
+        )
+
+    plot_height = 48 if (title or value) else 60
+    children.append(
+        render.Plot(
+            data = plot_data,
+            width = 64,
+            height = plot_height,
+            color = color,
+            color_inverted = "#0d1117",
+            fill = fill,
+        )
+    )
+
+    return render.Root(
+        child = render.Padding(
+            pad = (0, 2, 0, 0),
+            child = render.Column(
+                expanded = True,
                 children = children,
             ),
         ),
