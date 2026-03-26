@@ -174,6 +174,10 @@ class MQTTClient:
             )
             self._client.loop_start()
             logger.info("[mqtt] Connecting to %s:%d", self._settings.mqtt_broker, self._settings.mqtt_port)
+
+            # Start periodic state publisher
+            self._state_thread = threading.Thread(target=self._state_publish_loop, daemon=True)
+            self._state_thread.start()
         except Exception:
             logger.exception("[mqtt] Failed to connect")
 
@@ -192,6 +196,169 @@ class MQTTClient:
             self._client.subscribe(topic)
             logger.info("[mqtt] Subscribed to %s", topic)
 
+    def _state_publish_loop(self) -> None:
+        """Periodically publish state to HA (every 5s)."""
+        import time as _time
+        _time.sleep(3)  # Wait for dashboard to be ready
+        while True:
+            if self.connected:
+                try:
+                    self.publish_ha_state()
+                except Exception:
+                    logger.debug("[mqtt] State publish failed, will retry")
+            _time.sleep(5)
+
+    def publish(self, topic: str, payload: str, retain: bool = False) -> None:
+        """Publish a message."""
+        if self._client and self._client.is_connected():
+            self._client.publish(topic, payload, retain=retain)
+
+    def publish_ha_state(self) -> None:
+        """Publish current state to HA state topics."""
+        from phoenix.db import ConfigDatabase, AppDatabase
+
+        config_db = ConfigDatabase()
+        app_db = AppDatabase()
+        config = config_db.get()
+
+        # Light state
+        brightness = config.brightness
+        light_state = json.dumps({
+            "state": "ON" if brightness > 0 else "OFF",
+            "brightness": brightness,
+        })
+        self.publish("phoenix/light/state", light_state, retain=True)
+
+        # Current app
+        from phoenix.paths import DATA_DIR
+        current_app_file = DATA_DIR / "output" / "current_app.txt"
+        current_app = current_app_file.read_text().strip() if current_app_file.exists() else ""
+        self.publish("phoenix/now_playing/state", current_app, retain=True)
+
+        # Layout mode
+        self.publish("phoenix/mode/state", config.layout_mode, retain=True)
+
+        # Update app select entity with current app list
+        apps = app_db.list_apps()
+        active_names = [a.name for a in apps if a.enabled and a.active]
+        if active_names:
+            device = {
+                "identifiers": ["phoenix_display"],
+                "name": "Phoenix",
+                "model": "64x64 HUB75 via Matrix Portal M4",
+                "manufacturer": "DIY",
+            }
+            self.publish("homeassistant/select/phoenix/app/config", json.dumps({
+                "name": "Current App",
+                "unique_id": "phoenix_current_app",
+                "state_topic": "phoenix/now_playing/state",
+                "command_topic": "phoenix/app/set",
+                "options": active_names,
+                "icon": "mdi:apps",
+                "device": device,
+            }), retain=True)
+
+    def _publish_ha_discovery(self) -> None:
+        """Publish HA MQTT auto-discovery configs."""
+        device = {
+            "identifiers": ["phoenix_display"],
+            "name": "Phoenix",
+            "model": "64x64 HUB75 via Matrix Portal M4",
+            "manufacturer": "DIY",
+        }
+
+        # Light entity (brightness + on/off)
+        self.publish("homeassistant/light/phoenix/display/config", json.dumps({
+            "name": "Display",
+            "unique_id": "phoenix_display",
+            "schema": "json",
+            "state_topic": "phoenix/light/state",
+            "command_topic": "phoenix/light/set",
+            "brightness": True,
+            "brightness_scale": 255,
+            "icon": "mdi:led-strip-variant",
+            "device": device,
+        }), retain=True)
+
+        # Sensor: now playing (read only)
+        self.publish("homeassistant/sensor/phoenix/now_playing/config", json.dumps({
+            "name": "Now Playing",
+            "unique_id": "phoenix_now_playing",
+            "state_topic": "phoenix/now_playing/state",
+            "icon": "mdi:play-circle",
+            "device": device,
+        }), retain=True)
+
+        # Select: layout mode
+        self.publish("homeassistant/select/phoenix/mode/config", json.dumps({
+            "name": "Layout Mode",
+            "unique_id": "phoenix_layout_mode",
+            "state_topic": "phoenix/mode/state",
+            "command_topic": "phoenix/mode/set",
+            "options": ["cycle", "random", "single"],
+            "icon": "mdi:view-carousel",
+            "device": device,
+        }), retain=True)
+
+        # Select: switch app
+        self.publish("homeassistant/select/phoenix/app/config", json.dumps({
+            "name": "Current App",
+            "unique_id": "phoenix_current_app",
+            "state_topic": "phoenix/now_playing/state",
+            "command_topic": "phoenix/app/set",
+            "options": [],  # Will be updated dynamically
+            "icon": "mdi:apps",
+            "device": device,
+        }), retain=True)
+
+        logger.info("[mqtt] Published HA discovery configs")
+
+    def _handle_ha_command(self, topic: str, payload: str) -> None:
+        """Handle commands from HA."""
+        from phoenix.db import ConfigDatabase, AppDatabase
+
+        if topic == "phoenix/light/set":
+            try:
+                data = json.loads(payload)
+                config_db = ConfigDatabase()
+                current = config_db.get()
+
+                if data.get("state") == "OFF":
+                    config_db.update(brightness=0)
+                elif data.get("state") == "ON":
+                    brightness = data.get("brightness", 255)
+                    if brightness == 0:
+                        brightness = 255
+                    config_db.update(brightness=brightness)
+                elif "brightness" in data:
+                    config_db.update(brightness=data["brightness"])
+
+                self.publish_ha_state()
+            except Exception:
+                logger.exception("[mqtt] Failed to handle light command")
+
+        elif topic == "phoenix/mode/set":
+            try:
+                config_db = ConfigDatabase()
+                config_db.update(layout_mode=payload.strip())
+                self.publish_ha_state()
+            except Exception:
+                logger.exception("[mqtt] Failed to handle mode command")
+
+        elif topic == "phoenix/app/set":
+            try:
+                app_name = payload.strip()
+                config_db = ConfigDatabase()
+                config_db.update(layout_mode="single")
+                # Set the requested app as the only active one... actually,
+                # just switch to single mode. The display manager will pick
+                # the first active app. We need to reorder so this app is first.
+                app_db = AppDatabase()
+                app_db.upsert(app_name, sort_order=-1)  # Put it first
+                self.publish_ha_state()
+            except Exception:
+                logger.exception("[mqtt] Failed to handle app command")
+
     def _on_connect(self, client: mqtt.Client, userdata: object, flags: object, rc: object, properties: object = None) -> None:
         logger.info("[mqtt] Connected to broker")
         # Subscribe to notify topic
@@ -200,10 +367,18 @@ class MQTTClient:
         self._subscribed_topics.add(notify_topic)
         logger.info("[mqtt] Subscribed to %s", notify_topic)
 
+        # Subscribe to HA command topics
+        for cmd_topic in ("phoenix/light/set", "phoenix/mode/set", "phoenix/app/set"):
+            client.subscribe(cmd_topic)
+
         # Re-subscribe to any panel topics
         with self._lock:
             for topic in self._subscribed_topics:
                 client.subscribe(topic)
+
+        # Publish HA discovery and initial state
+        self._publish_ha_discovery()
+        self.publish_ha_state()
 
     def _on_message(self, client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
         payload = msg.payload.decode("utf-8", errors="replace")
@@ -211,6 +386,11 @@ class MQTTClient:
 
         # Store last message for all topics
         store_message(msg.topic, payload)
+
+        # Handle HA commands
+        if msg.topic.startswith("phoenix/") and msg.topic.endswith("/set"):
+            self._handle_ha_command(msg.topic, payload)
+            return
 
         # Handle notifications
         if msg.topic == self._settings.mqtt_notify_topic:
