@@ -155,6 +155,15 @@ def create_app() -> FastAPI:
     async def add_app(name: str):
         return _serialize_app(get_svc().create_app(name))
 
+    @app.post("/api/apps/{name}/show")
+    async def show_app_now(name: str):
+        """Skip to this app immediately on the display."""
+        from phoenix.paths import DATA_DIR
+        show_file = DATA_DIR / "output" / "show_now.txt"
+        show_file.parent.mkdir(parents=True, exist_ok=True)
+        show_file.write_text(name)
+        return {"ok": True, "showing": name}
+
     @app.put("/api/apps/{name}/priority")
     async def update_priority(name: str, request: Request):
         body = await request.json()

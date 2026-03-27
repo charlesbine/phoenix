@@ -606,6 +606,7 @@
                         <button class="btn btn-render" disabled=${rendering} onClick=${() => action('render')}>
                             ${rendering ? html`<span class="spinner" />` : 'Render'}
                         </button>
+                        <button class="btn btn-cycle" onClick=${() => action('show')}>Show</button>
                         <button class=${'btn btn-config' + (hasConfig ? ' has-config' : '')}
                                 onClick=${() => setShowConfig(!showConfig)}>
                             ${showConfig ? 'Close' : 'Config'}

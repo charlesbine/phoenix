@@ -118,6 +118,10 @@ class DisplayManager:
         for app in apps:
             # Check for notifications between each app
             self._check_notifications()
+            # Check for "show now" override
+            show_now = self._check_show_now()
+            if show_now:
+                self._display_app(show_now, duration)
             self._display_app(app, duration)
 
     def _display_app(self, app: AppConfig, duration: int) -> None:
@@ -133,6 +137,23 @@ class DisplayManager:
 
         logger.info("Displaying %s for %ds", fresh.name, duration)
         self.backend.display_image(path, duration)
+
+    def _check_show_now(self) -> AppConfig | None:
+        """Check if a 'show now' request is pending."""
+        show_file = DATA_DIR / "output" / "show_now.txt"
+        if not show_file.exists():
+            return None
+        try:
+            name = show_file.read_text().strip()
+            show_file.unlink()
+            if name:
+                app = self.app_db.get(name)
+                if app and output_path(name).exists():
+                    logger.info("[show_now] Jumping to %s", name)
+                    return app
+        except Exception:
+            pass
+        return None
 
     def _check_notifications(self) -> None:
         """Check for pending notifications and display them."""
