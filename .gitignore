@@ -29,3 +29,4 @@ htmlcov/
 dist/
 build/
 phoenix/cache.db
+phoenix/logs/

@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=charles
-WorkingDirectory=/home/charles/pheonix
+WorkingDirectory=/home/charles/phoenix
 ExecStart=/home/charles/.local/bin/uv run phoenix dashboard
 Restart=always
 RestartSec=5
