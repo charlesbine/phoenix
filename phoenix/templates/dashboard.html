@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Phoenix</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect x='6' y='1' width='4' height='2' fill='%23ff6b35'/><rect x='5' y='3' width='6' height='2' fill='%23ff4500'/><rect x='4' y='5' width='8' height='2' fill='%23ff6b35'/><rect x='3' y='7' width='10' height='2' fill='%23ffa500'/><rect x='4' y='9' width='8' height='2' fill='%23ff4500'/><rect x='5' y='11' width='6' height='2' fill='%23ff6b35'/><rect x='6' y='13' width='4' height='2' fill='%23ffa500'/></svg>">
+    <link rel="icon" href="/static/assets/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/assets/phoenix-180.png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -1361,7 +1362,10 @@
             };
 
             return html`
-                <h1>Phoenix</h1>
+                <h1 style="display:flex; align-items:center; gap:0.6rem;">
+                    <img src="/static/assets/phoenix-64.png" alt="" style="width:36px; height:36px; border-radius:6px;" />
+                    Phoenix
+                </h1>
 
                 <div class="top-row">
                     <${LivePreview} />

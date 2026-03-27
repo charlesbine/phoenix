@@ -31,6 +31,11 @@ def create_app() -> FastAPI:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 
+    # Serve static assets (logo, favicon)
+    static_dir = TEMPLATES_DIR.parent / "static"
+    if static_dir.exists():
+        app.mount("/static/assets", StaticFiles(directory=str(static_dir)), name="assets")
+
     # Serve preprocessor data files
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
