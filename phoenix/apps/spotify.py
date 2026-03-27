@@ -86,6 +86,7 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     attrs = player.get("attributes", {})
     title = attrs.get("media_title", "Unknown")
     artist = attrs.get("media_artist", "Unknown")
+    album = attrs.get("media_album_name", "")
     duration = attrs.get("media_duration", 0)
     position = attrs.get("media_position", 0)
     position_updated = attrs.get("media_position_updated_at", "")
@@ -113,17 +114,16 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         frame_art.paste(art.resize((64, 64), Image.Resampling.LANCZOS), (0, 0))
 
     # Frame 2: Info frame via pixlet
-    # Encode small album art as base64 PNG for embedding in starlark
+    # Encode album art as base64 PNG for embedding in starlark
     art_b64 = ""
     if art:
         buf = io.BytesIO()
-        art.resize((20, 20), Image.Resampling.LANCZOS).save(buf, "PNG")
+        art.resize((28, 28), Image.Resampling.LANCZOS).save(buf, "PNG")
         art_b64 = base64.b64encode(buf.getvalue()).decode()
 
-    # Calculate progress bar width (out of 52 pixels — bar area)
-    bar_filled = int(52 * progress_pct)
+    # Progress bar: 58px wide area
+    bar_filled = max(1, int(58 * progress_pct)) if progress_pct > 0 else 0
 
-    # Write the starlark template
     star = f'''load("render.star", "render")
 load("encoding/base64.star", "base64")
 
@@ -132,62 +132,79 @@ ART = "{art_b64}"
 def main():
     children = []
 
-    # Album art + title/artist row
-    info_children = [
-        render.Marquee(
-            width = 38,
-            child = render.Text("{_escape(title)}", font = "5x8", color = "#FFFFFF"),
-        ),
-        render.Box(width = 38, height = 1),
-        render.Marquee(
-            width = 38,
-            child = render.Text("{_escape(artist)}", font = "tom-thumb", color = "#B3B3B3"),
-        ),
-    ]
-
-    if ART:
-        children.append(
-            render.Row(
-                expanded = True,
-                cross_align = "center",
-                children = [
-                    render.Padding(
-                        pad = (2, 2, 3, 0),
-                        child = render.Image(src = base64.decode(ART), width = 20, height = 20),
-                    ),
-                    render.Column(children = info_children),
-                ],
-            )
+    # Song title — full width, Spotify green, big font
+    children.append(
+        render.Padding(
+            pad = (3, 4, 3, 0),
+            child = render.Marquee(
+                width = 58,
+                child = render.Text("{_escape(title)}", font = "6x13", color = "#1DB954"),
+            ),
         )
-    else:
-        children.extend(info_children)
+    )
 
-    # Spacer
     children.append(render.Box(width = 64, height = 3))
 
-    # Time row
+    # Album art + artist/album
+    art_and_info = []
+    if ART:
+        art_and_info.append(
+            render.Padding(
+                pad = (3, 0, 3, 0),
+                child = render.Image(src = base64.decode(ART), width = 24, height = 24),
+            )
+        )
+    art_and_info.append(
+        render.Column(
+            main_align = "center",
+            expanded = True,
+            children = [
+                render.Marquee(
+                    width = 30,
+                    child = render.Text("{_escape(artist)}", font = "tom-thumb", color = "#FFFFFF"),
+                ),
+                render.Box(width = 1, height = 2),
+                render.Marquee(
+                    width = 30,
+                    child = render.Text("{_escape(album)}", font = "tom-thumb", color = "#666666"),
+                ),
+            ],
+        )
+    )
+    children.append(
+        render.Box(
+            width = 64,
+            height = 24,
+            child = render.Row(
+                cross_align = "center",
+                children = art_and_info,
+            ),
+        )
+    )
+
+    children.append(render.Box(width = 64, height = 2))
+
+    # Progress bar + time
     children.append(
         render.Padding(
             pad = (3, 0, 3, 0),
+            child = render.Stack(
+                children = [
+                    render.Box(width = 58, height = 2, color = "#282828"),
+                    render.Box(width = {bar_filled}, height = 2, color = "#1DB954"),
+                ],
+            ),
+        )
+    )
+    children.append(
+        render.Padding(
+            pad = (3, 1, 3, 0),
             child = render.Row(
                 expanded = True,
                 main_align = "space_between",
                 children = [
                     render.Text("{_format_time(position)}", font = "tom-thumb", color = "#1DB954"),
-                    render.Text("{_format_time(duration)}", font = "tom-thumb", color = "#666666"),
-                ],
-            ),
-        )
-    )
-
-    # Progress bar
-    children.append(
-        render.Padding(
-            pad = (3, 2, 3, 0),
-            child = render.Stack(
-                children = [
-                    render.Box(width = 58, height = 3, color = "#282828"),
-                    render.Box(width = {bar_filled}, height = 3, color = "#1DB954"),
+                    render.Text("{_format_time(duration)}", font = "tom-thumb", color = "#444444"),
                 ],
             ),
         )
@@ -195,8 +212,6 @@ def main():
 
     return render.Root(
         child = render.Column(
-            expanded = True,
-            main_align = "center",
             children = children,
         ),
     )
