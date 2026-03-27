@@ -15,7 +15,7 @@ DEFAULT_LOCATION = {
     "lng": -74.0,
     "locality": "Brooklyn",
 }
-DEFAULT_TIMEZONE = "US/Eastern"
+DEFAULT_TIMEZONE = "America/New_York"
 
 words = {
     1: "ONE",
