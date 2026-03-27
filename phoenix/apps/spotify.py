@@ -2,15 +2,19 @@
 
 Two alternating frames:
 1. Full-screen album art (64x64)
-2. Song info: artist, title, progress bar, small album art
+2. Song info via pixlet: album art, title (marquee), artist, progress bar
 """
 
+import base64
 import io
 import json
 import logging
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from phoenix.cache import cache_get
 from phoenix.paths import DATA_DIR, ensure_dirs
@@ -18,7 +22,6 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Try multiple media player entities — Spotify direct + Sonos speakers
 MEDIA_PLAYER_ENTITIES = [
     "media_player.spotify_charlesbine",
     "media_player.unnamed_room",
@@ -42,7 +45,6 @@ def _fetch_entity(entity_id: str, settings: Settings) -> dict:
 
 
 def _find_playing(settings: Settings) -> dict | None:
-    """Find the first media player that's currently playing."""
     for entity_id in MEDIA_PLAYER_ENTITIES:
         data = _fetch_entity(entity_id, settings)
         if data.get("state") == "playing":
@@ -51,10 +53,8 @@ def _find_playing(settings: Settings) -> dict | None:
 
 
 def _download_art(url: str, settings: Settings) -> Image.Image | None:
-    """Download album art from HA's proxied URL."""
     if not url:
         return None
-    # HA entity_picture is a relative URL like /api/media_player_proxy/...
     if url.startswith("/"):
         url = f"{settings.ha_url.rstrip('/')}{url}"
     try:
@@ -67,12 +67,17 @@ def _download_art(url: str, settings: Settings) -> Image.Image | None:
     return None
 
 
+def _format_time(seconds: float) -> str:
+    m = int(seconds) // 60
+    s = int(seconds) % 60
+    return f"{m}:{s:02d}"
+
+
 def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
     ensure_dirs()
 
     player = _find_playing(settings)
     if player is None:
-        # Not playing — remove outputs so display skips this app
         for f in [output, output_large]:
             if f.exists():
                 f.unlink()
@@ -81,20 +86,19 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     attrs = player.get("attributes", {})
     title = attrs.get("media_title", "Unknown")
     artist = attrs.get("media_artist", "Unknown")
-    album = attrs.get("media_album_name", "")
-    art_url = attrs.get("entity_picture", "")
     duration = attrs.get("media_duration", 0)
     position = attrs.get("media_position", 0)
     position_updated = attrs.get("media_position_updated_at", "")
+    art_url = attrs.get("entity_picture", "")
 
-    # Extrapolate current position based on when HA last updated it
+    # Extrapolate current position
     if position_updated and duration > 0:
         try:
             from datetime import datetime, timezone
             updated_at = datetime.fromisoformat(position_updated)
             now = datetime.now(timezone.utc)
-            elapsed_since_update = (now - updated_at).total_seconds()
-            position = min(position + elapsed_since_update, duration)
+            elapsed = (now - updated_at).total_seconds()
+            position = min(position + elapsed, duration)
         except Exception:
             pass
 
@@ -106,58 +110,128 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     # Frame 1: Full-screen album art
     frame_art = Image.new("RGBA", (64, 64), (0, 0, 0, 255))
     if art:
-        resized = art.resize((64, 64), Image.Resampling.LANCZOS)
-        frame_art.paste(resized, (0, 0))
+        frame_art.paste(art.resize((64, 64), Image.Resampling.LANCZOS), (0, 0))
 
-    # Frame 2: Song info — small album art + title + artist + progress bar
-    # Rendered purely in Pillow (no pixlet dependency)
-    frame_info = Image.new("RGBA", (64, 64), (0, 0, 0, 255))
-    draw = ImageDraw.Draw(frame_info)
-
-    # Small album art in top-left
+    # Frame 2: Info frame via pixlet
+    # Encode small album art as base64 PNG for embedding in starlark
+    art_b64 = ""
     if art:
-        art_small = art.resize((24, 24), Image.Resampling.LANCZOS)
-        frame_info.paste(art_small, (2, 2))
+        buf = io.BytesIO()
+        art.resize((20, 20), Image.Resampling.LANCZOS).save(buf, "PNG")
+        art_b64 = base64.b64encode(buf.getvalue()).decode()
 
-    # Load a bitmap font — Pillow's default is fine for pixel displays
-    from PIL import ImageFont
-    try:
-        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 7)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 6)
-    except OSError:
-        font_large = ImageFont.load_default()
-        font_small = ImageFont.load_default()
+    # Calculate progress bar width (out of 52 pixels — bar area)
+    bar_filled = int(52 * progress_pct)
 
-    # Title (right of album art, wraps below if needed)
-    title_x = 29
-    title_short = title[:12] if len(title) > 12 else title
-    draw.text((title_x, 3), title_short, fill=(255, 255, 255), font=font_large)
+    # Write the starlark template
+    star = f'''load("render.star", "render")
+load("encoding/base64.star", "base64")
 
-    # Artist
-    artist_short = artist[:14] if len(artist) > 14 else artist
-    draw.text((title_x, 14), artist_short, fill=(179, 179, 179), font=font_small)
+ART = "{art_b64}"
 
-    # Time stamps
-    position_str = _format_time(position)
-    duration_str = _format_time(duration)
-    draw.text((2, 30), position_str, fill=(29, 185, 84), font=font_small)
-    draw.text((44, 30), duration_str, fill=(100, 100, 100), font=font_small)
+def main():
+    children = []
+
+    # Album art + title/artist row
+    info_children = [
+        render.Marquee(
+            width = 38,
+            child = render.Text("{_escape(title)}", font = "5x8", color = "#FFFFFF"),
+        ),
+        render.Box(width = 38, height = 1),
+        render.Marquee(
+            width = 38,
+            child = render.Text("{_escape(artist)}", font = "tom-thumb", color = "#B3B3B3"),
+        ),
+    ]
+
+    if ART:
+        children.append(
+            render.Row(
+                expanded = True,
+                cross_align = "center",
+                children = [
+                    render.Padding(
+                        pad = (2, 2, 3, 0),
+                        child = render.Image(src = base64.decode(ART), width = 20, height = 20),
+                    ),
+                    render.Column(children = info_children),
+                ],
+            )
+        )
+    else:
+        children.extend(info_children)
+
+    # Spacer
+    children.append(render.Box(width = 64, height = 3))
+
+    # Time row
+    children.append(
+        render.Padding(
+            pad = (3, 0, 3, 0),
+            child = render.Row(
+                expanded = True,
+                main_align = "space_between",
+                children = [
+                    render.Text("{_format_time(position)}", font = "tom-thumb", color = "#1DB954"),
+                    render.Text("{_format_time(duration)}", font = "tom-thumb", color = "#666666"),
+                ],
+            ),
+        )
+    )
 
     # Progress bar
-    bar_y = 40
-    bar_h = 3
-    draw.rectangle([2, bar_y, 61, bar_y + bar_h - 1], fill=(40, 40, 40))
-    bar_width = int(59 * progress_pct)
-    if bar_width > 0:
-        draw.rectangle([2, bar_y, 2 + bar_width, bar_y + bar_h - 1], fill=(29, 185, 84))
+    children.append(
+        render.Padding(
+            pad = (3, 2, 3, 0),
+            child = render.Stack(
+                children = [
+                    render.Box(width = 58, height = 3, color = "#282828"),
+                    render.Box(width = {bar_filled}, height = 3, color = "#1DB954"),
+                ],
+            ),
+        )
+    )
 
-    # Spotify green dot at progress position
-    dot_x = 2 + bar_width
-    draw.ellipse([dot_x - 1, bar_y - 1, dot_x + 2, bar_y + bar_h], fill=(29, 185, 84))
+    return render.Root(
+        child = render.Column(
+            expanded = True,
+            main_align = "center",
+            children = children,
+        ),
+    )
+'''
 
-    # Save as animated webp — 5 seconds per frame
-    frames = [frame_art, frame_info]
+    frame_info = None
+    with tempfile.TemporaryDirectory() as tmp:
+        star_path = Path(tmp) / "spotify_info.star"
+        star_path.write_text(star)
+        for is_large in [False, True]:
+            tmp_out = Path(tmp) / ("info_large.webp" if is_large else "info.webp")
+            cmd = [
+                "pixlet", "render", str(star_path),
+                "-o", str(tmp_out),
+                "-w", str(settings.render_width),
+                "-t", str(settings.render_height),
+            ]
+            if is_large:
+                cmd.extend(["-m", str(settings.magnification)])
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                logger.warning("[spotify] pixlet info frame failed: %s", proc.stderr[:200])
+
+        info_path = Path(tmp) / "info.webp"
+        info_large_path = Path(tmp) / "info_large.webp"
+
+        if info_path.exists():
+            frame_info = Image.open(info_path).convert("RGBA").copy()
+
+    if frame_info is None:
+        frame_info = frame_art.copy()
+
+    # Save animated webp — 5s per frame
     frame_duration = 5000
+    frames = [frame_art, frame_info]
 
     frames[0].save(
         output, "WEBP", save_all=True, append_images=frames[1:],
@@ -176,9 +250,6 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     )
 
 
-def _format_time(seconds: float) -> str:
-    m = int(seconds) // 60
-    s = int(seconds) % 60
-    return f"{m}:{s:02d}"
-
-
+def _escape(s: str) -> str:
+    """Escape string for embedding in Starlark string literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
