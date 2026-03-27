@@ -158,43 +158,75 @@ def _check_pixlet() -> None:
         )
 
 
+def _is_due(app: AppConfig) -> bool:
+    """Check if an app is due for re-rendering."""
+    if app.last_updated is None:
+        return True
+    elapsed = datetime.now() - app.last_updated
+    return elapsed >= app.refresh_interval
+
+
+def _render_one(name: str, settings: Settings, app_db: AppDatabase) -> None:
+    """Render a single app with error handling."""
+    try:
+        run_app(name, settings, app_db)
+    except Exception:
+        logger.exception("[%s] Render failed", name)
+        app_db.upsert(name, last_updated=datetime.now())
+
+
 def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
-    """Continuous rendering loop. Schedules apps based on refresh intervals."""
+    """Continuous rendering loop. Renders due apps in parallel across available cores."""
+    from concurrent.futures import ThreadPoolExecutor
+    import os
+
     _check_pixlet()
     ensure_dirs()
-    while True:
-        apps = [a for a in app_db.list_apps() if a.enabled]
-        if not apps:
-            logger.warning("No enabled apps found, waiting...")
-            sleep(MAX_TIME_BETWEEN_UPDATES.total_seconds())
-            continue
 
-        apps.sort(key=lambda a: a.priority, reverse=True)
+    max_workers = min(os.cpu_count() or 2, 4)
+    logger.info("Renderer starting with %d workers", max_workers)
 
-        def next_update_time(app: AppConfig) -> datetime:
-            if app.last_updated is None:
-                return datetime.now()
-            return app.last_updated + app.refresh_interval
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        while True:
+            apps = [a for a in app_db.list_apps() if a.enabled]
+            if not apps:
+                logger.warning("No enabled apps found, waiting...")
+                sleep(MAX_TIME_BETWEEN_UPDATES.total_seconds())
+                continue
 
-        next_app = min(apps, key=next_update_time)
-        wait = (next_update_time(next_app) - datetime.now()).total_seconds()
+            # Find all apps that are due for rendering
+            due = [a for a in apps if _is_due(a)]
 
-        if wait > MAX_TIME_BETWEEN_UPDATES.total_seconds():
-            logger.debug("Nothing to update for %ss, checking again then", MAX_TIME_BETWEEN_UPDATES.total_seconds())
-            sleep(MAX_TIME_BETWEEN_UPDATES.total_seconds())
-            continue
+            if not due:
+                # Sleep until the next app is due
+                def next_update_time(app: AppConfig) -> datetime:
+                    if app.last_updated is None:
+                        return datetime.now()
+                    return app.last_updated + app.refresh_interval
 
-        wait = max(wait, 0)
-        if wait > 0:
-            logger.debug("Next: %s in %.1fs", next_app.name, wait)
-            sleep(wait)
+                next_app = min(apps, key=next_update_time)
+                wait = (next_update_time(next_app) - datetime.now()).total_seconds()
+                wait = min(max(wait, 0.5), MAX_TIME_BETWEEN_UPDATES.total_seconds())
+                sleep(wait)
+                continue
 
-        try:
-            run_app(next_app.name, settings, app_db)
-        except Exception:
-            logger.exception("[%s] Render failed", next_app.name)
-            # Update last_updated so we don't retry immediately
-            app_db.upsert(next_app.name, last_updated=datetime.now())
+            # Sort by priority (high first), then by staleness (most overdue first)
+            due.sort(key=lambda a: (-a.priority, a.last_updated or datetime.min))
+
+            logger.info("Rendering %d due apps: %s", len(due), [a.name for a in due])
+
+            # Submit all due apps to the thread pool
+            futures = {
+                pool.submit(_render_one, a.name, settings, app_db): a.name
+                for a in due
+            }
+
+            # Wait for all to complete
+            for future in futures:
+                future.result()  # propagates exceptions if any
+
+            # Brief pause before next check
+            sleep(1)
 
 
 def _handle_preprocessor_result(name: str, result: PreprocessorResult, app_db: AppDatabase) -> None:
