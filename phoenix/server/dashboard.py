@@ -425,35 +425,32 @@ def create_app() -> FastAPI:
             return {"error": "no message for topic"}
         return msg
 
-    @app.get("/api/health")
-    async def health():
-        """Health check — shows service status, M4 connection, memory, uptime."""
+    def _check_health() -> dict:
+        """Shared health check logic."""
         import os
-        import time as _time
         from phoenix.paths import PACKAGE_DIR
 
-        health: dict = {"status": "ok", "issues": []}
+        result: dict = {"status": "ok", "issues": []}
 
         # M4 serial connection
-        serial_port = settings.serial_port
         m4_connected = False
         try:
             import serial as _serial
-            port = _serial.Serial(serial_port, baudrate=2000000, timeout=0.1)
+            port = _serial.Serial(settings.serial_port, baudrate=2000000, timeout=0.1)
             m4_connected = port.is_open
             port.close()
         except Exception:
             pass
-        health["m4"] = {"connected": m4_connected, "port": serial_port}
+        result["m4"] = {"connected": m4_connected, "port": settings.serial_port}
         if not m4_connected:
-            health["issues"].append(f"M4 not available on {serial_port}")
-            health["status"] = "degraded"
+            result["issues"].append(f"M4 not available on {settings.serial_port}")
+            result["status"] = "degraded"
 
         # MQTT
-        health["mqtt"] = {"connected": mqtt_client.connected, "broker": settings.mqtt_broker or None}
+        result["mqtt"] = {"connected": mqtt_client.connected, "broker": settings.mqtt_broker or None}
         if settings.mqtt_broker and not mqtt_client.connected:
-            health["issues"].append("MQTT disconnected")
-            health["status"] = "degraded"
+            result["issues"].append("MQTT disconnected")
+            result["status"] = "degraded"
 
         # Memory
         try:
@@ -465,17 +462,17 @@ def create_app() -> FastAPI:
                         mem[parts[0].strip()] = int(parts[1].strip().split()[0])
                 total = mem.get("MemTotal", 0) // 1024
                 avail = mem.get("MemAvailable", 0) // 1024
-                health["memory"] = {"total_mb": total, "available_mb": avail, "used_pct": round((total - avail) / total * 100) if total else 0}
+                result["memory"] = {"total_mb": total, "available_mb": avail, "used_pct": round((total - avail) / total * 100) if total else 0}
                 if avail < 100:
-                    health["issues"].append(f"Low memory: {avail}MB available")
-                    health["status"] = "degraded"
+                    result["issues"].append(f"Low memory: {avail}MB available")
+                    result["status"] = "degraded"
         except Exception:
             pass
 
         # Load
         try:
             load1, load5, load15 = os.getloadavg()
-            health["load"] = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
+            result["load"] = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
         except OSError:
             pass
 
@@ -485,18 +482,18 @@ def create_app() -> FastAPI:
                 uptime_secs = float(f.read().split()[0])
                 hours = int(uptime_secs // 3600)
                 mins = int((uptime_secs % 3600) // 60)
-                health["uptime"] = f"{hours}h {mins}m"
+                result["uptime"] = f"{hours}h {mins}m"
         except Exception:
             pass
 
         # USB power (check dmesg for overcurrent)
         try:
             import subprocess
-            result = subprocess.run(["sudo", "dmesg"], capture_output=True, text=True, timeout=5)
-            if "over-current" in result.stdout:
-                oc_count = result.stdout.count("over-current")
-                health["issues"].append(f"USB overcurrent detected ({oc_count} events) — panel needs external PSU")
-                health["status"] = "degraded"
+            dmesg = subprocess.run(["sudo", "dmesg"], capture_output=True, text=True, timeout=5)
+            if "over-current" in dmesg.stdout:
+                oc_count = dmesg.stdout.count("over-current")
+                result["issues"].append(f"USB overcurrent detected ({oc_count} events) — panel needs external PSU")
+                result["status"] = "degraded"
         except Exception:
             pass
 
@@ -512,25 +509,26 @@ def create_app() -> FastAPI:
                         render_times[name] = float(time_str)
                     except (IndexError, ValueError):
                         pass
-        health["render_times"] = render_times
+        result["render_times"] = render_times
 
+        return result
+
+    @app.get("/api/health")
+    async def health():
+        """Detailed health check with full diagnostics."""
         from fastapi.responses import JSONResponse
-        status_code = 200 if health["status"] == "ok" else 503
-        return JSONResponse(content=health, status_code=status_code)
+        result = _check_health()
+        return JSONResponse(content=result, status_code=200 if result["status"] == "ok" else 503)
 
     @app.get("/healthz")
     async def healthz():
-        """Simple health check — 200 if M4 connected, 503 if not."""
-        try:
-            import serial as _serial
-            port = _serial.Serial(settings.serial_port, baudrate=2000000, timeout=0.1)
-            ok = port.is_open
-            port.close()
-        except Exception:
-            ok = False
-        if ok:
-            return {"status": "ok"}
-        return JSONResponse(content={"status": "degraded"}, status_code=503)
+        """Simple health check — 200 ok, 503 degraded."""
+        from fastapi.responses import JSONResponse
+        result = _check_health()
+        return JSONResponse(
+            content={"status": result["status"]},
+            status_code=200 if result["status"] == "ok" else 503,
+        )
 
     @app.get("/api/logs")
     async def get_logs(lines: int = 100):
