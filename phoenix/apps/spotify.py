@@ -182,29 +182,29 @@ def main():
         )
     )
 
-    children.append(render.Box(width = 64, height = 2))
-
-    # Progress bar + time
+    # Time row
     children.append(
         render.Padding(
-            pad = (3, 0, 3, 0),
-            child = render.Stack(
-                children = [
-                    render.Box(width = 58, height = 2, color = "#282828"),
-                    render.Box(width = {bar_filled}, height = 2, color = "#1DB954"),
-                ],
-            ),
-        )
-    )
-    children.append(
-        render.Padding(
-            pad = (3, 1, 3, 0),
+            pad = (3, 3, 3, 0),
             child = render.Row(
                 expanded = True,
                 main_align = "space_between",
                 children = [
                     render.Text("{_format_time(position)}", font = "tom-thumb", color = "#1DB954"),
                     render.Text("{_format_time(duration)}", font = "tom-thumb", color = "#444444"),
+                ],
+            ),
+        )
+    )
+
+    # Progress bar below times
+    children.append(
+        render.Padding(
+            pad = (3, 2, 3, 0),
+            child = render.Stack(
+                children = [
+                    render.Box(width = 58, height = 3, color = "#282828"),
+                    render.Box(width = {bar_filled}, height = 3, color = "#1DB954"),
                 ],
             ),
         )
