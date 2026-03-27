@@ -8,6 +8,7 @@ Type=simple
 User=charles
 WorkingDirectory=/home/charles/phoenix
 ExecStart=/home/charles/.local/bin/uv run phoenix display
+Nice=-5
 Restart=always
 RestartSec=3
 Environment=PHOENIX_PLATFORM=serial

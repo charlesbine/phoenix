@@ -8,6 +8,7 @@ Type=simple
 User=charles
 WorkingDirectory=/home/charles/phoenix
 ExecStart=/home/charles/.local/bin/uv run phoenix render
+Nice=10
 Restart=always
 RestartSec=5
 Environment=PHOENIX_PLATFORM=serial
