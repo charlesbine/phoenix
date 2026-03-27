@@ -6,7 +6,7 @@ Requires=phoenix-dashboard.service
 [Service]
 Type=simple
 User=charles
-WorkingDirectory=/home/charles/pheonix
+WorkingDirectory=/home/charles/phoenix
 ExecStart=/home/charles/.local/bin/uv run phoenix display
 Restart=always
 RestartSec=3

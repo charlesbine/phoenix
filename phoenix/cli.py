@@ -18,11 +18,33 @@ def _setup(
 ):
     """LED matrix display manager for Starlark applets."""
     level = logging.DEBUG if verbose else logging.INFO
+
+    from phoenix.paths import PACKAGE_DIR
+    log_dir = PACKAGE_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+
+    # File handler — rotates daily, keeps 7 days
+    from logging.handlers import TimedRotatingFileHandler
+    file_handler = TimedRotatingFileHandler(
+        log_dir / "phoenix.log",
+        when="midnight",
+        backupCount=7,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    file_handler.setLevel(logging.DEBUG)
+
     logging.basicConfig(
         level=level,
         format="%(message)s",
         datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
+        handlers=[
+            RichHandler(rich_tracebacks=True, show_path=False),
+            file_handler,
+        ],
     )
 
 

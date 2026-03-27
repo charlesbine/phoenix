@@ -37,17 +37,20 @@ def _is_panel(name: str) -> bool:
 
 def _render_dispatch(app: AppConfig, settings: Settings) -> None:
     """Render an app based on its type (star, python, static, or panel)."""
+    import time as _time
     ensure_dirs()
+    start = _time.perf_counter()
 
     if _is_panel(app.name):
         logger.info("[%s] Rendering dashboard panel", app.name)
-        # Panels use the shared dashboard_panel.star template
         panel_app = AppConfig(
             name=app.name,
             pixlet_config={"instance_id": app.name.removeprefix("panel_")},
         )
         _run_pixlet(panel_app, settings, large=False, star_override=star_path("dashboard_panel"))
         _run_pixlet(panel_app, settings, large=True, star_override=star_path("dashboard_panel"))
+        elapsed = _time.perf_counter() - start
+        logger.info("[%s] Render complete (%.2fs)", app.name, elapsed)
         return
 
     kind = app_type(app.name)
@@ -63,6 +66,10 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
         _copy_static_app(app, settings)
     else:
         raise ValueError(f"No .star, .py, or image file found for '{app.name}' in {APPS_DIR}")
+
+    elapsed = _time.perf_counter() - start
+    output_size = output_path(app.name).stat().st_size if output_path(app.name).exists() else 0
+    logger.info("[%s] Render complete (%.2fs, %dKB)", app.name, elapsed, output_size // 1024)
 
 
 def render_preview(name: str, settings: Settings) -> None:

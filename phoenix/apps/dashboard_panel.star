@@ -274,26 +274,27 @@ def render_sparkline(data):
             )
         )
 
-    plot_height = 48 if (title or value) else 60
+    # Oversized height pushes pixlet's built-in axis padding off-screen
+    plot_height = 56 if (title or value) else 70
+    y_min = min([v for _, v in plot_data]) if plot_data else 0
     y_max = max([v for _, v in plot_data]) if plot_data else 1
+    has_negative = y_min < 0
+
     children.append(
         render.Plot(
             data = plot_data,
             width = 64,
             height = plot_height,
             color = color,
-            color_inverted = "#0d1117",
+            color_inverted = "#FF4444" if has_negative else color,
             fill = fill,
-            y_lim = (0, y_max * 1.05),
+            y_lim = (y_min if has_negative else 0, y_max * 1.05),
         )
     )
 
     return render.Root(
-        child = render.Padding(
-            pad = (0, 2, 0, 0),
-            child = render.Column(
-                expanded = True,
-                children = children,
-            ),
+        child = render.Column(
+            expanded = True,
+            children = children,
         ),
     )

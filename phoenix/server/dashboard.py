@@ -407,6 +407,62 @@ def create_app() -> FastAPI:
             return {"error": "no message for topic"}
         return msg
 
+    @app.get("/api/logs")
+    async def get_logs(lines: int = 100):
+        """Get recent log lines."""
+        from phoenix.paths import PACKAGE_DIR
+        log_file = PACKAGE_DIR / "logs" / "phoenix.log"
+        if not log_file.exists():
+            return {"lines": []}
+        text = log_file.read_text(encoding="utf-8", errors="replace")
+        all_lines = text.strip().splitlines()
+        return {"lines": all_lines[-lines:]}
+
+    @app.get("/api/stats")
+    async def get_stats():
+        """System stats — memory, uptime, render timing from logs."""
+        import os
+        from phoenix.paths import PACKAGE_DIR
+
+        stats: dict = {}
+
+        # Parse recent render times from log
+        log_file = PACKAGE_DIR / "logs" / "phoenix.log"
+        render_times: dict[str, float] = {}
+        if log_file.exists():
+            for line in log_file.read_text(errors="replace").splitlines()[-500:]:
+                if "Render complete" in line:
+                    try:
+                        name = line.split("[")[2].split("]")[0]
+                        time_str = line.split("(")[1].split("s")[0]
+                        render_times[name] = float(time_str)
+                    except (IndexError, ValueError):
+                        pass
+        stats["render_times"] = render_times
+
+        # Basic system info
+        try:
+            load1, load5, load15 = os.getloadavg()
+            stats["load"] = {"1m": round(load1, 2), "5m": round(load5, 2), "15m": round(load15, 2)}
+        except OSError:
+            pass
+
+        # Memory
+        try:
+            with open("/proc/meminfo") as f:
+                mem = {}
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        mem[parts[0].strip()] = int(parts[1].strip().split()[0])
+                total = mem.get("MemTotal", 0) // 1024
+                avail = mem.get("MemAvailable", 0) // 1024
+                stats["memory"] = {"total_mb": total, "available_mb": avail, "used_mb": total - avail}
+        except Exception:
+            pass
+
+        return stats
+
     @app.get("/api/now-playing")
     async def now_playing():
         txt = DATA_DIR / "output" / "current_app.txt"
