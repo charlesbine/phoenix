@@ -514,7 +514,23 @@ def create_app() -> FastAPI:
                         pass
         health["render_times"] = render_times
 
-        return health
+        from fastapi.responses import JSONResponse
+        status_code = 200 if health["status"] == "ok" else 503
+        return JSONResponse(content=health, status_code=status_code)
+
+    @app.get("/healthz")
+    async def healthz():
+        """Simple health check — 200 if M4 connected, 503 if not."""
+        try:
+            import serial as _serial
+            port = _serial.Serial(settings.serial_port, baudrate=2000000, timeout=0.1)
+            ok = port.is_open
+            port.close()
+        except Exception:
+            ok = False
+        if ok:
+            return {"status": "ok"}
+        return JSONResponse(content={"status": "degraded"}, status_code=503)
 
     @app.get("/api/logs")
     async def get_logs(lines: int = 100):
