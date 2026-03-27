@@ -34,6 +34,9 @@ class PhoenixService:
         pixlet_config: dict[str, str] | None = None,
         **kwargs: object,
     ) -> AppConfig:
+        from phoenix.models import REFRESH_PRESETS, default_preset_for
+        if "refresh_interval" not in kwargs:
+            kwargs["refresh_interval"] = REFRESH_PRESETS[default_preset_for(name)]
         return self.app_db.create(name, enabled=enabled, pixlet_config=pixlet_config or {}, **kwargs)
 
     def enable_app(self, name: str) -> AppConfig:

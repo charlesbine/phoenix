@@ -23,6 +23,31 @@ class PreprocessorResult:
     priority: int = 0
 
 
+# Refresh presets: how often an app should re-render
+REFRESH_PRESETS: dict[str, timedelta] = {
+    "realtime": timedelta(seconds=30),     # clocks, live data
+    "frequent": timedelta(minutes=5),      # sensors, API dashboards
+    "ambient": timedelta(minutes=30),      # art, procedural, static content
+}
+
+# Default preset assignments based on app name patterns
+_DEFAULT_PRESET_PATTERNS: dict[str, list[str]] = {
+    "realtime": ["clock", "fuzzy_clock"],
+    "ambient": ["procedural_planet", "pixel_planet", "aquarium", "nyan_cat",
+                "programming_excuses", "life", "maps", "hello_world",
+                "schema_hello_world", "font-preview", "quadrants"],
+    # Everything else defaults to "frequent"
+}
+
+
+def default_preset_for(name: str) -> str:
+    """Guess the best refresh preset for an app by name."""
+    for preset, patterns in _DEFAULT_PRESET_PATTERNS.items():
+        if name in patterns:
+            return preset
+    return "frequent"
+
+
 class AppConfig(BaseModel):
     name: str
     enabled: bool = True
@@ -33,11 +58,16 @@ class AppConfig(BaseModel):
     priority: int = 0
     sort_order: int = 0
 
-    def is_stale(self, factor: float = 1.5) -> bool:
-        if self.last_updated is None:
-            return True
-        elapsed = datetime.now() - self.last_updated
-        return elapsed > self.refresh_interval * factor
+    @property
+    def refresh_preset(self) -> str:
+        """Infer the preset from the current refresh_interval."""
+        secs = self.refresh_interval.total_seconds()
+        if secs <= 60:
+            return "realtime"
+        elif secs <= 300:
+            return "frequent"
+        else:
+            return "ambient"
 
     def seconds_until_refresh(self) -> float:
         if self.last_updated is None:

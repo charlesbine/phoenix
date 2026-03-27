@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
             "priority": a.priority,
             "sort_order": a.sort_order,
             "pixlet_config": a.pixlet_config,
+            "refresh_preset": a.refresh_preset,
             "app_type": app_type(a.name),
         }
 
@@ -156,6 +157,18 @@ def create_app() -> FastAPI:
         if priority is not None:
             return _serialize_app(get_svc().app_db.upsert(name, priority=int(priority)))
         return {"error": "missing priority"}
+
+    @app.put("/api/apps/{name}/preset")
+    async def update_preset(name: str, request: Request):
+        from phoenix.models import REFRESH_PRESETS
+        body = await request.json()
+        preset = body.get("preset", "frequent")
+        if preset not in REFRESH_PRESETS:
+            return {"error": f"Unknown preset: {preset}"}
+        from datetime import timedelta
+        return _serialize_app(get_svc().app_db.upsert(
+            name, refresh_interval=REFRESH_PRESETS[preset]
+        ))
 
     @app.put("/api/apps/{name}/refresh-interval")
     async def update_refresh_interval(name: str, request: Request):

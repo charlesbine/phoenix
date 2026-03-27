@@ -567,8 +567,8 @@
                 onAction();
             };
 
-            const saveRefreshInterval = async (seconds) => {
-                await api('/apps/' + app.name + '/refresh-interval', 'PUT', { refresh_interval: seconds });
+            const savePreset = async (preset) => {
+                await api('/apps/' + app.name + '/preset', 'PUT', { preset });
                 onAction();
             };
 
@@ -615,10 +615,13 @@
                         <${ConfigEditor} appName=${app.name} config=${app.pixlet_config} onSave=${saveConfig} />
                         <div class="config-editor" style="border-top: none; padding-top: 0;">
                             <div class="config-row">
-                                <label style="flex:0.6; font-size: 0.75rem; color: #8b949e">Refresh (sec)</label>
-                                <input type="number" min="10" max="86400" value=${app.refresh_interval}
-                                       style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
-                                       onChange=${e => saveRefreshInterval(parseInt(e.target.value) || 60)} />
+                                <label style="flex:0.6; font-size: 0.75rem; color: #8b949e">Refresh</label>
+                                <select style="flex:1; background:#0d1117; border:1px solid #30363d; color:#c9d1d9; padding:0.2rem 0.4rem; border-radius:3px; font-size:0.7rem;"
+                                        value=${app.refresh_preset} onChange=${e => savePreset(e.target.value)}>
+                                    <option value="realtime">Realtime (30s)</option>
+                                    <option value="frequent">Frequent (5m)</option>
+                                    <option value="ambient">Ambient (30m)</option>
+                                </select>
                             </div>
                             <div class="config-row">
                                 <label style="flex:0.6; font-size: 0.75rem; color: #8b949e">Priority</label>
