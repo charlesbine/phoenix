@@ -66,11 +66,8 @@ class DisplayManager:
                 time.sleep(NO_APPS_WAIT)
                 continue
 
-            if all(a.is_stale() for a in active):
-                logger.warning("All apps stale, waiting %ds...", ALL_APPS_STALE_WAIT)
-                self.backend.clear()
-                time.sleep(ALL_APPS_STALE_WAIT)
-                continue
+            # Don't skip stale apps — show them anyway. Better stale content than black screen.
+            # The renderer will update them when it gets to them.
 
             config = self.config_db.get()
             logger.debug("Display mode: %s, active: %s", config.layout_mode, [a.name for a in active])
@@ -132,10 +129,6 @@ class DisplayManager:
         path = output_path(fresh.name)
         if not path.exists():
             logger.warning("[%s] Output not found: %s", fresh.name, path)
-            return
-
-        if fresh.is_stale():
-            logger.debug("[%s] Stale (last updated: %s), skipping", fresh.name, fresh.last_updated)
             return
 
         logger.info("Displaying %s for %ds", fresh.name, duration)
