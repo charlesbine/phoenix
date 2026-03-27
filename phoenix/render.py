@@ -131,7 +131,8 @@ def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
         app_db.upsert(name, last_updated=datetime.now())
         return
 
-    preprocessor = get_preprocessor(name)
+    # Python apps handle their own data fetching — skip preprocessor
+    preprocessor = get_preprocessor(name) if app_type(name) != "python" else None
     if preprocessor is not None:
         logger.info("[%s] Running preprocessor", name)
         try:
