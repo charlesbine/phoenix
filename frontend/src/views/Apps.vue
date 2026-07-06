@@ -13,6 +13,10 @@ const tick = ref(0)
 const error = ref<string | null>(null)
 const note = ref<string | null>(null)
 const addPick = ref('')
+const showDisabled = ref(false)
+const visibleApps = computed(() =>
+  showDisabled.value ? apps.value : apps.value.filter((a) => a.enabled),
+)
 
 const PRESETS = ['realtime', 'frequent', 'ambient']
 const selectedApp = computed(() => apps.value.find((a) => a.name === selected.value) ?? null)
@@ -134,10 +138,13 @@ function onValue(id: string, e: Event): void {
       <section>
         <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
           <span>Rotation · {{ apps.length }} · drag to reorder</span>
+          <button class="hover:text-gold" :class="showDisabled ? 'text-gold' : ''" @click="showDisabled = !showDisabled">
+            {{ showDisabled ? '− hide disabled' : '+ show disabled' }}
+          </button>
         </div>
         <ul class="rounded border border-[#3a2016]">
           <li
-            v-for="a in apps"
+            v-for="a in visibleApps"
             :key="a.name"
             draggable="true"
             class="flex cursor-grab items-center gap-2.5 border-b border-[#1c0e14] px-3 py-2 text-xs uppercase tracking-wide last:border-b-0"

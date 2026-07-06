@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMatrixStore } from '@/stores/matrix'
 import MatrixPreview from '@/components/MatrixPreview.vue'
@@ -15,6 +15,10 @@ const { rotation, config, nowPlaying, online, tick, note, previewApp, selectedAp
 
 const device = ref<Device>('m4')
 const mode = ref<Mode>('stream')
+const showDisabled = ref(false)
+const visibleRotation = computed(() =>
+  showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
+)
 
 onMounted(() => {
   void store.refresh()
@@ -89,11 +93,16 @@ function modeActive(m: Mode): boolean {
         <div>
           <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
             <span>Rotation · {{ rotation.length }}</span>
-            <span>on {{ rotation.filter((a) => a.enabled).length }}</span>
+            <div class="flex items-center gap-3">
+              <button class="hover:text-gold" :class="showDisabled ? 'text-gold' : ''" @click="showDisabled = !showDisabled">
+                {{ showDisabled ? '− hide disabled' : '+ show disabled' }}
+              </button>
+              <span>on {{ rotation.filter((a) => a.enabled).length }}</span>
+            </div>
           </div>
           <ul class="rounded border border-[#3a2016]">
             <AppRow
-              v-for="a in rotation"
+              v-for="a in visibleRotation"
               :key="a.name"
               :app="a"
               :selected="a.name === previewApp"
