@@ -215,31 +215,42 @@ def dashboard():
 def shop(
     query: Annotated[Optional[str], typer.Argument(help="Search community apps")] = None,
     install: Annotated[Optional[str], typer.Option("--install", "-i", help="Import a community app by name")] = None,
+    category: Annotated[Optional[str], typer.Option("--category", "-c", help="Filter by category")] = None,
+    tag: Annotated[Optional[str], typer.Option("--tag", "-t", help="Filter by tag")] = None,
+    categories: Annotated[bool, typer.Option("--categories", help="List all categories")] = False,
 ):
-    """Browse and import community apps."""
-    from phoenix.shop import ensure_repo, import_app, list_apps
+    """Browse and import community apps from phoenix-apps."""
+    from phoenix.shop import ensure_repo, import_app, list_categories, search_apps
+    from phoenix.models import REFRESH_PRESETS
 
     from phoenix.paths import APPS_DIR, COMMUNITY_DIR
 
     ensure_repo(COMMUNITY_DIR)
 
+    if categories:
+        cats = list_categories(COMMUNITY_DIR)
+        for c in cats:
+            console.print(f"  {c}")
+        console.print(f"\n  {len(cats)} categories")
+        return
+
     if install:
         svc = get_service()
         dest = import_app(COMMUNITY_DIR, install, APPS_DIR)
-        svc.create_app(install)
+        svc.create_app(install, source="community", refresh_interval=REFRESH_PRESETS["ambient"])
         console.print(f"[green]Imported:[/] {install} -> {dest}")
         return
 
-    apps = list_apps(COMMUNITY_DIR)
-    if query:
-        apps = [a for a in apps if query.lower() in a.name.lower()]
+    apps = search_apps(COMMUNITY_DIR, query=query or "", category=category or "", tag=tag or "")
 
-    table = Table(title="Community Apps")
+    table = Table(title="Community Apps (phoenix-apps)")
     table.add_column("Name")
+    table.add_column("Category", style="dim")
     table.add_column("Summary")
+    table.add_column("Author", style="dim")
 
     for a in sorted(apps, key=lambda x: x.name):
-        table.add_row(a.name, a.summary)
+        table.add_row(a.name, a.category, a.summary, a.author)
 
     console.print(table)
     console.print(f"  {len(apps)} apps found")

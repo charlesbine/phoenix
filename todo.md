@@ -24,6 +24,10 @@
 - [ ] Transitions — fade to black between apps instead of hard cut
 - [ ] M4 temperature telemetry — read SAMD51 internal temp, report back to Pi
 - [ ] WebSocket for live dashboard updates instead of 15s polling
+- [ ] Downloading new applets from the comminity repo for pixlet: https://github.com/tidbyt/community . thiese are all optimized for 64 wide 32 tall displays. should run natively with that crop, but most can be easily adapted to the 64x64 size.
+
+## Fixes
+- [ ] Procedural pixel plan does not loop cleanly, there is a skip mid animation
 
 ## Nice to have
 - [ ] Multi-panel rotation — group panels into a single app slot that sub-cycles faster

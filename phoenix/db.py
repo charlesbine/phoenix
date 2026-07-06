@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS apps (
     last_updated TEXT,
     pixlet_config TEXT NOT NULL DEFAULT '{}',
     priority INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -82,6 +83,8 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(apps)").fetchall()]
             if "sort_order" not in cols:
                 conn.execute("ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            if "source" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN source TEXT NOT NULL DEFAULT ''")
             config_cols = [r[1] for r in conn.execute("PRAGMA table_info(display_config)").fetchall()]
             if "brightness" not in config_cols:
                 conn.execute("ALTER TABLE display_config ADD COLUMN brightness INTEGER NOT NULL DEFAULT 255")
@@ -92,6 +95,7 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
 
 
 def _row_to_app(row: sqlite3.Row) -> AppConfig:
+    keys = row.keys()
     return AppConfig(
         name=row["name"],
         enabled=bool(row["enabled"]),
@@ -100,7 +104,8 @@ def _row_to_app(row: sqlite3.Row) -> AppConfig:
         last_updated=datetime.fromisoformat(row["last_updated"]) if row["last_updated"] else None,
         pixlet_config=json.loads(row["pixlet_config"]),
         priority=row["priority"],
-        sort_order=row["sort_order"] if "sort_order" in row.keys() else 0,
+        sort_order=row["sort_order"] if "sort_order" in keys else 0,
+        source=row["source"] if "source" in keys else "",
     )
 
 
@@ -156,11 +161,17 @@ class AppDatabase:
             conn.execute("DELETE FROM apps WHERE name = ?", (name,))
             conn.commit()
 
+    def mark_all_stale(self) -> None:
+        """Clear last_updated for every app so the renderer treats them as due."""
+        with _connect(self._path) as conn:
+            conn.execute("UPDATE apps SET last_updated = NULL")
+            conn.commit()
+
     def _insert(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -168,8 +179,8 @@ class AppDatabase:
     def _replace(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -185,6 +196,7 @@ class AppDatabase:
             json.dumps(config.pixlet_config),
             config.priority,
             config.sort_order,
+            config.source,
         )
 
 

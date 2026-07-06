@@ -993,7 +993,7 @@ def generate_planet_gif(
 
     frames: list[Image.Image] = []
     for i in range(n_frames):
-        t = i * 0.3  # time step between frames
+        t = i * (frame_delay_ms / 1000.0)  # simulate real-time seconds
         frame = generator(cfg, t)
         # Convert to RGB with black background for GIF
         bg = Image.new("RGBA", (size, size), (0, 0, 0, 255))

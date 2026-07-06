@@ -56,6 +56,7 @@ def create_app() -> FastAPI:
             "pixlet_config": a.pixlet_config,
             "refresh_preset": a.refresh_preset,
             "app_type": app_type(a.name),
+            "source": a.source,
         }
 
     # -- SPA entry point --
@@ -531,13 +532,10 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz")
     async def healthz():
-        """Simple health check — 200 ok, 503 degraded."""
-        from fastapi.responses import JSONResponse
-        result = _check_health()
-        return JSONResponse(
-            content={"status": result["status"]},
-            status_code=200 if result["status"] == "ok" else 503,
-        )
+        """Liveness probe — 200 if the HTTP server is up. Dependency state (MQTT,
+        M4, etc.) lives on /api/health so a flaky dependency can't knock the
+        dashboard offline at the reverse proxy."""
+        return {"status": "ok"}
 
     @app.get("/api/logs")
     async def get_logs(lines: int = 100):
@@ -635,6 +633,129 @@ def create_app() -> FastAPI:
                 }
                 for r in rows
             ]
+
+    # -- Community Store --
+
+    @app.get("/api/store")
+    async def store_list(
+        q: str = Query("", description="Search query"),
+        category: str = Query("", description="Filter by category"),
+        tag: str = Query("", description="Filter by tag"),
+    ):
+        """List community apps with search, category, and tag filtering."""
+        from phoenix.shop import ensure_repo, search_apps
+        from phoenix.paths import COMMUNITY_DIR
+
+        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        apps = await asyncio.to_thread(search_apps, COMMUNITY_DIR, q, category, tag)
+
+        # Check which are already installed
+        installed = {a.name for a in get_svc().list_apps()}
+
+        return [
+            {
+                "name": a.name,
+                "summary": a.summary,
+                "description": a.description,
+                "author": a.author,
+                "category": a.category,
+                "tags": a.tags,
+                "supports_2x": a.supports_2x,
+                "installed": a.name in installed,
+            }
+            for a in apps
+        ]
+
+    @app.get("/api/store/categories")
+    async def store_categories():
+        """List all available categories."""
+        from phoenix.shop import ensure_repo, list_categories
+        from phoenix.paths import COMMUNITY_DIR
+
+        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        return await asyncio.to_thread(list_categories, COMMUNITY_DIR)
+
+    @app.post("/api/store/{name}/install")
+    async def store_install(name: str):
+        """Import a community app and register it."""
+        from phoenix.shop import ensure_repo, import_app
+        from phoenix.paths import COMMUNITY_DIR
+        from phoenix.models import REFRESH_PRESETS
+
+        svc = get_svc()
+        safe_name = name.replace("-", "_")
+
+        # Check if already installed
+        if svc.app_db.get(safe_name) is not None:
+            return {"error": f"'{name}' is already installed"}
+
+        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        try:
+            await asyncio.to_thread(import_app, COMMUNITY_DIR, name, APPS_DIR)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        # Register with community source and ambient refresh
+        app_config = svc.create_app(
+            safe_name,
+            source="community",
+            refresh_interval=REFRESH_PRESETS["ambient"],
+        )
+
+        # Render initial preview
+        try:
+            await asyncio.to_thread(svc.render_preview, safe_name)
+        except Exception:
+            pass
+
+        return _serialize_app(app_config)
+
+    @app.post("/api/store/{name}/preview")
+    async def store_preview(name: str):
+        """Render a preview of a community app without installing it."""
+        from phoenix.shop import ensure_repo, _resolve_app_dir
+        from phoenix.paths import COMMUNITY_DIR, output_path as _output_path
+        import shutil
+
+        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+
+        try:
+            app_dir = _resolve_app_dir(COMMUNITY_DIR, name)
+        except ValueError as e:
+            return {"error": str(e)}
+
+        star_files = list(app_dir.glob("*.star"))
+        if not star_files:
+            return {"error": f"No .star file found for '{name}'"}
+
+        # Copy .star to apps dir temporarily for rendering
+        safe_name = name.replace("-", "_")
+        tmp_star = APPS_DIR / f"{safe_name}.star"
+        already_exists = tmp_star.exists()
+
+        if not already_exists:
+            shutil.copy(star_files[0], tmp_star)
+
+        try:
+            await asyncio.to_thread(get_svc().render_preview, safe_name)
+            if not _output_path(safe_name).exists():
+                return {"info": f"{name}: no output (conditional skip)"}
+            return {"name": safe_name, "preview": True}
+        except Exception as e:
+            return {"error": str(e)}
+        finally:
+            if not already_exists and tmp_star.exists():
+                if get_svc().app_db.get(safe_name) is None:
+                    tmp_star.unlink()
+
+    @app.post("/api/store/sync")
+    async def store_sync():
+        """Pull latest community apps."""
+        from phoenix.shop import ensure_repo
+        from phoenix.paths import COMMUNITY_DIR
+
+        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        return {"ok": True}
 
     # -- Config --
 

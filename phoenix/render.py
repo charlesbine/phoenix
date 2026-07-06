@@ -187,6 +187,9 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
     max_workers = min(os.cpu_count() or 2, 4)
     logger.info("Renderer starting with %d workers", max_workers)
 
+    app_db.mark_all_stale()
+    logger.info("Marked all apps stale — will re-render on first pass")
+
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         while True:
             apps = [a for a in app_db.list_apps() if a.enabled]
@@ -250,16 +253,63 @@ def _handle_preprocessor_result(name: str, result: PreprocessorResult, app_db: A
         app_db.upsert(name, priority=0)
 
 
+COMMUNITY_RENDER_HEIGHT = 32  # Tidbyt/tronbyt community apps target 64x32
+
+
+def _center_on_canvas(webp_path: Path, canvas_width: int, canvas_height: int) -> None:
+    """Center a half-height render onto the full canvas, in place.
+
+    Handles both static and animated WebP files.
+    """
+    with Image.open(webp_path) as img:
+        if getattr(img, "is_animated", False):
+            from PIL import ImageSequence
+            frames = []
+            durations = []
+            for frame in ImageSequence.Iterator(img):
+                canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 255))
+                f = frame.convert("RGBA")
+                y_offset = (canvas_height - f.height) // 2
+                canvas.paste(f, (0, y_offset))
+                frames.append(canvas)
+                durations.append(frame.info.get("duration", 100))
+            if frames:
+                frames[0].save(
+                    webp_path, "WEBP", save_all=True, append_images=frames[1:],
+                    duration=durations, loop=0,
+                )
+        else:
+            canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 255))
+            f = img.convert("RGBA")
+            y_offset = (canvas_height - f.height) // 2
+            canvas.paste(f, (0, y_offset))
+            canvas.save(webp_path, "WEBP")
+
+
 def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False, star_override: Path | None = None) -> None:
     """Shell out to pixlet to render a Starlark app to .webp.
 
     Copies the .star file to a temp dir first as a workaround for a pixlet bug:
     https://discuss.tidbyt.com/t/strange-behavior-with-pixlet/6525
+
+    Community apps (source="community") render at 64x32 then get centered on the
+    full 64x64 canvas.
     """
     app_star = star_override or star_path(app.name)
+    is_community = app.source == "community"
+
+    # Community apps render at native Tidbyt height (32), then get centered
+    render_height = COMMUNITY_RENDER_HEIGHT if is_community else settings.render_height
 
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_star = shutil.copy(app_star, tmp)
+        # If the .star lives in a subdirectory (community app with assets),
+        # copy the entire directory so pixlet can resolve relative loads
+        if app_star.parent.name != APPS_DIR.name:
+            tmp_app_dir = Path(tmp) / app_star.parent.name
+            shutil.copytree(app_star.parent, tmp_app_dir)
+            tmp_star = str(tmp_app_dir / app_star.name)
+        else:
+            tmp_star = shutil.copy(app_star, tmp)
 
         if large:
             out = output_path_large(app.name)
@@ -270,7 +320,7 @@ def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False, star_ov
             "pixlet", "render", str(tmp_star),
             "-o", str(out),
             "-w", str(settings.render_width),
-            "-t", str(settings.render_height),
+            "-t", str(render_height),
         ]
         if large:
             cmd.extend(["-m", str(settings.magnification)])
@@ -286,6 +336,16 @@ def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False, star_ov
             stderr_lines = [l.strip() for l in proc.stderr.strip().splitlines() if l.strip()]
             detail = stderr_lines[-1] if stderr_lines else "unknown error"
             raise RuntimeError(f"[{app.name}] {detail}")
+
+        # Center community apps on the full canvas
+        if is_community and out.exists():
+            if large:
+                canvas_w = settings.render_width * settings.magnification
+                canvas_h = settings.render_height * settings.magnification
+            else:
+                canvas_w = settings.render_width
+                canvas_h = settings.render_height
+            _center_on_canvas(out, canvas_w, canvas_h)
 
 
 def _run_python_app(app: AppConfig, settings: Settings) -> None:

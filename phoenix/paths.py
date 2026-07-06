@@ -22,7 +22,14 @@ def ensure_dirs() -> None:
 
 
 def star_path(name: str) -> Path:
-    return APPS_DIR / f"{name}.star"
+    # Check flat file first, then subdirectory (community apps with assets)
+    flat = APPS_DIR / f"{name}.star"
+    if flat.exists():
+        return flat
+    subdir = APPS_DIR / name / f"{name}.star"
+    if subdir.exists():
+        return subdir
+    return flat  # default for new apps
 
 
 def python_app_path(name: str) -> Path:

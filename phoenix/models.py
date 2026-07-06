@@ -57,6 +57,7 @@ class AppConfig(BaseModel):
     pixlet_config: dict[str, str] = {}
     priority: int = 0
     sort_order: int = 0
+    source: str = ""  # e.g. "community" for tronbyt/apps imports
 
     @property
     def refresh_preset(self) -> str:
