@@ -1,11 +1,12 @@
 """FastAPI dashboard — JSON API + static SPA frontend."""
 
 import asyncio
+import json
 import humanize
 from datetime import datetime
 from urllib.parse import unquote
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -769,5 +770,53 @@ def create_app() -> FastAPI:
         body = await request.json()
         cfg = get_svc().update_display_config(**body)
         return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval, "brightness": cfg.brightness}
+
+    # -- Realtime state push (replaces client polling) --
+
+    @app.websocket("/ws/state")
+    async def ws_state(ws: WebSocket):
+        """Push {apps, config, now_playing} on connect and whenever it changes,
+        with a heartbeat every ~15s. One socket replaces per-client polling."""
+        await ws.accept()
+        last_sig: str | None = None
+        ticks = 0
+        try:
+            while True:
+                svc = get_svc()
+                cfg = svc.get_display_config()
+                np_file = DATA_DIR / "output" / "current_app.txt"
+                apps = [_serialize_app(a) for a in svc.list_apps()]
+                payload = {
+                    "apps": apps,
+                    "config": {
+                        "layout_mode": cfg.layout_mode,
+                        "cycle_interval": cfg.cycle_interval,
+                        "brightness": cfg.brightness,
+                    },
+                    "now_playing": np_file.read_text().strip() if np_file.exists() else None,
+                }
+                # change detection ignores the humanized/volatile timestamps
+                sig = json.dumps(
+                    {
+                        "a": [
+                            {k: v for k, v in a.items() if k not in ("last_updated", "last_updated_human")}
+                            for a in apps
+                        ],
+                        "c": payload["config"],
+                        "n": payload["now_playing"],
+                    },
+                    default=str,
+                    sort_keys=True,
+                )
+                ticks += 1
+                if sig != last_sig or ticks >= 15:
+                    await ws.send_json(payload)
+                    last_sig = sig
+                    ticks = 0
+                await asyncio.sleep(1.0)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
 
     return app

@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/* ---- Ember CRT design tokens (from the phoenix artwork) ---- */
+@theme {
+  --color-bg: #0e0810;
+  --color-panel: #160b14;
+  --color-panel2: #120a10;
+  --color-line: #2a1620;
+  --color-gold: #ffd98a;
+  --color-flame: #ff9e3d;
+  --color-ember: #ff5a2a;
+  --color-crimson: #b3241a;
+  --color-core: #fff2cf;
+  --color-dim: #a86a4a;
+  --color-muted: #9c7d70;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+:root { color-scheme: dark; }
+html, body, #app { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  background-image: radial-gradient(130% 100% at 50% -10%, #2a0f22 0%, #140a12 55%, #0c0710 100%);
+  background-attachment: fixed;
+  color: var(--color-gold);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* pixel-art images stay crisp */
+.px { image-rendering: pixelated; }
+
+/* the whole word glows like the bird */
+.fire {
+  background: linear-gradient(180deg, #fff2cf 0%, #ffd98a 34%, #ff9e3d 62%, #ff5a2a 82%, #b3241a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* global CRT scanline overlay */
+.scanlines::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0, 0, 0, 0.13) 2px 3px);
+  mix-blend-mode: multiply;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .blink { animation: crt-blink 1.06s steps(1) infinite; }
+}
+@keyframes crt-blink { 50% { opacity: 0; } }
