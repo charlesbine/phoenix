@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMatrixStore } from '@/stores/matrix'
 import { api } from '@/api/client'
-import type { Health } from '@/api/types'
+import type { Config, Health } from '@/api/types'
 import MatrixPreview from '@/components/MatrixPreview.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
@@ -16,6 +16,7 @@ const showDisabled = ref(false)
 const health = ref<Health | null>(null)
 const healthError = ref<string | null>(null)
 let healthTimer: number | null = null
+const layoutModes: Config['layout_mode'][] = ['cycle', 'random', 'single']
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
 )
@@ -124,7 +125,39 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <BrightnessSlider v-if="config" :value="config.brightness" @commit="store.setBrightness" />
+        <div v-if="config" class="rounded border border-[#3a2016] bg-panel p-3">
+          <div class="mb-3 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+            <span>Panel controls</span>
+            <span class="text-muted">{{ store.activeDeviceObj?.name ?? store.activeDevice }}</span>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_7rem]">
+            <BrightnessSlider :value="config.brightness" @commit="store.setBrightness" />
+
+            <label class="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+              Layout
+              <select
+                :value="config.layout_mode"
+                class="mt-2 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 py-1.5 text-xs text-gold focus:border-flame focus:outline-none"
+                @change="store.setLayoutMode(($event.target as HTMLSelectElement).value as Config['layout_mode'])"
+              >
+                <option v-for="mode in layoutModes" :key="mode" :value="mode">{{ mode }}</option>
+              </select>
+            </label>
+
+            <label class="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+              Interval
+              <input
+                type="number"
+                min="1"
+                max="300"
+                :value="config.cycle_interval"
+                class="mt-2 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 py-1.5 text-xs text-gold focus:border-flame focus:outline-none"
+                @change="store.setCycleInterval(Number(($event.target as HTMLInputElement).value))"
+              />
+            </label>
+          </div>
+        </div>
         <div>
           <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
             <span>Rotation · {{ rotation.length }}</span>
