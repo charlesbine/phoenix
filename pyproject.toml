@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+wled = ["zeroconf>=0.80"]  # mDNS auto-discovery for the WLED backend
 
 [project.scripts]
 phoenix = "phoenix.cli:app"

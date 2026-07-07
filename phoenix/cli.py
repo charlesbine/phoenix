@@ -181,6 +181,10 @@ def display():
         from phoenix.display.serial import SerialDisplayBackend
 
         backend = SerialDisplayBackend()
+    elif settings.platform == "wled":
+        from phoenix.display.wled import WLEDDisplayBackend
+
+        backend = WLEDDisplayBackend()
     else:
         from phoenix.display.web import WebDisplayBackend
 
