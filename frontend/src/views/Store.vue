@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/client'
 import type { StoreApp } from '@/api/types'
 
 const apps = ref<StoreApp[]>([])
+// The catalog is ~1000 apps; cap the DOM and let search narrow the rest.
+const CAP = 60
+const shownApps = computed(() => apps.value.slice(0, CAP))
 const categories = ref<string[]>([])
 
 const q = ref('')
@@ -68,10 +71,12 @@ async function preview(app: StoreApp): Promise<void> {
     const res = await api.previewStore(app.name)
     if (res.error) {
       previewErrors.value[app.name] = res.error
-    } else if (res.preview_url) {
-      previews.value[app.name] = res.preview_url
     } else {
-      previewErrors.value[app.name] = 'No preview available'
+      // The store-preview endpoint renders to outputs/<safe_name>.large.webp but
+      // returns {name, preview:true} (no url), so build it here. Backend maps
+      // hyphens to underscores for the on-disk name.
+      const safe = app.name.replace(/-/g, '_')
+      previews.value[app.name] = res.preview_url ?? `/static/outputs/${encodeURIComponent(safe)}.large.webp?t=${Date.now()}`
     }
   } catch (e: unknown) {
     previewErrors.value[app.name] = e instanceof Error ? e.message : 'Preview failed'
@@ -151,7 +156,7 @@ onMounted(() => {
         <!-- status row -->
         <div class="mt-3 flex items-center gap-3 font-mono text-[11px] uppercase tracking-wider">
           <span v-if="loading" class="text-dim"><span class="blink">▮</span> Loading catalog…</span>
-          <span v-else class="text-dim">{{ apps.length }} app{{ apps.length === 1 ? '' : 's' }}</span>
+          <span v-else class="text-dim">{{ apps.length }} app{{ apps.length === 1 ? '' : 's' }}<span v-if="apps.length > CAP"> · showing {{ CAP }} — search to narrow</span></span>
         </div>
         <p v-if="error" class="mt-1 text-[11px] text-[#ff6a4a]">{{ error }}</p>
       </header>
@@ -159,7 +164,7 @@ onMounted(() => {
       <!-- results -->
       <div v-if="apps.length" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div
-          v-for="app in apps"
+          v-for="app in shownApps"
           :key="app.name"
           class="border border-[#3a2016] rounded bg-panel p-3"
         >
