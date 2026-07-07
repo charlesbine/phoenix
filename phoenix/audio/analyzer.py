@@ -21,6 +21,9 @@ class SpectrumAnalyzer:
         attack: float = 0.55,   # fraction toward a rising target per block
         release: float = 0.15,  # slower fall
         peak_decay: float = 0.015,
+        tilt: float = 3.0,      # dB/octave lift on highs (pink-noise comp) — evens the spectrum
+        gain_db: float = 6.0,   # overall sensitivity bump
+        tilt_pivot: float = 1000.0,
     ):
         self.samplerate = samplerate
         self.fft_size = fft_size
@@ -29,6 +32,7 @@ class SpectrumAnalyzer:
         self.attack = attack
         self.release = release
         self.peak_decay = peak_decay
+        self.gain_db = gain_db
 
         self._window = np.hanning(fft_size).astype(np.float32)
         freqs = np.fft.rfftfreq(fft_size, 1.0 / samplerate)
@@ -40,6 +44,11 @@ class SpectrumAnalyzer:
             if idx.size == 0:  # band narrower than a bin — snap to the nearest
                 idx = np.array([int(np.argmin(np.abs(freqs - (edges[b] + edges[b + 1]) / 2)))])
             self._bins.append(idx)
+
+        # Per-band tilt: lift highs, cut lows, pivoting at ~1kHz so music's
+        # natural bass-heavy 1/f rolloff doesn't leave the treble bars stubby.
+        centers = np.sqrt(edges[:-1] * edges[1:])
+        self._tilt_db = (tilt * np.log2(centers / tilt_pivot)).astype(np.float32)
 
         self._levels = np.zeros(bands, dtype=np.float32)
         self._peaks = np.zeros(bands, dtype=np.float32)
@@ -56,7 +65,7 @@ class SpectrumAnalyzer:
         raw = np.empty(self.bands, dtype=np.float32)
         for b, idx in enumerate(self._bins):
             mag = float(spec[idx].max())  # peak-in-band is punchier than mean
-            db = 20.0 * np.log10(mag + 1e-9)
+            db = 20.0 * np.log10(mag + 1e-9) + self._tilt_db[b] + self.gain_db
             raw[b] = np.clip((db - self.floor_db) / (-self.floor_db), 0.0, 1.0)
 
         # Attack/release: rise fast, fall slow.

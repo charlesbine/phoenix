@@ -248,6 +248,8 @@ def visualize(
     duration: Annotated[Optional[float], typer.Option(help="Seconds to render (with --file)")] = None,
     scale: Annotated[int, typer.Option(help="Upscale factor for the recorded video")] = 8,
     bands: Annotated[int, typer.Option(help="Spectrum bands (bars)")] = 24,
+    tilt: Annotated[float, typer.Option(help="dB/octave lift on highs (evens the spectrum)")] = 3.0,
+    gain: Annotated[float, typer.Option(help="Overall sensitivity in dB")] = 6.0,
     samplerate: Annotated[int, typer.Option(help="Sample rate (Hz)")] = 44100,
     block: Annotated[int, typer.Option(help="Samples per block; fps ≈ samplerate/block")] = 1024,
     brightness: Annotated[Optional[int], typer.Option(help="Set WLED master brightness 0-255 on start")] = None,
@@ -304,7 +306,7 @@ def visualize(
     else:
         source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
 
-    analyzer = SpectrumAnalyzer(samplerate=samplerate, fft_size=block, bands=bands)
+    analyzer = SpectrumAnalyzer(samplerate=samplerate, fft_size=block, bands=bands, tilt=tilt, gain_db=gain)
     viz = SpectrumBars(bands=bands)
 
     dest = " + ".join(x for x in [f"WLED {sink._ip}" if sink else None, record] if x)
