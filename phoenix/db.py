@@ -63,6 +63,30 @@ CREATE TABLE IF NOT EXISTS display_config (
     cycle_interval INTEGER NOT NULL DEFAULT 10,
     brightness INTEGER NOT NULL DEFAULT 255
 );
+
+-- Each physical panel is a device. app definitions stay global (one render per
+-- app); per-device rotation membership lives in device_apps. mirror_of points a
+-- device at another so its loop just follows it (cheap mirroring).
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    backend TEXT NOT NULL DEFAULT 'web',
+    brightness INTEGER NOT NULL DEFAULT 128,
+    layout_mode TEXT NOT NULL DEFAULT 'cycle',
+    cycle_interval INTEGER NOT NULL DEFAULT 10,
+    mirror_of TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS device_apps (
+    device_id TEXT NOT NULL,
+    app_name TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (device_id, app_name)
+);
 """
 
 # Track which db paths have had schema applied this process
@@ -236,6 +260,149 @@ class ConfigDatabase:
             conn.commit()
         logger.info("Display config updated: %s", config)
         return config
+
+
+class DeviceDatabase:
+    """CRUD for panels (devices) and their per-device rotation membership."""
+
+    _DEVICE_FIELDS = (
+        "name", "backend", "brightness", "layout_mode", "cycle_interval",
+        "mirror_of", "sort_order", "enabled",
+    )
+    _MEMBER_FIELDS = ("enabled", "priority", "sort_order")
+
+    def __init__(self, path: str | Path | None = None):
+        self._path = str(path or DB_PATH)
+        with _connect(self._path):
+            pass
+
+    def list_devices(self) -> list[dict]:
+        with _connect(self._path) as conn:
+            rows = conn.execute("SELECT * FROM devices ORDER BY sort_order, name").fetchall()
+            return [dict(r) for r in rows]
+
+    def get(self, device_id: str) -> dict | None:
+        with _connect(self._path) as conn:
+            row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+            return dict(row) if row else None
+
+    def create(self, device_id: str, name: str, backend: str, **kwargs: object) -> dict:
+        cols = {k: kwargs[k] for k in self._DEVICE_FIELDS if k in kwargs}
+        cols.update(name=name, backend=backend)
+        keys = ["id", *cols.keys()]
+        vals = [device_id, *cols.values()]
+        placeholders = ", ".join("?" for _ in keys)
+        with _connect(self._path) as conn:
+            conn.execute(
+                f"INSERT OR IGNORE INTO devices ({', '.join(keys)}) VALUES ({placeholders})",
+                vals,
+            )
+            conn.commit()
+        return self.get(device_id)  # type: ignore[return-value]
+
+    def update(self, device_id: str, **kwargs: object) -> dict | None:
+        fields = {k: v for k, v in kwargs.items() if k in self._DEVICE_FIELDS}
+        if fields:
+            sets = ", ".join(f"{k} = ?" for k in fields)
+            with _connect(self._path) as conn:
+                conn.execute(f"UPDATE devices SET {sets} WHERE id = ?", (*fields.values(), device_id))
+                conn.commit()
+        return self.get(device_id)
+
+    def delete(self, device_id: str) -> None:
+        with _connect(self._path) as conn:
+            conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+            conn.execute("DELETE FROM device_apps WHERE device_id = ?", (device_id,))
+            conn.commit()
+
+    # -- per-device rotation membership --
+
+    def list_apps(self, device_id: str) -> list[dict]:
+        with _connect(self._path) as conn:
+            rows = conn.execute(
+                "SELECT * FROM device_apps WHERE device_id = ? ORDER BY sort_order, app_name",
+                (device_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def set_app(self, device_id: str, app_name: str, **kwargs: object) -> None:
+        fields = {k: v for k, v in kwargs.items() if k in self._MEMBER_FIELDS}
+        with _connect(self._path) as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM device_apps WHERE device_id = ? AND app_name = ?",
+                (device_id, app_name),
+            ).fetchone()
+            if exists and fields:
+                sets = ", ".join(f"{k} = ?" for k in fields)
+                conn.execute(
+                    f"UPDATE device_apps SET {sets} WHERE device_id = ? AND app_name = ?",
+                    (*fields.values(), device_id, app_name),
+                )
+            elif not exists:
+                conn.execute(
+                    "INSERT INTO device_apps (device_id, app_name, enabled, priority, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        device_id,
+                        app_name,
+                        int(bool(fields.get("enabled", True))),
+                        int(fields.get("priority", 0)),  # type: ignore[arg-type]
+                        int(fields.get("sort_order", 0)),  # type: ignore[arg-type]
+                    ),
+                )
+            conn.commit()
+
+    def remove_app(self, device_id: str, app_name: str) -> None:
+        with _connect(self._path) as conn:
+            conn.execute(
+                "DELETE FROM device_apps WHERE device_id = ? AND app_name = ?", (device_id, app_name)
+            )
+            conn.commit()
+
+    def reorder(self, device_id: str, app_names: list[str]) -> None:
+        with _connect(self._path) as conn:
+            for i, name in enumerate(app_names):
+                conn.execute(
+                    "UPDATE device_apps SET sort_order = ? WHERE device_id = ? AND app_name = ?",
+                    (i, device_id, name),
+                )
+            conn.commit()
+
+
+def seed_default_device(
+    device_id: str = "main",
+    name: str = "Main",
+    backend: str = "web",
+    path: str | Path | None = None,
+) -> str | None:
+    """If no devices exist yet, migrate the current single-device state into one
+    device (config + the whole global rotation). Idempotent and non-destructive —
+    it only reads the legacy tables and writes the new ones.
+
+    Returns the seeded device id, or None if devices already existed.
+    """
+    ddb = DeviceDatabase(path)
+    if ddb.list_devices():
+        return None
+    cfg = ConfigDatabase(path).get()
+    ddb.create(
+        device_id,
+        name,
+        backend,
+        brightness=cfg.brightness,
+        layout_mode=cfg.layout_mode,
+        cycle_interval=cfg.cycle_interval,
+    )
+    for app in AppDatabase(path).list_apps():
+        ddb.set_app(
+            device_id,
+            app.name,
+            enabled=app.enabled,
+            priority=app.priority,
+            sort_order=app.sort_order,
+        )
+    logger.info("Seeded default device %r from existing single-device state", device_id)
+    return device_id
 
 
 class PanelDatabase:
