@@ -133,7 +133,12 @@ class WLEDDisplayBackend:
             return False
 
     def clear(self) -> None:
-        self.send_frame(b"\x00" * FRAME_SIZE)
+        # UDP is lossy — repeat the black frame so a dropped packet can't leave
+        # a band of stale pixels painted on the panel.
+        black = b"\x00" * FRAME_SIZE
+        for _ in range(3):
+            self.send_frame(black)
+            time.sleep(0.02)
 
     def close(self) -> None:
         try:

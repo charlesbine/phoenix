@@ -7,6 +7,7 @@ can be tested without hardware. New sources (a network feed, a file) only need
 """
 
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterator, Protocol
 
@@ -100,12 +101,16 @@ class FileAudioSource:
         blocksize: int = 1024,
         start: float = 0.0,
         duration: float | None = None,
+        realtime: bool = False,
     ):
         self.path = str(path)
         self.samplerate = samplerate
         self.blocksize = blocksize
         self.start = start
         self.duration = duration
+        # realtime paces block delivery to wall-clock (for streaming to a live
+        # panel); off = as-fast-as-possible (for rendering to a video).
+        self.realtime = realtime
         self._audio: np.ndarray | None = None
 
     def _decode(self) -> np.ndarray:
@@ -123,7 +128,12 @@ class FileAudioSource:
         if self._audio is None:
             self._audio = self._decode()
         n = self.blocksize
-        for i in range(0, len(self._audio) - n + 1, n):
+        t0 = time.perf_counter()
+        for k, i in enumerate(range(0, len(self._audio) - n + 1, n)):
+            if self.realtime:  # pace to wall-clock so a file plays at natural speed
+                dt = (t0 + k * n / self.samplerate) - time.perf_counter()
+                if dt > 0:
+                    time.sleep(dt)
             yield self._audio[i : i + n]
 
     def close(self) -> None:

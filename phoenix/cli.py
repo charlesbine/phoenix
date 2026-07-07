@@ -303,7 +303,10 @@ def visualize(
             sink.set_brightness(brightness)
 
     if file:
-        source = FileAudioSource(file, samplerate=samplerate, blocksize=block, start=start, duration=duration)
+        source = FileAudioSource(
+            file, samplerate=samplerate, blocksize=block, start=start, duration=duration,
+            realtime=(sink is not None and record is None),  # pace to the panel; full-speed for --record
+        )
     else:
         source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
 
