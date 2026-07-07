@@ -72,7 +72,10 @@ class _MockCanvas:
 class MatrixDisplayBackend:
     """DisplayBackend implementation for RGB LED matrix."""
 
-    def __init__(self):
+    def __init__(self, device_id: str | None = None):
+        # device_id accepted for a uniform backend constructor; the Pi matrix
+        # has no per-device sentinel/brightness path of its own yet.
+        self._device_id = device_id
         self._matrix = _get_matrix()
 
     def display_image(self, image_path: Path, duration: int) -> None:

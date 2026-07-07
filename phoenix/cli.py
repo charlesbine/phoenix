@@ -165,35 +165,75 @@ def config_cmd(
     console.print(f"[green]Updated:[/] {cfg.model_dump()}")
 
 
+def _make_backend(backend_type: str, device_id: str | None = None):
+    """Instantiate a display backend by name, bound to a device when given."""
+    if backend_type == "matrix":
+        from phoenix.display.matrix import MatrixDisplayBackend
+
+        return MatrixDisplayBackend(device_id=device_id)
+    elif backend_type == "serial":
+        from phoenix.display.serial import SerialDisplayBackend
+
+        return SerialDisplayBackend(device_id=device_id)
+    elif backend_type == "wled":
+        from phoenix.display.wled import WLEDDisplayBackend
+
+        return WLEDDisplayBackend(device_id=device_id)
+    else:
+        from phoenix.display.web import WebDisplayBackend
+
+        return WebDisplayBackend(device_id=device_id)
+
+
 @app.command()
-def display():
-    """Run the display loop (backend selected by PHOENIX_PLATFORM env var)."""
+def display(
+    device: Annotated[
+        Optional[str], typer.Option("--device", "-d", help="Run only this device's loop")
+    ] = None,
+):
+    """Run a display loop per enabled device.
+
+    On first run the legacy single-panel state is migrated into a 'main' device
+    (backend from PHOENIX_PLATFORM). Each enabled device gets its own loop and
+    backend; mirror devices follow their target.
+    """
+    import threading
+
+    from phoenix.db import DeviceDatabase, seed_default_device
     from phoenix.display.manager import DisplayManager
     from phoenix.settings import get_settings
 
     settings = get_settings()
+    # Migrate the current single-device world into one 'main' device the first
+    # time this runs; no-op once devices exist.
+    seed_default_device(backend=settings.platform)
 
-    if settings.platform == "matrix":
-        from phoenix.display.matrix import MatrixDisplayBackend
+    ddb = DeviceDatabase()
+    devices = [d for d in ddb.list_devices() if d["enabled"]]
+    if device:
+        devices = [d for d in devices if d["id"] == device]
+        if not devices:
+            console.print(f"[red]No enabled device named[/] {device}")
+            raise typer.Exit(1)
 
-        backend = MatrixDisplayBackend()
-    elif settings.platform == "serial":
-        from phoenix.display.serial import SerialDisplayBackend
+    if not devices:
+        console.print("[yellow]No enabled devices to drive.[/]")
+        raise typer.Exit(1)
 
-        backend = SerialDisplayBackend()
-    elif settings.platform == "wled":
-        from phoenix.display.wled import WLEDDisplayBackend
+    threads: list[threading.Thread] = []
+    for i, d in enumerate(devices):
+        backend = _make_backend(d["backend"], d["id"])
+        dm = DisplayManager(backend, device_id=d["id"], primary=(i == 0))
+        mode = f"mirror→{d['mirror_of']}" if d.get("mirror_of") else d["backend"]
+        console.print(f"Starting device [bold]{d['id']}[/] ({mode})...")
+        t = threading.Thread(target=dm.run, name=f"display-{d['id']}", daemon=True)
+        t.start()
+        threads.append(t)
 
-        backend = WLEDDisplayBackend()
-    else:
-        from phoenix.display.web import WebDisplayBackend
-
-        backend = WebDisplayBackend()
-
-    console.print(f"Starting display ({settings.platform} backend)...")
-    dm = DisplayManager(backend)
     try:
-        dm.run()
+        while any(t.is_alive() for t in threads):
+            for t in threads:
+                t.join(timeout=0.5)
     except KeyboardInterrupt:
         console.print("Display stopped.")
 

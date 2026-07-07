@@ -56,6 +56,23 @@ def app_type(name: str) -> str:
     return "unknown"
 
 
+def current_app_file(device_id: str | None = None) -> Path:
+    """Sentinel naming the app a device is currently showing.
+
+    Unsuffixed (device_id=None) is the legacy single-device file the dashboard
+    still reads; per-device files let a mirror follow its target and let the
+    dashboard report now-playing per panel.
+    """
+    base = DATA_DIR / "output"
+    return base / (f"current_app__{device_id}.txt" if device_id else "current_app.txt")
+
+
+def current_display_file(device_id: str | None = None) -> Path:
+    """The last frame a device showed, copied for the web/dashboard preview."""
+    base = DATA_DIR / "output"
+    return base / (f"current_display__{device_id}.webp" if device_id else "current_display.webp")
+
+
 def output_path(name: str) -> Path:
     return OUTPUTS_DIR / f"{name}.webp"
 

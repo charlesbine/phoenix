@@ -20,8 +20,8 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageSequence
 
-from phoenix.db import ConfigDatabase
-from phoenix.paths import DATA_DIR
+from phoenix.db import ConfigDatabase, DeviceDatabase
+from phoenix.paths import DATA_DIR, current_app_file, current_display_file
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -86,9 +86,10 @@ class WLEDDisplayBackend:
     frames are re-sent periodically so a dropped packet self-heals.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, device_id: str | None = None) -> None:
         self._settings = get_settings()
         self._config_db = ConfigDatabase()
+        self._device_id = device_id
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._web_output = DATA_DIR / "output"
         self._web_output.mkdir(parents=True, exist_ok=True)
@@ -141,9 +142,13 @@ class WLEDDisplayBackend:
     def display_image(self, image_path: Path, duration: int) -> None:
         large_path = image_path.with_suffix(".large.webp")
         src = large_path if large_path.exists() else image_path
+        app_name = image_path.stem.removesuffix(".large")
         try:
             shutil.copy(src, self._current_display)
-            (self._web_output / "current_app.txt").write_text(image_path.stem.removesuffix(".large"))
+            (self._web_output / "current_app.txt").write_text(app_name)
+            if self._device_id:
+                shutil.copy(src, current_display_file(self._device_id))
+                current_app_file(self._device_id).write_text(app_name)
         except Exception:
             pass
 
@@ -172,6 +177,10 @@ class WLEDDisplayBackend:
 
     def _get_brightness(self) -> int:
         try:
+            if self._device_id:
+                dev = DeviceDatabase().get(self._device_id)
+                if dev is not None:
+                    return dev["brightness"]
             return self._config_db.get().brightness
         except Exception:
             return 255
