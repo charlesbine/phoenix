@@ -140,6 +140,10 @@ class AppDatabase:
         with _connect(self._path):
             pass
 
+    @property
+    def path(self) -> str:
+        return self._path
+
     def list_apps(self) -> list[AppConfig]:
         with _connect(self._path) as conn:
             rows = conn.execute("SELECT * FROM apps ORDER BY name").fetchall()
@@ -280,6 +284,20 @@ class DeviceDatabase:
         with _connect(self._path) as conn:
             rows = conn.execute("SELECT * FROM devices ORDER BY sort_order, name").fetchall()
             return [dict(r) for r in rows]
+
+    def enabled_app_names(self) -> set[str]:
+        """App names enabled in the rotation of at least one enabled device.
+
+        The renderer renders the union of these with the globally-enabled apps,
+        so a panel's content stays fresh even if the app is off globally.
+        """
+        with _connect(self._path) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT da.app_name FROM device_apps da "
+                "JOIN devices d ON d.id = da.device_id "
+                "WHERE da.enabled = 1 AND d.enabled = 1"
+            ).fetchall()
+            return {r["app_name"] for r in rows}
 
     def get(self, device_id: str) -> dict | None:
         with _connect(self._path) as conn:
