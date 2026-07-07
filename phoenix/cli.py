@@ -350,6 +350,45 @@ def visualize(
 
 
 @app.command()
+def play(
+    file: Annotated[str, typer.Argument(help="Image / GIF / WebP / APNG to display")],
+    ip: Annotated[Optional[str], typer.Option("--ip", help="WLED panel IP (else PHOENIX_WLED_IP / mDNS)")] = None,
+    duration: Annotated[float, typer.Option(help="Seconds to loop it (0 = forever, Ctrl-C to stop)")] = 15.0,
+    brightness: Annotated[int, typer.Option(help="WLED master brightness 0-255")] = 110,
+    redundancy: Annotated[int, typer.Option(help="Send each UDP packet N times (lossy-link insurance)")] = 1,
+):
+    """Stream an image or animated GIF/WebP to the WLED panel (host-decoded, looped).
+
+        phoenix play cat.gif --ip 192.168.1.166
+    """
+    from pathlib import Path
+
+    from phoenix.display.sink import FramePlayer
+    from phoenix.display.wled import WLEDDisplayBackend
+
+    p = Path(file)
+    if not p.exists():
+        console.print(f"[red]No such file:[/] {file}")
+        raise typer.Exit(1)
+
+    sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy)
+    if not sink._ip:
+        console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
+        raise typer.Exit(1)
+
+    player = FramePlayer(sink)
+    dur = int(duration) if duration > 0 else 10**9
+    console.print(f"[green]Playing[/] {p.name} → WLED [bold]{sink._ip}[/] · {brightness} bri · Ctrl-C to stop")
+    try:
+        player.play(p, dur, lambda: brightness, lambda: False)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sink.clear()
+        console.print("\nStopped.")
+
+
+@app.command()
 def dashboard():
     """Run the FastAPI web dashboard."""
     import uvicorn
