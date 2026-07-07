@@ -247,6 +247,7 @@ def visualize(
     start: Annotated[float, typer.Option(help="Seconds into the file to start (with --file)")] = 0.0,
     duration: Annotated[Optional[float], typer.Option(help="Seconds to render (with --file)")] = None,
     scale: Annotated[int, typer.Option(help="Upscale factor for the recorded video")] = 8,
+    mode: Annotated[str, typer.Option("--mode", "-m", help="Visualizer: bars | vu | spectrogram")] = "bars",
     bands: Annotated[int, typer.Option(help="Spectrum bands (bars)")] = 24,
     tilt: Annotated[float, typer.Option(help="dB/octave lift on highs (evens the spectrum)")] = 3.0,
     gain: Annotated[float, typer.Option(help="Overall sensitivity in dB")] = 6.0,
@@ -269,7 +270,7 @@ def visualize(
     try:
         from phoenix.audio.analyzer import SpectrumAnalyzer
         from phoenix.audio.source import DeviceAudioSource, FileAudioSource, list_input_devices
-        from phoenix.audio.visualizer import SpectrumBars
+        from phoenix.audio.visualizer import make_visualizer
     except ImportError as e:
         console.print(f"[red]Audio extra not installed.[/] Run: [bold]uv sync --extra audio[/]  ({e})")
         raise typer.Exit(1)
@@ -307,7 +308,11 @@ def visualize(
         source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
 
     analyzer = SpectrumAnalyzer(samplerate=samplerate, fft_size=block, bands=bands, tilt=tilt, gain_db=gain)
-    viz = SpectrumBars(bands=bands)
+    try:
+        viz = make_visualizer(mode, bands=bands)
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
 
     dest = " + ".join(x for x in [f"WLED {sink._ip}" if sink else None, record] if x)
     console.print(f"[green]Visualizing[/] {file or 'live'} → {dest} · {bands} bands · ~{fps:.0f}fps")

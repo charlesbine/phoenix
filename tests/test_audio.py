@@ -12,7 +12,7 @@ import pytest
 
 from phoenix.audio.analyzer import SpectrumAnalyzer
 from phoenix.audio.source import FileAudioSource, SyntheticSource
-from phoenix.audio.visualizer import SpectrumBars
+from phoenix.audio.visualizer import Spectrogram, SpectrumBars, VUMeter, make_visualizer
 
 
 def test_synthetic_source_shape():
@@ -96,3 +96,31 @@ def test_bars_peak_cap_sits_above_a_short_bar():
     lit_rows = np.where(frame.any(axis=(1, 2)))[0]
     # highest lit row (smallest y) is the cap, near y = 64*(1-0.75) = 16
     assert lit_rows.min() <= 20
+
+
+def test_vu_fills_more_when_louder():
+    viz = VUMeter(bands=24, size=64)
+    z = np.zeros(24, dtype=np.float32)
+    o = np.ones(24, dtype=np.float32)
+    quiet = np.frombuffer(viz.render(z, z), dtype=np.uint8)
+    loud = np.frombuffer(viz.render(o, o), dtype=np.uint8)
+    assert len(loud) == 64 * 64 * 3
+    assert (loud > 0).sum() > (quiet > 0).sum()  # louder → more segments lit
+
+
+def test_spectrogram_scrolls_left():
+    viz = Spectrogram(bands=24, size=64)
+    bright = np.ones(24, dtype=np.float32)
+    silent = np.zeros(24, dtype=np.float32)
+    viz.render(bright, bright)  # newest bright column at x=63
+    frame = np.frombuffer(viz.render(silent, silent), dtype=np.uint8).reshape(64, 64, 3)
+    assert frame[:, 62].any()       # the bright column scrolled one step left
+    assert not frame[:, 63].any()   # newest (silent) column is dark
+
+
+def test_make_visualizer_selects_mode():
+    assert isinstance(make_visualizer("vu", 24), VUMeter)
+    assert isinstance(make_visualizer("spectrogram", 24), Spectrogram)
+    assert isinstance(make_visualizer("bars", 24), SpectrumBars)
+    with pytest.raises(ValueError):
+        make_visualizer("nope", 24)
