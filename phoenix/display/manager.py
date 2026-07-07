@@ -39,7 +39,73 @@ MIRROR_SLICE = 2  # seconds a mirror shows one frame before re-checking its targ
 # Live-audio content-mode capture params
 AUDIO_SR = 44100
 AUDIO_BLOCK = 1024
+AUDIO_SIZE = 64
 AUDIO_BANDS = 24
+
+
+def _is_live_runtime(app: AppConfig) -> bool:
+    return app.runtime in {"live_audio", "live_nowplaying"}
+
+
+def _config_int(config: dict, key: str, default: int) -> int:
+    try:
+        return int(str(config.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _config_float(config: dict, key: str, default: float) -> float:
+    try:
+        return float(str(config.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _spectrogram_bar_width(config: dict, size: int = AUDIO_SIZE) -> int:
+    width = _config_int(config, "bar_width", 2)
+    return width if width in {1, 2} and size % width == 0 else 2
+
+
+def _bar_width(config: dict) -> int:
+    width = _config_int(config, "bar_width", 2)
+    return width if width in {1, 2, 4} else 2
+
+
+def _bar_gap(config: dict) -> int:
+    spacing = str(config.get("bar_spacing") or "solid")
+    return 1 if spacing == "separated" else 0
+
+
+def _uniform_bar_count(config: dict, size: int = AUDIO_SIZE) -> int:
+    width = _bar_width(config)
+    gap = _bar_gap(config)
+    return max(1, (size + gap) // (width + gap))
+
+
+def _audio_band_count(mode: str, config: dict, size: int = AUDIO_SIZE) -> int:
+    if mode == "spectrogram":
+        return size // _spectrogram_bar_width(config, size)
+    if mode == "bars":
+        return _uniform_bar_count(config, size)
+    return max(1, _config_int(config, "bands", AUDIO_BANDS))
+
+
+def _analyzer_kwargs(mode: str, config: dict) -> dict[str, float]:
+    if mode == "bars":
+        tilt_default = 0.0
+        gain_default = 8.0
+    elif mode == "spectrogram":
+        tilt_default = 1.5
+        gain_default = 8.0
+    else:
+        tilt_default = 0.0
+        gain_default = 6.0
+    return {
+        "floor_db": _config_float(config, "floor_db", -55.0 if mode in {"bars", "vu"} else -62.0),
+        "noise_gate": _config_float(config, "noise_gate", 0.08 if mode == "bars" else 0.03),
+        "tilt": _config_float(config, "tilt_db", tilt_default),
+        "gain_db": _config_float(config, "gain_db", gain_default),
+    }
 
 
 class DisplayManager:
@@ -94,12 +160,6 @@ class DisplayManager:
                 if dev.get("mirror_of"):
                     self._mirror_tick(dev["mirror_of"])
                     continue
-                if dev.get("content_mode") == "audio":
-                    self._run_audio(dev)
-                    continue
-                if dev.get("content_mode") == "nowplaying":
-                    self._run_nowplaying(dev)
-                    continue
                 brightness = dev["brightness"]
                 layout_mode = dev["layout_mode"]
                 cycle_interval = dev["cycle_interval"]
@@ -111,6 +171,7 @@ class DisplayManager:
 
             # If brightness is 0, display is "off" — skip rendering
             if brightness == 0:
+                self._clear_display_state()
                 time.sleep(1)
                 continue
 
@@ -132,7 +193,7 @@ class DisplayManager:
 
             if not active:
                 logger.warning("No active apps, waiting %ds...", NO_APPS_WAIT)
-                self.backend.clear()
+                self._clear_display_state()
                 time.sleep(NO_APPS_WAIT)
                 continue
 
@@ -180,17 +241,40 @@ class DisplayManager:
         name = sentinel.read_text().strip() if sentinel.exists() else ""
         if name and output_path(name).exists():
             self._show(output_path(name), MIRROR_SLICE, name)
+        elif name and current_display_file(target_id).exists():
+            self._show(current_display_file(target_id), MIRROR_SLICE, name)
         else:
             time.sleep(MIRROR_SLICE)
 
-    # -- live audio content-mode --
+    # -- live apps --
 
-    def _run_audio(self, dev: dict) -> None:
-        """Stream the live audio visualizer to this panel until the device is
-        toggled off 'audio' (or its audio_mode changes, or it's turned off)."""
+    def _display_live_app(self, app: AppConfig, duration: int | None) -> None:
+        if app.runtime == "live_audio":
+            mode = str(app.pixlet_config.get("mode") or "bars")
+            self._display_audio_app(app.name, app.pixlet_config, duration)
+        elif app.runtime == "live_nowplaying":
+            self._display_nowplaying_app(app.name, duration)
+
+    def _live_slot_active(self, name: str, start: float, duration: int | None) -> bool:
+        if duration is not None and time.perf_counter() - start >= duration:
+            return False
+        if self._pending_notification():
+            return False
+        if not self.device_id:
+            return self.config_db.get().brightness > 0
+        dev = self.device_db.get(self.device_id)
+        if dev is None or dev["brightness"] == 0:
+            return False
+
+        return True
+
+    def _display_audio_app(self, name: str, config: dict, duration: int | None) -> None:
+        """Stream the live audio visualizer for one app slot."""
+        mode = str(config.get("mode") or "bars")
         if self.player is None:  # not a streaming sink (e.g. web) — can't do live audio
             logger.warning("[%s] backend can't stream live audio; idling", self.device_id)
-            time.sleep(NO_APPS_WAIT)
+            self._write_now_playing(name)
+            time.sleep(min(duration or NO_APPS_WAIT, NO_APPS_WAIT))
             return
         try:
             from phoenix.audio.analyzer import SpectrumAnalyzer
@@ -201,34 +285,45 @@ class DisplayManager:
             time.sleep(NO_APPS_WAIT)
             return
 
-        mode = dev.get("audio_mode") or "bars"
         settings = get_settings()
         try:
+            bands = _audio_band_count(mode, config)
+            bar_width = _spectrogram_bar_width(config) if mode == "spectrogram" else None
+            gap = _bar_gap(config) if mode == "bars" else 0
+            if mode == "bars":
+                bar_width = _bar_width(config)
             source = DeviceAudioSource(
                 device=settings.audio_device or None, samplerate=AUDIO_SR, blocksize=AUDIO_BLOCK
             )
-            analyzer = SpectrumAnalyzer(samplerate=AUDIO_SR, fft_size=AUDIO_BLOCK, bands=AUDIO_BANDS)
-            viz = make_visualizer(mode, bands=AUDIO_BANDS)
+            analyzer = SpectrumAnalyzer(
+                samplerate=AUDIO_SR,
+                fft_size=AUDIO_BLOCK,
+                bands=bands,
+                **_analyzer_kwargs(mode, config),
+            )
+            viz = make_visualizer(
+                mode,
+                bands=bands,
+                size=AUDIO_SIZE,
+                bar_width=bar_width,
+                gap=gap,
+                palette=str(config.get("palette") or "hue"),
+                contrast=str(config.get("contrast") or "high"),
+            )
         except Exception:
             logger.exception("[%s] audio setup failed", self.device_id)
-            time.sleep(NO_APPS_WAIT)
+            time.sleep(min(duration or NO_APPS_WAIT, NO_APPS_WAIT))
             return
 
         logger.info("[%s] Live audio visualizer (%s)", self.device_id, mode)
-        self._write_now_playing(f"audio:{mode}")
+        self._write_now_playing(name)
+        start = time.perf_counter()
         try:
             for i, samples in enumerate(source.blocks()):
-                # ~4x/sec: re-read control state so a dashboard toggle takes effect.
                 if i % 10 == 0:
-                    d = self.device_db.get(self.device_id)
-                    if (
-                        d is None
-                        or d.get("content_mode") != "audio"
-                        or (d.get("audio_mode") or "bars") != mode
-                        or d["brightness"] == 0
-                    ):
+                    if not self._live_slot_active(name, start, duration):
                         break
-                    self.backend.set_brightness(d["brightness"])
+                    self.backend.set_brightness(self._current_brightness())
                 frame = viz.render(*analyzer.process(samples))
                 self.backend.send_frame(frame)
                 if i % 20 == 0:  # ~2x/sec live preview for the dashboard
@@ -238,11 +333,12 @@ class DisplayManager:
         finally:
             source.close()
 
-    def _run_nowplaying(self, dev: dict) -> None:
-        """Stream the live now-playing card to this panel until toggled off."""
+    def _display_nowplaying_app(self, name: str, duration: int | None) -> None:
+        """Stream the live now-playing card for one app slot."""
         if self.player is None:
             logger.warning("[%s] backend can't stream live frames; idling", self.device_id)
-            time.sleep(NO_APPS_WAIT)
+            self._write_now_playing(name)
+            time.sleep(min(duration or NO_APPS_WAIT, NO_APPS_WAIT))
             return
         try:
             from phoenix.nowplaying.render import NowPlayingRenderer
@@ -255,16 +351,16 @@ class DisplayManager:
         source = HANowPlayingSource(get_settings())
         renderer = NowPlayingRenderer()
         logger.info("[%s] Live now-playing", self.device_id)
-        self._write_now_playing("nowplaying")
+        self._write_now_playing(name)
         last = time.perf_counter()
+        start = last
         i = 0
         try:
             while True:
                 if i % 10 == 0:
-                    d = self.device_db.get(self.device_id)
-                    if d is None or d.get("content_mode") != "nowplaying" or d["brightness"] == 0:
+                    if not self._live_slot_active(name, start, duration):
                         break
-                    self.backend.set_brightness(d["brightness"])
+                    self.backend.set_brightness(self._current_brightness())
                 now = time.perf_counter()
                 dt, last = now - last, now
                 track = source.get()
@@ -278,7 +374,7 @@ class DisplayManager:
             logger.exception("[%s] nowplaying loop error", self.device_id)
 
     def _write_now_playing(self, name: str) -> None:
-        """Text-only now-playing sentinel (no frame), for the live-audio mode."""
+        """Text-only now-playing sentinel for live-frame modes."""
         out = DATA_DIR / "output"
         try:
             out.mkdir(parents=True, exist_ok=True)
@@ -299,6 +395,25 @@ class DisplayManager:
             img.save(out / "current_display.webp", "WEBP")
             if self.device_id:
                 img.save(current_display_file(self.device_id), "WEBP")
+        except Exception:
+            pass
+
+    def _clear_display_state(self) -> None:
+        """Clear the physical output and the dashboard's current-frame sentinels."""
+        if self.player is not None:
+            self.backend.set_brightness(0)
+        self.backend.clear()
+        try:
+            from PIL import Image
+
+            out = DATA_DIR / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            img = Image.new("RGB", (64, 64), (0, 0, 0))
+            img.save(out / "current_display.webp", "WEBP")
+            (out / "current_app.txt").write_text("")
+            if self.device_id:
+                img.save(current_display_file(self.device_id), "WEBP")
+                current_app_file(self.device_id).write_text("")
         except Exception:
             pass
 
@@ -404,6 +519,10 @@ class DisplayManager:
         if fresh is None:
             return
 
+        if _is_live_runtime(fresh):
+            self._display_live_app(fresh, duration)
+            return
+
         path = output_path(fresh.name)
         if not path.exists():
             logger.warning("[%s] Output not found: %s", fresh.name, path)
@@ -422,7 +541,7 @@ class DisplayManager:
             show_file.unlink()
             if name:
                 app = self.app_db.get(name)
-                if app and output_path(name).exists():
+                if app and (_is_live_runtime(app) or output_path(name).exists()):
                     logger.info("[show_now] Jumping to %s", name)
                     return app
         except Exception:

@@ -2,16 +2,14 @@
 import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 
-const props = defineProps<{ app: string | null; tick: number; device?: string }>()
+const props = defineProps<{ app: string | null; tick: number; device?: string; live?: boolean }>()
 const emit = defineEmits<{ render: [] }>()
 
 const broken = ref(false)
-// Live modes (nowplaying, audio:*) have no rendered webp — show the panel's live frame.
-const isLive = (name: string) => name === 'nowplaying' || name.includes(':')
+// Live apps have no rendered webp — show the panel's latest streamed frame.
 const src = computed(() => {
   if (!props.app) return null
-  const url =
-    isLive(props.app) && props.device ? api.liveFrameUrl(props.device) : api.frameUrl(props.app)
+  const url = props.live && props.device ? api.liveFrameUrl(props.device) : api.frameUrl(props.app)
   return `${url}?t=${props.tick}`
 })
 

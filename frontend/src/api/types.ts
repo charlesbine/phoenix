@@ -11,7 +11,8 @@ export interface AppItem {
   sort_order: number
   pixlet_config: Record<string, unknown>
   refresh_preset: string | null
-  app_type: 'star' | 'python' | 'static' | 'panel' | 'unknown'
+  app_type: 'star' | 'python' | 'static' | 'panel' | 'live_audio' | 'live_nowplaying' | 'unknown'
+  is_live: boolean
   source: string | null
 }
 
@@ -23,6 +24,7 @@ export interface Config {
 
 export interface NowPlaying {
   app: string | null
+  is_live: boolean
 }
 
 /** A physical panel. Content (rotation), brightness and layout are per-device;

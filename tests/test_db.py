@@ -35,9 +35,8 @@ class TestAppDatabase:
         app_db.create("clock")
         app_db.create("weather")
         apps = app_db.list_apps()
-        assert len(apps) == 2
         names = {a.name for a in apps}
-        assert names == {"clock", "weather"}
+        assert {"clock", "weather"}.issubset(names)
 
     def test_update(self, app_db):
         app_db.create("clock", priority=0)
@@ -70,6 +69,34 @@ class TestAppDatabase:
         app_db.create("clock", refresh_interval=timedelta(seconds=30))
         app = app_db.get("clock")
         assert app.refresh_interval == timedelta(seconds=30)
+
+    def test_builtin_spectrogram_config_is_seeded_and_preserved(self, tmp_path):
+        import phoenix.db as db_mod
+
+        path = tmp_path / "builtins.db"
+        db = AppDatabase(path)
+        bars = db.get("audio_bars")
+        assert bars is not None
+        assert bars.pixlet_config["bar_width"] == "2"
+        assert bars.pixlet_config["bar_spacing"] == "solid"
+        assert bars.pixlet_config["floor_db"] == "-55"
+        assert bars.pixlet_config["noise_gate"] == "0.08"
+        app = db.get("audio_spectrogram")
+        assert app is not None
+        assert app.pixlet_config["mode"] == "spectrogram"
+        assert app.pixlet_config["bar_width"] == "2"
+        assert app.pixlet_config["palette"] == "hue"
+        assert app.pixlet_config["contrast"] == "high"
+        assert app.pixlet_config["floor_db"] == "-62"
+        assert app.pixlet_config["noise_gate"] == "0.03"
+
+        db.upsert("audio_spectrogram", pixlet_config={"mode": "spectrogram", "bar_width": "1"})
+        db_mod._initialized.discard(str(path))
+
+        app = AppDatabase(path).get("audio_spectrogram")
+        assert app is not None
+        assert app.pixlet_config["bar_width"] == "1"
+        assert app.pixlet_config["palette"] == "hue"
 
 
 class TestConfigDatabase:

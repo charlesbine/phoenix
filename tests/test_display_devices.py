@@ -7,6 +7,8 @@ _mirror_tick shows whatever the target device last displayed.
 
 from pathlib import Path
 
+import pytest
+
 from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase
 from phoenix.display import manager as manager_mod
 from phoenix.display.manager import MIRROR_SLICE, DisplayManager
@@ -55,6 +57,39 @@ def test_collect_active_uses_device_membership_and_overrides(tmp_path):
     assert names == {"clock", "spotify"}  # weather disabled, news inactive, weather excluded
     clock = next(a for a in active if a.name == "clock")
     assert clock.priority == 2 and clock.sort_order == 9  # per-device overrides win
+
+
+def test_collect_active_includes_db_backed_live_apps(tmp_path):
+    db = str(tmp_path / "t.db")
+    adb = _seed_apps(db)
+    ddb = DeviceDatabase(db)
+    ddb.create("apollo", "Apollo", "wled")
+    ddb.set_app("apollo", "audio_vu", enabled=True, priority=1, sort_order=0)
+
+    dm = DisplayManager(FakeBackend(), app_db=adb, device_id="apollo", device_db=ddb)
+    active = dm._collect_active()
+
+    assert [a.name for a in active] == ["audio_vu"]
+    assert active[0].runtime == "live_audio"
+    assert active[0].pixlet_config["mode"] == "vu"
+
+
+def test_spectrogram_bar_width_controls_live_band_count():
+    assert manager_mod._audio_band_count("spectrogram", {"bar_width": "2"}) == 32
+    assert manager_mod._audio_band_count("spectrogram", {"bar_width": "1"}) == 64
+    assert manager_mod._audio_band_count("spectrogram", {"bar_width": "3"}) == 32
+    assert manager_mod._audio_band_count("bars", {"bar_width": "2", "bar_spacing": "solid"}) == 32
+    assert manager_mod._audio_band_count("bars", {"bar_width": "2", "bar_spacing": "separated"}) == 21
+
+
+def test_audio_analyzer_kwargs_are_db_configurable_without_frequency_shift():
+    bars = manager_mod._analyzer_kwargs("bars", {"floor_db": "-50", "noise_gate": "0.12"})
+    spectrogram = manager_mod._analyzer_kwargs("spectrogram", {})
+
+    assert bars["floor_db"] == -50.0
+    assert bars["noise_gate"] == 0.12
+    assert spectrogram["floor_db"] == -62.0
+    assert spectrogram["noise_gate"] == 0.03
 
 
 def test_global_mode_ignores_devices(tmp_path):
@@ -108,3 +143,65 @@ def test_mirror_tick_waits_when_target_idle(tmp_path, monkeypatch):
     dm._mirror_tick("main")
 
     assert backend.shown == []  # nothing to mirror yet
+
+
+def test_empty_rotation_clears_per_device_display_state(tmp_path, monkeypatch):
+    db = str(tmp_path / "t.db")
+    adb = _seed_apps(db)
+    ddb = DeviceDatabase(db)
+    ddb.create("apollo", "Apollo", "wled")
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(manager_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(manager_mod, "current_app_file", lambda dev=None: data_dir / "output" / f"current_app__{dev}.txt")
+    monkeypatch.setattr(manager_mod, "current_display_file", lambda dev=None: data_dir / "output" / f"current_display__{dev}.webp")
+
+    backend = FakeBackend()
+    dm = DisplayManager(backend, app_db=adb, device_id="apollo", device_db=ddb)
+    dm._clear_display_state()
+
+    assert backend.cleared == 1
+    assert (data_dir / "output" / "current_app.txt").read_text() == ""
+    assert (data_dir / "output" / "current_app__apollo.txt").read_text() == ""
+    assert (data_dir / "output" / "current_display__apollo.webp").exists()
+
+
+def test_legacy_content_mode_does_not_bypass_empty_rotation(tmp_path, monkeypatch):
+    db = str(tmp_path / "t.db")
+    adb = _seed_apps(db)
+    ddb = DeviceDatabase(db)
+    ddb.create("apollo", "Apollo", "wled", content_mode="nowplaying")
+
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(manager_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(manager_mod, "current_app_file", lambda dev=None: data_dir / "output" / f"current_app__{dev}.txt")
+    monkeypatch.setattr(manager_mod, "current_display_file", lambda dev=None: data_dir / "output" / f"current_display__{dev}.webp")
+
+    class StopLoop(Exception):
+        pass
+
+    monkeypatch.setattr(manager_mod.time, "sleep", lambda _seconds: (_ for _ in ()).throw(StopLoop()))
+
+    backend = FakeBackend()
+    dm = DisplayManager(backend, app_db=adb, device_id="apollo", device_db=ddb)
+    with pytest.raises(StopLoop):
+        dm.run()
+
+    assert backend.cleared == 1
+    assert (data_dir / "output" / "current_app__apollo.txt").read_text() == ""
+
+
+def test_show_now_accepts_live_app_without_rendered_output(tmp_path, monkeypatch):
+    db = str(tmp_path / "t.db")
+    adb = _seed_apps(db)
+    show_file = tmp_path / "show_now__apollo.txt"
+    show_file.write_text("nowplaying")
+
+    monkeypatch.setattr(manager_mod, "show_now_file", lambda dev=None: show_file)
+
+    dm = DisplayManager(FakeBackend(), app_db=adb, device_id="apollo", device_db=DeviceDatabase(db))
+    app = dm._check_show_now()
+
+    assert app is not None
+    assert app.name == "nowplaying"
+    assert app.runtime == "live_nowplaying"

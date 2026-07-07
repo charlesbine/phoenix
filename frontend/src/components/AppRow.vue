@@ -9,6 +9,8 @@ const TYPE_MARK: Record<string, string> = {
   python: 'py',
   static: '▦',
   panel: '▤',
+  live_audio: 'au',
+  live_nowplaying: 'np',
   unknown: '·',
 }
 </script>

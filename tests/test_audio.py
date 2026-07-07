@@ -41,6 +41,18 @@ def test_analyzer_silence_is_quiet():
     assert levels.max() < 0.05 and peaks.max() < 0.05
 
 
+def test_analyzer_noise_gate_suppresses_quiet_residual_energy():
+    quiet = next(SyntheticSource(120.0, blocksize=1024, blocks=1, amplitude=0.005).blocks())
+    open_analyzer = SpectrumAnalyzer(fft_size=1024, floor_db=-70, noise_gate=0.0)
+    gated_analyzer = SpectrumAnalyzer(fft_size=1024, floor_db=-70, noise_gate=0.12)
+
+    open_levels, _ = open_analyzer.process(quiet)
+    gated_levels, _ = gated_analyzer.process(quiet)
+
+    assert open_levels.max() > 0.0
+    assert gated_levels.max() < open_levels.max()
+
+
 def test_bars_render_black_when_silent():
     viz = SpectrumBars(bands=16, size=64)
     z = np.zeros(16, dtype=np.float32)
@@ -98,6 +110,15 @@ def test_bars_peak_cap_sits_above_a_short_bar():
     assert lit_rows.min() <= 20
 
 
+def test_bars_can_render_exact_two_pixel_solid_columns():
+    viz = SpectrumBars(bands=32, size=64, bar_width=2, gap=0)
+    levels = np.linspace(0.05, 1.0, 32, dtype=np.float32)
+    frame = np.frombuffer(viz.render(levels, levels), dtype=np.uint8).reshape(64, 64, 3)
+
+    for x in range(0, 64, 2):
+        assert np.array_equal(frame[:, x], frame[:, x + 1])
+
+
 def test_vu_fills_more_when_louder():
     viz = VUMeter(bands=24, size=64)
     z = np.zeros(24, dtype=np.float32)
@@ -118,9 +139,22 @@ def test_spectrogram_scrolls_left():
     assert not frame[:, 63].any()   # newest (silent) column is dark
 
 
+def test_spectrogram_can_render_exact_two_pixel_frequency_rows():
+    viz = Spectrogram(bands=32, size=64, bar_width=2)
+    levels = np.linspace(0.0, 1.0, 32, dtype=np.float32)
+
+    frame = np.frombuffer(viz.render(levels, levels), dtype=np.uint8).reshape(64, 64, 3)
+    newest = frame[:, 63]
+
+    for y in range(0, 64, 2):
+        assert np.array_equal(newest[y], newest[y + 1])
+
+
 def test_make_visualizer_selects_mode():
     assert isinstance(make_visualizer("vu", 24), VUMeter)
     assert isinstance(make_visualizer("spectrogram", 24), Spectrogram)
+    assert isinstance(make_visualizer("spectrogram", 32, bar_width=2), Spectrogram)
+    assert isinstance(make_visualizer("bars", 32, bar_width=2, gap=0), SpectrumBars)
     assert isinstance(make_visualizer("bars", 24), SpectrumBars)
     with pytest.raises(ValueError):
         make_visualizer("nope", 24)

@@ -89,6 +89,115 @@ def test_content_mode_toggle(client):
     assert client.get("/api/devices/main").json()["content_mode"] == "apps"
 
 
+def test_builtin_live_apps_are_regular_device_apps(client):
+    apps = {a["name"]: a for a in client.get("/api/apps").json()}
+    assert apps["nowplaying"]["app_type"] == "live_nowplaying"
+    assert apps["nowplaying"]["is_live"] is True
+    assert apps["audio_vu"]["app_type"] == "live_audio"
+    assert apps["audio_vu"]["is_live"] is True
+    assert apps["audio_bars"]["pixlet_config"]["bar_spacing"] == "solid"
+    assert apps["audio_bars"]["pixlet_config"]["noise_gate"] == "0.08"
+    assert apps["audio_spectrogram"]["pixlet_config"]["bar_width"] == "2"
+    assert apps["audio_spectrogram"]["pixlet_config"]["noise_gate"] == "0.03"
+    assert apps["nowplaying"]["enabled"] is False  # available, not globally rotating
+
+    client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
+    client.post("/api/apps/nowplaying/add", params={"device": "apollo"})
+    client.post("/api/apps/audio_vu/add", params={"device": "apollo"})
+
+    apollo = client.get("/api/apps", params={"device": "apollo"}).json()
+    assert {a["name"] for a in apollo} == {"nowplaying", "audio_vu"}
+    assert {a["name"]: a["enabled"] for a in apollo} == {"nowplaying": True, "audio_vu": True}
+
+
+def test_live_spectrogram_schema_exposes_bar_width(client):
+    schema = client.get("/api/apps/audio_spectrogram/schema").json()
+
+    assert [field["id"] for field in schema] == ["bar_width", "palette", "contrast", "floor_db", "noise_gate"]
+    assert schema[0] == {
+        "type": "dropdown",
+        "id": "bar_width",
+        "name": "Spectrogram bar width",
+        "desc": "Frequency rows map evenly to the 64px panel.",
+        "default": "2",
+        "options": [
+            {"display": "1 px", "value": "1"},
+            {"display": "2 px", "value": "2"},
+        ],
+    }
+    assert schema[1]["default"] == "hue"
+    assert schema[2]["default"] == "high"
+    assert schema[3]["default"] == "-62"
+    assert schema[4]["default"] == "0.03"
+
+
+def test_live_bars_schema_exposes_uniform_spacing_controls(client):
+    schema = client.get("/api/apps/audio_bars/schema").json()
+
+    assert schema == [
+        {
+            "type": "dropdown",
+            "id": "bar_width",
+            "name": "Bar width",
+            "desc": "Every analyzer bar uses the same pixel width.",
+            "default": "2",
+            "options": [
+                {"display": "1 px", "value": "1"},
+                {"display": "2 px", "value": "2"},
+            ],
+        },
+        {
+            "type": "dropdown",
+            "id": "bar_spacing",
+            "name": "Bar spacing",
+            "desc": "Solid removes gaps between bars.",
+            "default": "solid",
+            "options": [
+                {"display": "Solid", "value": "solid"},
+                {"display": "Separated", "value": "separated"},
+            ],
+        },
+        {
+            "type": "dropdown",
+            "id": "floor_db",
+            "name": "Noise floor",
+            "desc": "Raises silence cutoff without changing frequency range.",
+            "default": "-55",
+            "options": [
+                {"display": "-50 dB", "value": "-50"},
+                {"display": "-55 dB", "value": "-55"},
+                {"display": "-62 dB", "value": "-62"},
+                {"display": "-70 dB", "value": "-70"},
+            ],
+        },
+        {
+            "type": "dropdown",
+            "id": "noise_gate",
+            "name": "Noise gate",
+            "desc": "Suppresses residual low-level energy after normalization.",
+            "default": "0.08",
+            "options": [
+                {"display": "Off", "value": "0"},
+                {"display": "Light", "value": "0.04"},
+                {"display": "Medium", "value": "0.08"},
+                {"display": "Strong", "value": "0.12"},
+            ],
+        },
+    ]
+
+
+def test_show_live_app_uses_normal_show_path_and_exits_legacy_mode(client):
+    from phoenix.paths import show_now_file
+
+    client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
+    client.put("/api/devices/apollo", json={"content_mode": "audio", "audio_mode": "spectrogram"})
+
+    res = client.post("/api/apps/nowplaying/show", params={"device": "apollo"}).json()
+    assert res["showing"] == "nowplaying"
+    assert show_now_file("apollo").read_text() == "nowplaying"
+    assert client.get("/api/devices/apollo").json()["content_mode"] == "apps"
+
+
 def test_now_playing_is_per_device(client):
     from phoenix.paths import current_app_file
 
@@ -98,3 +207,16 @@ def test_now_playing_is_per_device(client):
 
     assert client.get("/api/now-playing", params={"device": "apollo"}).json()["app"] == "spotify"
     assert client.get("/api/now-playing", params={"device": "main"}).json()["app"] == "clock"
+
+
+def test_health_check_does_not_run_privileged_commands(client, monkeypatch):
+    import subprocess
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError(f"/api/health must not shell out: {args!r} {kwargs!r}")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+    res = client.get("/api/health")
+
+    assert res.status_code in {200, 503}
+    assert "status" in res.json()

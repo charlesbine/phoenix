@@ -74,6 +74,12 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
 
 def render_preview(name: str, settings: Settings) -> None:
     """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
+    app_db = AppDatabase()
+    existing = app_db.get(name)
+    if existing and existing.runtime.startswith("live_"):
+        app_db.upsert(name, last_updated=datetime.now())
+        return
+
     if _is_panel(name):
         from phoenix.preprocessors.dashboard_panel import run_panel
         panel_id = name.removeprefix("panel_")
@@ -119,6 +125,10 @@ def run_app(
     app = app_db.get(name)
     if app is None:
         raise ValueError(f"App '{name}' not found in database")
+
+    if app.runtime.startswith("live_"):
+        app_db.upsert(name, last_updated=datetime.now())
+        return
 
     # An app is worth rendering if it's on globally OR enabled on any panel.
     if device_enabled is None:

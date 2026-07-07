@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS apps (
     pixlet_config TEXT NOT NULL DEFAULT '{}',
     priority INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    source TEXT NOT NULL DEFAULT ''
+    source TEXT NOT NULL DEFAULT '',
+    runtime TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -95,6 +96,46 @@ CREATE TABLE IF NOT EXISTS device_apps (
 # Track which db paths have had schema applied this process
 _initialized: set[str] = set()
 
+_BUILTIN_APPS: tuple[dict, ...] = (
+    {
+        "name": "nowplaying",
+        "runtime": "live_nowplaying",
+        "pixlet_config": {},
+    },
+    {
+        "name": "audio_bars",
+        "runtime": "live_audio",
+        "pixlet_config": {
+            "mode": "bars",
+            "bar_width": "2",
+            "bar_spacing": "solid",
+            "floor_db": "-55",
+            "noise_gate": "0.08",
+            "tilt_db": "0",
+            "gain_db": "8",
+        },
+    },
+    {
+        "name": "audio_vu",
+        "runtime": "live_audio",
+        "pixlet_config": {"mode": "vu", "floor_db": "-55", "noise_gate": "0.06"},
+    },
+    {
+        "name": "audio_spectrogram",
+        "runtime": "live_audio",
+        "pixlet_config": {
+            "mode": "spectrogram",
+            "bar_width": "2",
+            "palette": "hue",
+            "contrast": "high",
+            "floor_db": "-62",
+            "noise_gate": "0.03",
+            "tilt_db": "1.5",
+            "gain_db": "8",
+        },
+    },
+)
+
 
 @contextmanager
 def _connect(path: str) -> Iterator[sqlite3.Connection]:
@@ -112,6 +153,8 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
                 conn.execute("ALTER TABLE apps ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
             if "source" not in cols:
                 conn.execute("ALTER TABLE apps ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+            if "runtime" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN runtime TEXT NOT NULL DEFAULT ''")
             config_cols = [r[1] for r in conn.execute("PRAGMA table_info(display_config)").fetchall()]
             if "brightness" not in config_cols:
                 conn.execute("ALTER TABLE display_config ADD COLUMN brightness INTEGER NOT NULL DEFAULT 255")
@@ -122,6 +165,7 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
                 conn.execute("ALTER TABLE devices ADD COLUMN audio_mode TEXT NOT NULL DEFAULT 'bars'")
             if "address" not in device_cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN address TEXT NOT NULL DEFAULT ''")
+            _seed_builtin_apps(conn)
             _initialized.add(path)
         yield conn
     finally:
@@ -140,7 +184,37 @@ def _row_to_app(row: sqlite3.Row) -> AppConfig:
         priority=row["priority"],
         sort_order=row["sort_order"] if "sort_order" in keys else 0,
         source=row["source"] if "source" in keys else "",
+        runtime=row["runtime"] if "runtime" in keys else "",
     )
+
+
+def _seed_builtin_apps(conn: sqlite3.Connection) -> None:
+    """Ensure built-in live apps exist as normal app rows."""
+    for app in _BUILTIN_APPS:
+        existing = conn.execute(
+            "SELECT pixlet_config FROM apps WHERE name = ?", (app["name"],)
+        ).fetchone()
+        pixlet_config = dict(app["pixlet_config"])
+        if existing is not None:
+            try:
+                current = json.loads(existing["pixlet_config"])
+                if isinstance(current, dict):
+                    pixlet_config.update(current)
+            except (TypeError, json.JSONDecodeError):
+                pass
+        conn.execute(
+            """
+            INSERT INTO apps
+                (name, enabled, active, refresh_interval, pixlet_config, priority, sort_order, source, runtime)
+            VALUES (?, 0, 1, 30.0, ?, 0, 0, 'builtin', ?)
+            ON CONFLICT(name) DO UPDATE SET
+                pixlet_config = excluded.pixlet_config,
+                source = CASE WHEN apps.source = '' THEN 'builtin' ELSE apps.source END,
+                runtime = excluded.runtime
+            """,
+            (app["name"], json.dumps(pixlet_config), app["runtime"]),
+        )
+    conn.commit()
 
 
 class AppDatabase:
@@ -208,8 +282,8 @@ class AppDatabase:
     def _insert(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source, runtime)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -217,8 +291,8 @@ class AppDatabase:
     def _replace(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source, runtime)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -235,6 +309,7 @@ class AppDatabase:
             config.priority,
             config.sort_order,
             config.source,
+            config.runtime,
         )
 
 
@@ -422,6 +497,8 @@ def seed_default_device(
         cycle_interval=cfg.cycle_interval,
     )
     for app in AppDatabase(path).list_apps():
+        if app.source == "builtin":
+            continue
         ddb.set_app(
             device_id,
             app.name,

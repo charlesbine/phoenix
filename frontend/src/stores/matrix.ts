@@ -7,12 +7,14 @@ interface StatePush {
   apps: AppItem[]
   config: Config
   now_playing: string | null
+  now_playing_is_live: boolean
 }
 
 export const useMatrixStore = defineStore('matrix', () => {
   const apps = ref<AppItem[]>([])
   const config = ref<Config | null>(null)
   const nowPlaying = ref<string | null>(null)
+  const nowPlayingLive = ref(false)
   const online = ref(false)
   const error = ref<string | null>(null)
   const tick = ref(0) // bumps on every state push / render — cache-busts the preview frame
@@ -61,6 +63,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     apps.value = s.apps
     config.value = s.config
     nowPlaying.value = s.now_playing
+    nowPlayingLive.value = s.now_playing_is_live
     online.value = true
     error.value = null
     tick.value++
@@ -70,7 +73,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     const d = activeDevice.value
     try {
       const [a, c, np] = await Promise.all([api.listApps(d), api.getConfig(d), api.nowPlaying(d)])
-      apply({ apps: a, config: c, now_playing: np.app })
+      apply({ apps: a, config: c, now_playing: np.app, now_playing_is_live: np.is_live })
     } catch (e) {
       online.value = false
       error.value = e instanceof Error ? e.message : String(e)
@@ -148,12 +151,6 @@ export const useMatrixStore = defineStore('matrix', () => {
     config.value = await api.setConfig({ brightness: value }, activeDevice.value)
   }
 
-  /** Switch the active panel's content mode (apps | audio | nowplaying). */
-  async function setContentMode(mode: Device['content_mode']): Promise<void> {
-    await api.updateDevice(activeDevice.value, { content_mode: mode })
-    await loadDevices()
-  }
-
   async function toggle(app: AppItem): Promise<void> {
     const d = activeDevice.value
     const updated = app.enabled ? await api.disable(app.name, d) : await api.enable(app.name, d)
@@ -176,11 +173,11 @@ export const useMatrixStore = defineStore('matrix', () => {
   }
 
   return {
-    apps, config, nowPlaying, online, error, tick, note,
+    apps, config, nowPlaying, nowPlayingLive, online, error, tick, note,
     devices, activeDevice, activeDeviceObj,
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
-    loadDevices, setActiveDevice, setContentMode,
+    loadDevices, setActiveDevice,
     setBrightness, toggle, setPriority, showNow,
   }
 })

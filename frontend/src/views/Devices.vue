@@ -141,57 +141,27 @@ async function remove(d: Device): Promise<void> {
           </label>
 
           <template v-if="!d.mirror_of">
-            <div class="flex items-center justify-between gap-2 sm:col-span-2">
-              <span class="text-dim">content</span>
-              <div class="flex gap-1">
-                <button
-                  v-for="cm in (['apps', 'audio', 'nowplaying'] as const)"
-                  :key="cm"
-                  class="rounded px-2.5 py-1"
-                  :class="d.content_mode === cm ? 'bg-flame text-[#160a0a]' : 'text-dim hover:text-gold'"
-                  @click="patch(d, { content_mode: cm })"
-                >
-                  {{ cm === 'nowplaying' ? 'now playing' : cm }}
-                </button>
-              </div>
-            </div>
-
-            <label v-if="d.content_mode === 'audio'" class="flex items-center justify-between gap-2 sm:col-span-2">
-              <span class="text-dim">visualizer</span>
+            <label class="flex items-center justify-between gap-2">
+              <span class="text-dim">layout</span>
               <select
-                :value="d.audio_mode"
+                :value="d.layout_mode"
                 class="rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-gold focus:border-flame focus:outline-none"
-                @change="patch(d, { audio_mode: ($event.target as HTMLSelectElement).value as Device['audio_mode'] })"
+                @change="patch(d, { layout_mode: ($event.target as HTMLSelectElement).value as Device['layout_mode'] })"
               >
-                <option value="bars">bars</option>
-                <option value="vu">vu</option>
-                <option value="spectrogram">spectrogram</option>
+                <option v-for="l in LAYOUTS" :key="l" :value="l">{{ l }}</option>
               </select>
             </label>
 
-            <template v-if="d.content_mode === 'apps'">
-              <label class="flex items-center justify-between gap-2">
-                <span class="text-dim">layout</span>
-                <select
-                  :value="d.layout_mode"
-                  class="rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-gold focus:border-flame focus:outline-none"
-                  @change="patch(d, { layout_mode: ($event.target as HTMLSelectElement).value as Device['layout_mode'] })"
-                >
-                  <option v-for="l in LAYOUTS" :key="l" :value="l">{{ l }}</option>
-                </select>
-              </label>
-
-              <label class="flex items-center justify-between gap-2">
-                <span class="text-dim">interval&nbsp;(s)</span>
-                <input
-                  type="number"
-                  min="1"
-                  :value="d.cycle_interval"
-                  class="w-20 rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-gold focus:border-flame focus:outline-none"
-                  @change="patch(d, { cycle_interval: Number(($event.target as HTMLInputElement).value) })"
-                />
-              </label>
-            </template>
+            <label class="flex items-center justify-between gap-2">
+              <span class="text-dim">interval&nbsp;(s)</span>
+              <input
+                type="number"
+                min="1"
+                :value="d.cycle_interval"
+                class="w-20 rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-gold focus:border-flame focus:outline-none"
+                @change="patch(d, { cycle_interval: Number(($event.target as HTMLInputElement).value) })"
+              />
+            </label>
 
             <label class="flex items-center justify-between gap-2 sm:col-span-2">
               <span class="text-dim">brightness · {{ d.brightness }}</span>

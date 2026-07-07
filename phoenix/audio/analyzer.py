@@ -18,6 +18,7 @@ class SpectrumAnalyzer:
         fmin: float = 40.0,
         fmax: float = 16000.0,
         floor_db: float = -70.0,
+        noise_gate: float = 0.0,
         attack: float = 0.55,   # fraction toward a rising target per block
         release: float = 0.15,  # slower fall
         peak_decay: float = 0.015,
@@ -29,6 +30,7 @@ class SpectrumAnalyzer:
         self.fft_size = fft_size
         self.bands = bands
         self.floor_db = floor_db
+        self.noise_gate = float(np.clip(noise_gate, 0.0, 0.95))
         self.attack = attack
         self.release = release
         self.peak_decay = peak_decay
@@ -67,6 +69,9 @@ class SpectrumAnalyzer:
             mag = float(spec[idx].max())  # peak-in-band is punchier than mean
             db = 20.0 * np.log10(mag + 1e-9) + self._tilt_db[b] + self.gain_db
             raw[b] = np.clip((db - self.floor_db) / (-self.floor_db), 0.0, 1.0)
+
+        if self.noise_gate > 0.0:
+            raw = np.where(raw < self.noise_gate, 0.0, (raw - self.noise_gate) / (1.0 - self.noise_gate))
 
         # Attack/release: rise fast, fall slow.
         coeff = np.where(raw > self._levels, self.attack, self.release).astype(np.float32)

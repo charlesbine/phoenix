@@ -57,6 +57,7 @@ def create_app() -> FastAPI:
         return PhoenixService()
 
     def _serialize_app(a):
+        kind = a.runtime or app_type(a.name)
         return {
             "name": a.name,
             "enabled": a.enabled,
@@ -68,7 +69,8 @@ def create_app() -> FastAPI:
             "sort_order": a.sort_order,
             "pixlet_config": a.pixlet_config,
             "refresh_preset": a.refresh_preset,
-            "app_type": app_type(a.name),
+            "app_type": kind,
+            "is_live": a.runtime.startswith("live_"),
             "source": a.source,
         }
 
@@ -115,6 +117,107 @@ def create_app() -> FastAPI:
             row["sort_order"] = m["sort_order"]
             return row
         return {"error": f"{name} not in device {device_id}"}
+
+    def _runtime_schema(app_obj) -> list[dict]:
+        if not app_obj or app_obj.runtime != "live_audio":
+            return []
+        def audio_floor_gate_fields(floor_default: str, gate_default: str) -> list[dict]:
+            return [
+                {
+                    "type": "dropdown",
+                    "id": "floor_db",
+                    "name": "Noise floor",
+                    "desc": "Raises silence cutoff without changing frequency range.",
+                    "default": str(app_obj.pixlet_config.get("floor_db", floor_default)),
+                    "options": [
+                        {"display": "-50 dB", "value": "-50"},
+                        {"display": "-55 dB", "value": "-55"},
+                        {"display": "-62 dB", "value": "-62"},
+                        {"display": "-70 dB", "value": "-70"},
+                    ],
+                },
+                {
+                    "type": "dropdown",
+                    "id": "noise_gate",
+                    "name": "Noise gate",
+                    "desc": "Suppresses residual low-level energy after normalization.",
+                    "default": str(app_obj.pixlet_config.get("noise_gate", gate_default)),
+                    "options": [
+                        {"display": "Off", "value": "0"},
+                        {"display": "Light", "value": "0.04"},
+                        {"display": "Medium", "value": "0.08"},
+                        {"display": "Strong", "value": "0.12"},
+                    ],
+                },
+            ]
+        mode = app_obj.pixlet_config.get("mode")
+        if mode == "bars":
+            return [
+                {
+                    "type": "dropdown",
+                    "id": "bar_width",
+                    "name": "Bar width",
+                    "desc": "Every analyzer bar uses the same pixel width.",
+                    "default": str(app_obj.pixlet_config.get("bar_width", "2")),
+                    "options": [
+                        {"display": "1 px", "value": "1"},
+                        {"display": "2 px", "value": "2"},
+                    ],
+                },
+                {
+                    "type": "dropdown",
+                    "id": "bar_spacing",
+                    "name": "Bar spacing",
+                    "desc": "Solid removes gaps between bars.",
+                    "default": str(app_obj.pixlet_config.get("bar_spacing", "solid")),
+                    "options": [
+                        {"display": "Solid", "value": "solid"},
+                        {"display": "Separated", "value": "separated"},
+                    ],
+                },
+                *audio_floor_gate_fields("-55", "0.08"),
+            ]
+        if mode == "vu":
+            return audio_floor_gate_fields("-55", "0.06")
+        if mode != "spectrogram":
+            return []
+        return [
+            {
+                "type": "dropdown",
+                "id": "bar_width",
+                "name": "Spectrogram bar width",
+                "desc": "Frequency rows map evenly to the 64px panel.",
+                "default": str(app_obj.pixlet_config.get("bar_width", "2")),
+                "options": [
+                    {"display": "1 px", "value": "1"},
+                    {"display": "2 px", "value": "2"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "palette",
+                "name": "Palette",
+                "desc": "Hue gives frequency energy more color separation.",
+                "default": str(app_obj.pixlet_config.get("palette", "hue")),
+                "options": [
+                    {"display": "Hue", "value": "hue"},
+                    {"display": "Fire", "value": "fire"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "contrast",
+                "name": "Contrast",
+                "desc": "Higher contrast reveals quieter detail.",
+                "default": str(app_obj.pixlet_config.get("contrast", "high")),
+                "options": [
+                    {"display": "Classic", "value": "classic"},
+                    {"display": "High", "value": "high"},
+                    {"display": "Hot", "value": "hot"},
+                ],
+            },
+            *audio_floor_gate_fields("-62", "0.03"),
+        ]
 
     # -- SPA entry point --
 
@@ -188,6 +291,9 @@ def create_app() -> FastAPI:
 
     @app.get("/api/apps/{name}/schema")
     async def get_app_schema(name: str):
+        app_obj = get_svc().app_db.get(name)
+        if app_obj and app_obj.runtime:
+            return _runtime_schema(app_obj)
         from phoenix.paths import star_path
         path = star_path(name)
         if not path.exists():
@@ -239,6 +345,8 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/show")
     async def show_app_now(name: str, device: str | None = Query(None)):
         """Skip to this app immediately — on one device, or all if unscoped."""
+        if device:
+            get_device_db().update(device, content_mode="apps")
         show_file = show_now_file(device)
         show_file.parent.mkdir(parents=True, exist_ok=True)
         show_file.write_text(name)
@@ -288,6 +396,8 @@ def create_app() -> FastAPI:
         try:
             svc = get_svc()
             app_obj = svc.app_db.get(name)
+            if app_obj and app_obj.runtime.startswith("live_"):
+                return {"info": f"{name}: live app streams directly to the panel"}
             if app_obj and not app_obj.enabled:
                 await asyncio.to_thread(svc.render_preview, name)
             else:
@@ -304,7 +414,11 @@ def create_app() -> FastAPI:
         """Render a preview for any app (even if not in DB or disabled)."""
         from phoenix.paths import output_path as _output_path
         try:
-            await asyncio.to_thread(get_svc().render_preview, name)
+            svc = get_svc()
+            app_obj = svc.app_db.get(name)
+            if app_obj and app_obj.runtime.startswith("live_"):
+                return {"info": f"{name}: live app preview uses the panel's latest frame"}
+            await asyncio.to_thread(svc.render_preview, name)
             if not _output_path(name).exists():
                 return {"info": f"{name}: no output (conditional skip — no data to display)"}
             return {"name": name, "preview": True}
@@ -578,17 +692,6 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
-        # USB power (check dmesg for overcurrent)
-        try:
-            import subprocess
-            dmesg = subprocess.run(["sudo", "dmesg"], capture_output=True, text=True, timeout=5)
-            if "over-current" in dmesg.stdout:
-                oc_count = dmesg.stdout.count("over-current")
-                result["issues"].append(f"USB overcurrent detected ({oc_count} events) — panel needs external PSU")
-                result["status"] = "degraded"
-        except Exception:
-            pass
-
         # Last render times
         log_file = PACKAGE_DIR / "logs" / "phoenix.log"
         render_times: dict[str, float] = {}
@@ -683,9 +786,16 @@ def create_app() -> FastAPI:
             txt = current_app_file(None)
         return txt.read_text().strip() if txt.exists() else None
 
+    def _is_live_app_name(name: str | None) -> bool:
+        if not name:
+            return False
+        app_obj = get_svc().app_db.get(name)
+        return bool(app_obj and app_obj.runtime.startswith("live_"))
+
     @app.get("/api/now-playing")
     async def now_playing(device: str | None = Query(None)):
-        return {"app": _read_now_playing(device)}
+        current = _read_now_playing(device)
+        return {"app": current, "is_live": _is_live_app_name(current)}
 
     # -- Cache proxy --
 
@@ -948,10 +1058,12 @@ def create_app() -> FastAPI:
                         "cycle_interval": cfg.cycle_interval,
                         "brightness": cfg.brightness,
                     }
+                current = _read_now_playing(device)
                 payload = {
                     "apps": apps,
                     "config": config,
-                    "now_playing": _read_now_playing(device),
+                    "now_playing": current,
+                    "now_playing_is_live": _is_live_app_name(current),
                 }
                 # change detection ignores the humanized/volatile timestamps
                 sig = json.dumps(
