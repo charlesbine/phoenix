@@ -6,15 +6,10 @@ import MatrixPreview from '@/components/MatrixPreview.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
 
-type Device = 'm4' | 'apollo'
-type Mode = 'stream' | 'gif' | 'audio'
-
 const store = useMatrixStore()
-const { rotation, config, nowPlaying, online, tick, note, previewApp, selectedApp, following } =
+const { rotation, config, nowPlaying, online, tick, note, previewApp, selectedApp, following, activeDeviceObj } =
   storeToRefs(store)
 
-const device = ref<Device>('m4')
-const mode = ref<Mode>('stream')
 const showDisabled = ref(false)
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
@@ -26,27 +21,20 @@ onMounted(() => {
 })
 onUnmounted(() => store.disconnect())
 
-const MODES: Mode[] = ['stream', 'gif', 'audio']
-function modeDisabled(m: Mode): boolean {
-  return (device.value === 'm4' && m !== 'stream') || m === 'audio'
-}
-function modeActive(m: Mode): boolean {
-  return device.value === 'm4' ? m === 'stream' : mode.value === m
-}
+// Content mode for the active panel (the header dropdown chooses which panel).
+const CONTENT_MODES = [
+  { v: 'apps', label: 'apps' },
+  { v: 'audio', label: 'audio' },
+  { v: 'nowplaying', label: 'now playing' },
+] as const
 </script>
 
 <template>
   <div>
-    <!-- which panel are we controlling -->
-    <div class="mb-4 flex justify-end gap-1.5 font-mono text-[11px] uppercase tracking-wider">
-      <button class="rounded px-3 py-1.5" :class="device === 'm4' ? 'bg-flame text-[#160a0a]' : 'text-dim'" @click="device = 'm4'">M4</button>
-      <button class="rounded px-3 py-1.5" :class="device === 'apollo' ? 'bg-flame text-[#160a0a]' : 'text-dim'" @click="device = 'apollo'">Apollo</button>
-    </div>
-
     <div class="grid gap-5 md:grid-cols-2">
       <!-- stage -->
       <section>
-        <MatrixPreview :app="previewApp" :tick="tick" @render="previewApp && store.render(previewApp)" />
+        <MatrixPreview :app="previewApp" :tick="tick" :device="store.activeDevice" @render="previewApp && store.render(previewApp)" />
 
         <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] uppercase tracking-wider">
           <span class="text-dim">Preview <b class="text-gold">{{ previewApp ?? '—' }}</b></span>
@@ -73,16 +61,16 @@ function modeActive(m: Mode): boolean {
           </button>
         </div>
 
+        <!-- content mode for the active panel -->
         <div class="mt-4 flex overflow-hidden rounded border border-[#3a2016] font-mono text-[11px] uppercase tracking-wider">
           <button
-            v-for="m in MODES"
-            :key="m"
-            class="flex-1 border-r border-[#3a2016] px-2 py-2 last:border-r-0 disabled:opacity-40"
-            :class="modeActive(m) ? 'bg-[#251009] text-gold' : 'text-dim'"
-            :disabled="modeDisabled(m)"
-            @click="mode = m"
+            v-for="m in CONTENT_MODES"
+            :key="m.v"
+            class="flex-1 border-r border-[#3a2016] px-2 py-2 last:border-r-0"
+            :class="(activeDeviceObj?.content_mode ?? 'apps') === m.v ? 'bg-[#251009] text-gold' : 'text-dim hover:text-gold'"
+            @click="store.setContentMode(m.v)"
           >
-            {{ m }}<span v-if="m === 'audio'" class="ml-1 text-[8px]">soon</span>
+            {{ m.label }}
           </button>
         </div>
       </section>

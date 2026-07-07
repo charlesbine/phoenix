@@ -124,4 +124,6 @@ export const api = {
 
   /** Latest rendered frame for an app (magnified webp), cache-busted by the caller. */
   frameUrl: (name: string) => `/static/outputs/${enc(name)}.large.webp`,
+  /** Live frame a panel is currently streaming (audio/now-playing modes). */
+  liveFrameUrl: (device: string) => `/data/output/current_display__${enc(device)}.webp`,
 }

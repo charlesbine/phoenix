@@ -2,11 +2,18 @@
 import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 
-const props = defineProps<{ app: string | null; tick: number }>()
+const props = defineProps<{ app: string | null; tick: number; device?: string }>()
 const emit = defineEmits<{ render: [] }>()
 
 const broken = ref(false)
-const src = computed(() => (props.app ? `${api.frameUrl(props.app)}?t=${props.tick}` : null))
+// Live modes (nowplaying, audio:*) have no rendered webp — show the panel's live frame.
+const isLive = (name: string) => name === 'nowplaying' || name.includes(':')
+const src = computed(() => {
+  if (!props.app) return null
+  const url =
+    isLive(props.app) && props.device ? api.liveFrameUrl(props.device) : api.frameUrl(props.app)
+  return `${url}?t=${props.tick}`
+})
 
 // Retry the image whenever the app or the cache-bust tick changes.
 watch(

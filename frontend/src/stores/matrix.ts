@@ -80,9 +80,12 @@ export const useMatrixStore = defineStore('matrix', () => {
   async function loadDevices(): Promise<void> {
     try {
       devices.value = await api.listDevices()
-      // If the stored/active device no longer exists, fall back to the first.
-      if (devices.value.length && !devices.value.some((d) => d.id === activeDevice.value)) {
-        rememberDevice(devices.value[0].id)
+      // If the active device is gone or disabled, land on the first enabled one
+      // — via setActiveDevice so the live socket reconnects to it.
+      const active = devices.value.find((d) => d.id === activeDevice.value)
+      if (devices.value.length && (!active || !active.enabled)) {
+        const target = devices.value.find((d) => d.enabled) ?? devices.value[0]
+        await setActiveDevice(target.id)
       }
     } catch {
       /* devices are optional; the switcher just won't populate */
@@ -100,6 +103,7 @@ export const useMatrixStore = defineStore('matrix', () => {
   }
 
   function connect(): void {
+    disconnect() // idempotent — drop any existing socket before opening a new one
     closed = false
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     ws = new WebSocket(`${proto}://${location.host}/ws/state?device=${encodeURIComponent(activeDevice.value)}`)
@@ -144,6 +148,12 @@ export const useMatrixStore = defineStore('matrix', () => {
     config.value = await api.setConfig({ brightness: value }, activeDevice.value)
   }
 
+  /** Switch the active panel's content mode (apps | audio | nowplaying). */
+  async function setContentMode(mode: Device['content_mode']): Promise<void> {
+    await api.updateDevice(activeDevice.value, { content_mode: mode })
+    await loadDevices()
+  }
+
   async function toggle(app: AppItem): Promise<void> {
     const d = activeDevice.value
     const updated = app.enabled ? await api.disable(app.name, d) : await api.enable(app.name, d)
@@ -170,7 +180,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     devices, activeDevice, activeDeviceObj,
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
-    loadDevices, setActiveDevice,
+    loadDevices, setActiveDevice, setContentMode,
     setBrightness, toggle, setPriority, showNow,
   }
 })
