@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { api } from '@/api/client'
 import type { AppItem, SchemaField } from '@/api/types'
 import MatrixPreview from '@/components/MatrixPreview.vue'
+import { useMatrixStore } from '@/stores/matrix'
 
-const apps = ref<AppItem[]>([])
-const available = ref<string[]>([])
+const store = useMatrixStore()
+const device = computed(() => store.activeDevice)
+
+const apps = ref<AppItem[]>([]) // this device's rotation
+const globalNames = ref<Set<string>>(new Set()) // every installed app (for the add picker)
+const available = ref<string[]>([]) // addable: installed-but-not-in-rotation + uninstalled files
 const selected = ref<string | null>(null)
 const schema = ref<SchemaField[]>([])
 const values = reactive<Record<string, string>>({})
@@ -23,14 +28,28 @@ const selectedApp = computed(() => apps.value.find((a) => a.name === selected.va
 
 async function load(): Promise<void> {
   try {
-    const list = await api.listApps()
-    apps.value = list.sort((a, b) => a.sort_order - b.sort_order)
-    available.value = await api.availableApps()
+    const [rotation, allApps, files] = await Promise.all([
+      api.listApps(device.value),
+      api.listApps(),
+      api.availableApps(),
+    ])
+    apps.value = rotation.sort((a, b) => a.sort_order - b.sort_order)
+    globalNames.value = new Set(allApps.map((a) => a.name))
+    const inRotation = new Set(rotation.map((a) => a.name))
+    // Installed apps not yet on this panel, plus app files that aren't installed.
+    available.value = [
+      ...allApps.map((a) => a.name).filter((n) => !inRotation.has(n)),
+      ...files.filter((n) => !inRotation.has(n)),
+    ].filter((n, i, arr) => arr.indexOf(n) === i)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
 onMounted(load)
+watch(device, () => {
+  selected.value = null
+  void load()
+})
 
 function replace(u: AppItem): void {
   const i = apps.value.findIndex((x) => x.name === u.name)
@@ -75,20 +94,21 @@ async function renderPreview(): Promise<void> {
 }
 
 async function toggleEnabled(a: AppItem): Promise<void> {
-  replace(a.enabled ? await api.disable(a.name) : await api.enable(a.name))
+  replace(a.enabled ? await api.disable(a.name, device.value) : await api.enable(a.name, device.value))
 }
 async function toggleActive(a: AppItem): Promise<void> {
+  // active/inactive is a global app property (preprocessor gate), not per-device.
   replace(a.active ? await api.deactivate(a.name) : await api.activate(a.name))
 }
 async function setPreset(name: string, preset: string): Promise<void> {
-  replace(await api.setPreset(name, preset))
+  replace(await api.setPreset(name, preset)) // refresh cadence is global
 }
 async function setPriority(name: string, priority: number): Promise<void> {
-  replace(await api.setPriority(name, Math.max(0, priority)))
+  replace(await api.setPriority(name, Math.max(0, priority), device.value))
 }
 async function removeApp(name: string): Promise<void> {
-  if (!confirm(`Delete "${name}"? This removes it from the rotation.`)) return
-  await api.deleteApp(name)
+  if (!confirm(`Remove "${name}" from this panel's rotation? (The app itself is kept.)`)) return
+  await api.removeFromDevice(name, device.value)
   if (selected.value === name) selected.value = null
   await load()
 }
@@ -97,7 +117,10 @@ async function addApp(): Promise<void> {
   const name = addPick.value
   addPick.value = ''
   try {
-    await api.addApp(name)
+    // Install globally first if it's an app file that isn't registered yet…
+    if (!globalNames.value.has(name)) await api.addApp(name)
+    // …then add it to this panel's rotation.
+    await api.addApp(name, device.value)
     await load()
     await selectApp(name)
   } catch (e) {
@@ -116,7 +139,7 @@ function onDrop(target: string): void {
   const ti = order.indexOf(target)
   order.splice(ti, 0, order.splice(fi, 1)[0])
   apps.value = order.map((n) => apps.value.find((a) => a.name === n)!)
-  api.reorder(order).catch((e: unknown) => {
+  api.reorder(order, device.value).catch((e: unknown) => {
     error.value = e instanceof Error ? e.message : String(e)
   })
 }
@@ -181,10 +204,10 @@ function onValue(id: string, e: Event): void {
 
         <!-- settings -->
         <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-wider">
-          <button class="rounded border border-[#3a2016] px-2.5 py-1 text-gold hover:bg-[#251009]" @click="api.showNow(selectedApp.name)">▷ show</button>
+          <button class="rounded border border-[#3a2016] px-2.5 py-1 text-gold hover:bg-[#251009]" @click="api.showNow(selectedApp.name, device)">▷ show</button>
           <button class="rounded px-2.5 py-1" :class="selectedApp.enabled ? 'text-flame' : 'text-[#7a4a34]'" @click="toggleEnabled(selectedApp)">{{ selectedApp.enabled ? 'enabled' : 'disabled' }}</button>
           <button class="rounded px-2.5 py-1" :class="selectedApp.active ? 'text-flame' : 'text-[#7a4a34]'" @click="toggleActive(selectedApp)">{{ selectedApp.active ? 'active' : 'inactive' }}</button>
-          <button class="ml-auto rounded border border-[#3a2016] px-2.5 py-1 text-[#ff6a4a] hover:bg-[#251009]" @click="removeApp(selectedApp.name)">delete</button>
+          <button class="ml-auto rounded border border-[#3a2016] px-2.5 py-1 text-[#ff6a4a] hover:bg-[#251009]" @click="removeApp(selectedApp.name)">remove</button>
         </div>
 
         <!-- refresh preset + priority -->

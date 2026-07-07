@@ -25,6 +25,20 @@ export interface NowPlaying {
   app: string | null
 }
 
+/** A physical panel. Content (rotation), brightness and layout are per-device;
+ * mirror_of makes this panel follow another. */
+export interface Device {
+  id: string
+  name: string
+  backend: 'web' | 'serial' | 'wled' | 'matrix'
+  brightness: number
+  layout_mode: 'cycle' | 'random' | 'single'
+  cycle_interval: number
+  mirror_of: string | null
+  sort_order: number
+  enabled: boolean
+}
+
 export interface Health {
   status: string
   [key: string]: unknown

@@ -675,12 +675,17 @@ def create_app() -> FastAPI:
 
         return stats
 
+    def _read_now_playing(device: str | None) -> str | None:
+        # Prefer the per-device sentinel; fall back to the legacy single-display
+        # one so now-playing keeps working before the device loop has run.
+        txt = current_app_file(device)
+        if not txt.exists() and device:
+            txt = current_app_file(None)
+        return txt.read_text().strip() if txt.exists() else None
+
     @app.get("/api/now-playing")
     async def now_playing(device: str | None = Query(None)):
-        txt = current_app_file(device)
-        if txt.exists():
-            return {"app": txt.read_text().strip()}
-        return {"app": None}
+        return {"app": _read_now_playing(device)}
 
     # -- Cache proxy --
 
@@ -927,7 +932,6 @@ def create_app() -> FastAPI:
         try:
             while True:
                 svc = get_svc()
-                np_file = current_app_file(device)
                 if device:
                     apps = _device_apps(device)
                     config = _device_config(device) or {
@@ -944,7 +948,7 @@ def create_app() -> FastAPI:
                 payload = {
                     "apps": apps,
                     "config": config,
-                    "now_playing": np_file.read_text().strip() if np_file.exists() else None,
+                    "now_playing": _read_now_playing(device),
                 }
                 # change detection ignores the humanized/volatile timestamps
                 sig = json.dumps(
