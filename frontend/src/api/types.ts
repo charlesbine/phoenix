@@ -88,6 +88,24 @@ export interface Stats {
   [key: string]: unknown
 }
 
+export interface NotificationItem {
+  id: number
+  text: string
+  color: string
+  duration: number
+  layout: string
+  created_at: number
+  displayed: boolean
+}
+
+export interface CacheEntry {
+  url: string
+  age_seconds: number
+  ttl: number
+  fresh: boolean
+  size_bytes: number
+}
+
 /** A field extracted from a Starlark app's get_schema(). */
 export interface SchemaField {
   type: string // text | toggle | dropdown | color | location | datetime | oauth2 | …

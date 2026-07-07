@@ -12,6 +12,8 @@ import type {
   StoreApp,
   LogLines,
   Stats,
+  NotificationItem,
+  CacheEntry,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -46,6 +48,10 @@ export const api = {
   health: healthReq,
   logs: (lines = 100) => req<LogLines>(`/api/logs?lines=${lines}`),
   stats: () => req<Stats>('/api/stats'),
+  notifications: () => req<NotificationItem[]>('/api/notifications'),
+  cacheStats: () => req<CacheEntry[]>('/api/cache/stats'),
+  notify: (body: { text: string; color?: string; duration?: number; layout?: string }) =>
+    req<{ ok?: boolean; error?: string }>('/api/notify', { method: 'POST', body: JSON.stringify(body) }),
 
   enable: (name: string, device?: string) =>
     req<AppItem>(`/api/apps/${enc(name)}/enable${qd(device)}`, { method: 'POST' }),
