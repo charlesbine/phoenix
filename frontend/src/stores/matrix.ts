@@ -151,6 +151,14 @@ export const useMatrixStore = defineStore('matrix', () => {
     config.value = await api.setConfig({ brightness: value }, activeDevice.value)
   }
 
+  async function setLayoutMode(value: Config['layout_mode']): Promise<void> {
+    config.value = await api.setConfig({ layout_mode: value }, activeDevice.value)
+  }
+
+  async function setCycleInterval(value: number): Promise<void> {
+    config.value = await api.setConfig({ cycle_interval: Math.max(1, value) }, activeDevice.value)
+  }
+
   async function toggle(app: AppItem): Promise<void> {
     const d = activeDevice.value
     const updated = app.enabled ? await api.disable(app.name, d) : await api.enable(app.name, d)
@@ -178,6 +186,6 @@ export const useMatrixStore = defineStore('matrix', () => {
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
     loadDevices, setActiveDevice,
-    setBrightness, toggle, setPriority, showNow,
+    setBrightness, setLayoutMode, setCycleInterval, toggle, setPriority, showNow,
   }
 })
