@@ -97,6 +97,9 @@ class DisplayManager:
                 if dev.get("content_mode") == "audio":
                     self._run_audio(dev)
                     continue
+                if dev.get("content_mode") == "nowplaying":
+                    self._run_nowplaying(dev)
+                    continue
                 brightness = dev["brightness"]
                 layout_mode = dev["layout_mode"]
                 cycle_interval = dev["cycle_interval"]
@@ -234,6 +237,45 @@ class DisplayManager:
             logger.exception("[%s] audio loop error", self.device_id)
         finally:
             source.close()
+
+    def _run_nowplaying(self, dev: dict) -> None:
+        """Stream the live now-playing card to this panel until toggled off."""
+        if self.player is None:
+            logger.warning("[%s] backend can't stream live frames; idling", self.device_id)
+            time.sleep(NO_APPS_WAIT)
+            return
+        try:
+            from phoenix.nowplaying.render import NowPlayingRenderer
+            from phoenix.nowplaying.source import HANowPlayingSource
+        except ImportError:
+            logger.warning("nowplaying deps missing")
+            time.sleep(NO_APPS_WAIT)
+            return
+
+        source = HANowPlayingSource(get_settings())
+        renderer = NowPlayingRenderer()
+        logger.info("[%s] Live now-playing", self.device_id)
+        self._write_now_playing("nowplaying")
+        last = time.perf_counter()
+        i = 0
+        try:
+            while True:
+                if i % 10 == 0:
+                    d = self.device_db.get(self.device_id)
+                    if d is None or d.get("content_mode") != "nowplaying" or d["brightness"] == 0:
+                        break
+                    self.backend.set_brightness(d["brightness"])
+                now = time.perf_counter()
+                dt, last = now - last, now
+                track = source.get()
+                frame = renderer.render(track, dt) if track else renderer.render_idle()
+                self.backend.send_frame(frame)
+                if i % 20 == 0:
+                    self._save_preview(frame)
+                i += 1
+                time.sleep(1 / 20)
+        except Exception:
+            logger.exception("[%s] nowplaying loop error", self.device_id)
 
     def _write_now_playing(self, name: str) -> None:
         """Text-only now-playing sentinel (no frame), for the live-audio mode."""

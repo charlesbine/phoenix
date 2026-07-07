@@ -392,6 +392,52 @@ def play(
 
 
 @app.command()
+def nowplaying(
+    ip: Annotated[Optional[str], typer.Option("--ip", help="WLED panel IP (else PHOENIX_WLED_IP / mDNS)")] = None,
+    brightness: Annotated[int, typer.Option(help="WLED master brightness 0-255")] = 120,
+    fps: Annotated[float, typer.Option(help="Cap frames/sec sent to the panel")] = 15.0,
+):
+    """Stream a live now-playing card (album art + scrolling title + progress) to the panel.
+
+        phoenix nowplaying --ip 192.168.1.166
+    """
+    import time
+
+    from phoenix.display.wled import WLEDDisplayBackend
+    from phoenix.nowplaying.render import NowPlayingRenderer
+    from phoenix.nowplaying.source import HANowPlayingSource
+    from phoenix.settings import get_settings
+
+    settings = get_settings()
+    if not settings.ha_url or not settings.ha_token:
+        console.print("[yellow]Home Assistant not configured[/] (PHOENIX_HA_URL / PHOENIX_HA_TOKEN) — showing idle card.")
+
+    sink = WLEDDisplayBackend(ip=ip, max_fps=fps)
+    if not sink._ip:
+        console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
+        raise typer.Exit(1)
+    sink.set_brightness(brightness)
+
+    source = HANowPlayingSource(settings)
+    renderer = NowPlayingRenderer()
+    console.print(f"[green]Now playing[/] → WLED [bold]{sink._ip}[/] · Ctrl-C to stop")
+    last = time.perf_counter()
+    try:
+        while True:
+            now = time.perf_counter()
+            dt, last = now - last, now
+            track = source.get()
+            frame = renderer.render(track, dt) if track else renderer.render_idle()
+            sink.send_frame(frame)
+            time.sleep(1 / 20)  # render ~20fps; the sink caps the wire rate
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sink.clear()
+        console.print("\nStopped.")
+
+
+@app.command()
 def dashboard():
     """Run the FastAPI web dashboard."""
     import uvicorn

@@ -135,13 +135,13 @@ async function remove(d: Device): Promise<void> {
               <span class="text-dim">content</span>
               <div class="flex gap-1">
                 <button
-                  v-for="cm in (['apps', 'audio'] as const)"
+                  v-for="cm in (['apps', 'audio', 'nowplaying'] as const)"
                   :key="cm"
                   class="rounded px-2.5 py-1"
                   :class="d.content_mode === cm ? 'bg-flame text-[#160a0a]' : 'text-dim hover:text-gold'"
                   @click="patch(d, { content_mode: cm })"
                 >
-                  {{ cm }}
+                  {{ cm === 'nowplaying' ? 'now playing' : cm }}
                 </button>
               </div>
             </div>
@@ -159,7 +159,7 @@ async function remove(d: Device): Promise<void> {
               </select>
             </label>
 
-            <template v-if="d.content_mode !== 'audio'">
+            <template v-if="d.content_mode === 'apps'">
               <label class="flex items-center justify-between gap-2">
                 <span class="text-dim">layout</span>
                 <select

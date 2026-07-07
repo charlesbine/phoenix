@@ -37,7 +37,7 @@ export interface Device {
   mirror_of: string | null
   sort_order: number
   enabled: boolean
-  content_mode: 'apps' | 'audio'
+  content_mode: 'apps' | 'audio' | 'nowplaying'
   audio_mode: 'bars' | 'vu' | 'spectrogram'
 }
 
