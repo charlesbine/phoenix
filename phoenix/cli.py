@@ -298,7 +298,7 @@ def visualize(
     if ip is not None or recorder is None:  # panel is the default unless only recording
         from phoenix.display.wled import WLEDDisplayBackend
 
-        sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol)
+        sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol, max_fps=(fps or 15.0))
         if not sink._ip:
             if recorder is None:
                 console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
@@ -358,6 +358,7 @@ def play(
     brightness: Annotated[int, typer.Option(help="WLED master brightness 0-255")] = 110,
     redundancy: Annotated[int, typer.Option(help="Send each UDP packet N times (lossy-link insurance)")] = 1,
     protocol: Annotated[str, typer.Option(help="Transport: ddp (atomic frames, no tearing) | dnrgb")] = "ddp",
+    fps: Annotated[float, typer.Option(help="Cap frames/sec sent to the panel (WiFi can't sustain much past ~15)")] = 15.0,
 ):
     """Stream an image or animated GIF/WebP to the WLED panel (host-decoded, looped).
 
@@ -373,7 +374,7 @@ def play(
         console.print(f"[red]No such file:[/] {file}")
         raise typer.Exit(1)
 
-    sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol)
+    sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol, max_fps=fps)
     if not sink._ip:
         console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
         raise typer.Exit(1)

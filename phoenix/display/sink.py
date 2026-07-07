@@ -11,6 +11,7 @@ spectrogram just produces frames and calls ``sink.send_frame`` at its own rate,
 instead of going through the webp player.
 """
 
+import gc
 import logging
 import time
 from pathlib import Path
@@ -67,10 +68,18 @@ class FramePlayer:
             return
         if not frames:
             return
-        if len(frames) == 1:
-            self._play_still(frames[0], duration, get_brightness, should_interrupt)
-        else:
-            self._play_animation(frames, durations, duration, get_brightness, should_interrupt)
+        # Pause GC for the streaming loop: a periodic gen-2 collection is exactly
+        # the kind of ~tens-of-ms stall that reads as a brief freeze mid-animation.
+        gc_was = gc.isenabled()
+        gc.disable()
+        try:
+            if len(frames) == 1:
+                self._play_still(frames[0], duration, get_brightness, should_interrupt)
+            else:
+                self._play_animation(frames, durations, duration, get_brightness, should_interrupt)
+        finally:
+            if gc_was:
+                gc.enable()
 
     @staticmethod
     def _extract(image: Image.Image) -> tuple[list[bytes], list[float]]:
@@ -121,6 +130,7 @@ class FramePlayer:
         should_interrupt: Callable[[], bool],
     ) -> None:
         start = time.perf_counter()
+        next_t = start  # drift-free schedule: sleep until each frame's due time
         while time.perf_counter() - start < duration:
             self.sink.set_brightness(get_brightness())
             for rgb, delay in zip(frames, durations):
@@ -131,4 +141,9 @@ class FramePlayer:
                 if not self.sink.send_frame(rgb):
                     time.sleep(RECONNECT_DELAY)
                     return
-                time.sleep(delay)
+                next_t += delay
+                slack = next_t - time.perf_counter()
+                if slack > 0:
+                    time.sleep(slack)
+                else:
+                    next_t = time.perf_counter()  # fell behind — resync, don't burst to catch up

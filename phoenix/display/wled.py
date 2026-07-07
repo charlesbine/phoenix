@@ -124,6 +124,7 @@ class WLEDDisplayBackend:
         ip: str | None = None,
         redundancy: int = 1,
         protocol: str = "ddp",
+        max_fps: float = 15.0,
     ) -> None:
         self._settings = get_settings()
         self._device_id = device_id
@@ -132,6 +133,10 @@ class WLEDDisplayBackend:
         self._redundancy = max(1, redundancy)  # send each packet N times (lossy-link insurance)
         self._protocol = protocol  # "ddp" (atomic frames, no tearing) or "dnrgb"
         self._seq = 0
+        # Cap the wire rate: WiFi + an ESP32 busy driving HUB75 can't ingest much
+        # past ~15fps — pushing 30 bufferbloats the link to multi-second latency.
+        self._min_interval = 1.0 / max_fps if max_fps else 0.0
+        self._last_send = 0.0
         # An explicit ip skips settings/mDNS discovery (used by `phoenix visualize`).
         self._ip = ip.strip() if ip else self._resolve_ip()
 
@@ -168,6 +173,13 @@ class WLEDDisplayBackend:
             self._ip = self._resolve_ip()
         if not self._ip:
             return False
+        # Rate cap: drop frames sent faster than max_fps so we don't bufferbloat
+        # the link. Returns True (a no-op drop, not a failure).
+        if self._min_interval:
+            now = time.monotonic()
+            if now - self._last_send < self._min_interval:
+                return True
+            self._last_send = now
         try:
             for _ in range(self._redundancy):
                 if self._protocol == "ddp":
