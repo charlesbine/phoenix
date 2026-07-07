@@ -52,6 +52,33 @@ def send_dnrgb(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes, repeat
         offset += chunk
 
 
+# DDP (Distributed Display Protocol) — like DNRGB but with an explicit PUSH flag
+# on the final packet, so WLED commits the whole frame in one atomic show()
+# instead of displaying it half-updated. That's what kills tearing.
+DDP_PORT = 4048
+DDP_MAX_DATA = 1440  # bytes/packet (480 LEDs) — same slicing as DNRGB
+DDP_FLAG_V1 = 0x40
+DDP_FLAG_PUSH = 0x01
+
+
+def send_ddp(sock: socket.socket, ip: str, rgb_bytes: bytes, port: int = DDP_PORT, seq: int = 0) -> None:
+    """Send one full frame as DDP packets; PUSH is set only on the last packet
+    so the receiver displays the frame atomically (no mid-frame tearing)."""
+    total = len(rgb_bytes)
+    offset = 0
+    while offset < total:
+        chunk = min(DDP_MAX_DATA, total - offset)
+        last = offset + chunk >= total
+        flags = DDP_FLAG_V1 | (DDP_FLAG_PUSH if last else 0)
+        header = bytes([
+            flags, seq & 0x0F, 0x00, 0x01,              # flags, seq, type, output-id
+            (offset >> 24) & 0xFF, (offset >> 16) & 0xFF, (offset >> 8) & 0xFF, offset & 0xFF,
+            (chunk >> 8) & 0xFF, chunk & 0xFF,           # 4-byte offset, 2-byte length
+        ])
+        sock.sendto(header + rgb_bytes[offset : offset + chunk], (ip, port))
+        offset += chunk
+
+
 def discover_wled(timeout: float = 10.0) -> str | None:
     """mDNS-discover a WLED device (``_wled._tcp``). Returns an IP or None.
 
@@ -92,13 +119,19 @@ class WLEDDisplayBackend:
     still_refresh = 0.5  # lossy link — re-send stills to self-heal dropped packets
 
     def __init__(
-        self, device_id: str | None = None, ip: str | None = None, redundancy: int = 1
+        self,
+        device_id: str | None = None,
+        ip: str | None = None,
+        redundancy: int = 1,
+        protocol: str = "ddp",
     ) -> None:
         self._settings = get_settings()
         self._device_id = device_id
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._last_brightness = -1
         self._redundancy = max(1, redundancy)  # send each packet N times (lossy-link insurance)
+        self._protocol = protocol  # "ddp" (atomic frames, no tearing) or "dnrgb"
+        self._seq = 0
         # An explicit ip skips settings/mDNS discovery (used by `phoenix visualize`).
         self._ip = ip.strip() if ip else self._resolve_ip()
 
@@ -136,7 +169,12 @@ class WLEDDisplayBackend:
         if not self._ip:
             return False
         try:
-            send_dnrgb(self._sock, self._ip, self._settings.wled_port, rgb, repeat=self._redundancy)
+            for _ in range(self._redundancy):
+                if self._protocol == "ddp":
+                    self._seq = (self._seq % 15) + 1
+                    send_ddp(self._sock, self._ip, rgb, seq=self._seq)
+                else:
+                    send_dnrgb(self._sock, self._ip, self._settings.wled_port, rgb)
             return True
         except OSError as e:
             logger.warning("WLED send failed: %s", e)

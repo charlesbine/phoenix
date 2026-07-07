@@ -256,6 +256,7 @@ def visualize(
     brightness: Annotated[Optional[int], typer.Option(help="Set WLED master brightness 0-255 on start")] = None,
     redundancy: Annotated[int, typer.Option(help="Send each UDP packet N times — insurance on a lossy WiFi link")] = 1,
     fps: Annotated[Optional[float], typer.Option(help="Cap output frames/sec (fewer, more-complete frames on a bad link)")] = None,
+    protocol: Annotated[str, typer.Option(help="Transport: ddp (atomic frames, no tearing) | dnrgb")] = "ddp",
     list_devices: Annotated[bool, typer.Option("--list-devices", help="List audio input devices and exit")] = False,
 ):
     """Stream a live audio spectrum visualizer to the WLED panel.
@@ -297,7 +298,7 @@ def visualize(
     if ip is not None or recorder is None:  # panel is the default unless only recording
         from phoenix.display.wled import WLEDDisplayBackend
 
-        sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy)
+        sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol)
         if not sink._ip:
             if recorder is None:
                 console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
@@ -356,6 +357,7 @@ def play(
     duration: Annotated[float, typer.Option(help="Seconds to loop it (0 = forever, Ctrl-C to stop)")] = 15.0,
     brightness: Annotated[int, typer.Option(help="WLED master brightness 0-255")] = 110,
     redundancy: Annotated[int, typer.Option(help="Send each UDP packet N times (lossy-link insurance)")] = 1,
+    protocol: Annotated[str, typer.Option(help="Transport: ddp (atomic frames, no tearing) | dnrgb")] = "ddp",
 ):
     """Stream an image or animated GIF/WebP to the WLED panel (host-decoded, looped).
 
@@ -371,7 +373,7 @@ def play(
         console.print(f"[red]No such file:[/] {file}")
         raise typer.Exit(1)
 
-    sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy)
+    sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy, protocol=protocol)
     if not sink._ip:
         console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
         raise typer.Exit(1)
