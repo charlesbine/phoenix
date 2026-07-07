@@ -878,6 +878,8 @@ def create_app() -> FastAPI:
             "mirror_of": d["mirror_of"],
             "sort_order": d["sort_order"],
             "enabled": bool(d["enabled"]),
+            "content_mode": d["content_mode"] if "content_mode" in d.keys() else "apps",
+            "audio_mode": d["audio_mode"] if "audio_mode" in d.keys() else "bars",
         }
 
     @app.get("/api/devices")

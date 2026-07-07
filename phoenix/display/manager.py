@@ -28,13 +28,18 @@ from phoenix.paths import (
     show_now_file,
     star_path,
 )
-from phoenix.settings import Settings
+from phoenix.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
 ALL_APPS_STALE_WAIT = 1  # seconds to wait when all apps are stale
 NO_APPS_WAIT = 5  # seconds to wait when no active apps found
 MIRROR_SLICE = 2  # seconds a mirror shows one frame before re-checking its target
+
+# Live-audio content-mode capture params
+AUDIO_SR = 44100
+AUDIO_BLOCK = 1024
+AUDIO_BANDS = 24
 
 
 class DisplayManager:
@@ -88,6 +93,9 @@ class DisplayManager:
                     continue
                 if dev.get("mirror_of"):
                     self._mirror_tick(dev["mirror_of"])
+                    continue
+                if dev.get("content_mode") == "audio":
+                    self._run_audio(dev)
                     continue
                 brightness = dev["brightness"]
                 layout_mode = dev["layout_mode"]
@@ -171,6 +179,86 @@ class DisplayManager:
             self._show(output_path(name), MIRROR_SLICE, name)
         else:
             time.sleep(MIRROR_SLICE)
+
+    # -- live audio content-mode --
+
+    def _run_audio(self, dev: dict) -> None:
+        """Stream the live audio visualizer to this panel until the device is
+        toggled off 'audio' (or its audio_mode changes, or it's turned off)."""
+        if self.player is None:  # not a streaming sink (e.g. web) — can't do live audio
+            logger.warning("[%s] backend can't stream live audio; idling", self.device_id)
+            time.sleep(NO_APPS_WAIT)
+            return
+        try:
+            from phoenix.audio.analyzer import SpectrumAnalyzer
+            from phoenix.audio.source import DeviceAudioSource
+            from phoenix.audio.visualizer import make_visualizer
+        except ImportError:
+            logger.warning("audio extra not installed (uv sync --extra audio); can't visualize")
+            time.sleep(NO_APPS_WAIT)
+            return
+
+        mode = dev.get("audio_mode") or "bars"
+        settings = get_settings()
+        try:
+            source = DeviceAudioSource(
+                device=settings.audio_device or None, samplerate=AUDIO_SR, blocksize=AUDIO_BLOCK
+            )
+            analyzer = SpectrumAnalyzer(samplerate=AUDIO_SR, fft_size=AUDIO_BLOCK, bands=AUDIO_BANDS)
+            viz = make_visualizer(mode, bands=AUDIO_BANDS)
+        except Exception:
+            logger.exception("[%s] audio setup failed", self.device_id)
+            time.sleep(NO_APPS_WAIT)
+            return
+
+        logger.info("[%s] Live audio visualizer (%s)", self.device_id, mode)
+        self._write_now_playing(f"audio:{mode}")
+        try:
+            for i, samples in enumerate(source.blocks()):
+                # ~4x/sec: re-read control state so a dashboard toggle takes effect.
+                if i % 10 == 0:
+                    d = self.device_db.get(self.device_id)
+                    if (
+                        d is None
+                        or d.get("content_mode") != "audio"
+                        or (d.get("audio_mode") or "bars") != mode
+                        or d["brightness"] == 0
+                    ):
+                        break
+                    self.backend.set_brightness(d["brightness"])
+                frame = viz.render(*analyzer.process(samples))
+                self.backend.send_frame(frame)
+                if i % 20 == 0:  # ~2x/sec live preview for the dashboard
+                    self._save_preview(frame)
+        except Exception:
+            logger.exception("[%s] audio loop error", self.device_id)
+        finally:
+            source.close()
+
+    def _write_now_playing(self, name: str) -> None:
+        """Text-only now-playing sentinel (no frame), for the live-audio mode."""
+        out = DATA_DIR / "output"
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "current_app.txt").write_text(name)
+            if self.device_id:
+                current_app_file(self.device_id).write_text(name)
+        except Exception:
+            pass
+
+    def _save_preview(self, frame: bytes) -> None:
+        """Encode a live frame to webp so the dashboard preview stays current."""
+        try:
+            from PIL import Image
+
+            img = Image.frombytes("RGB", (64, 64), frame)
+            out = DATA_DIR / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            img.save(out / "current_display.webp", "WEBP")
+            if self.device_id:
+                img.save(current_display_file(self.device_id), "WEBP")
+        except Exception:
+            pass
 
     # -- putting an app on the panel --
 

@@ -75,6 +75,20 @@ def test_per_device_config_and_priority(client):
     assert row["name"] == "clock" and row["priority"] == 3
 
 
+def test_content_mode_toggle(client):
+    # Seeded main defaults to the app rotation.
+    main = client.get("/api/devices/main").json()
+    assert main["content_mode"] == "apps" and main["audio_mode"] == "bars"
+
+    client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
+    client.put("/api/devices/apollo", json={"content_mode": "audio", "audio_mode": "spectrogram"})
+
+    dev = client.get("/api/devices/apollo").json()
+    assert dev["content_mode"] == "audio" and dev["audio_mode"] == "spectrogram"
+    # other panels are unaffected
+    assert client.get("/api/devices/main").json()["content_mode"] == "apps"
+
+
 def test_now_playing_is_per_device(client):
     from phoenix.paths import current_app_file
 

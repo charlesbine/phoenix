@@ -37,6 +37,8 @@ export interface Device {
   mirror_of: string | null
   sort_order: number
   enabled: boolean
+  content_mode: 'apps' | 'audio'
+  audio_mode: 'bars' | 'vu' | 'spectrogram'
 }
 
 export interface Health {

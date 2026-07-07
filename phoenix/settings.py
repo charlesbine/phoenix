@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     wled_ip: str = "auto"  # explicit IP, or "auto" for mDNS discovery (needs the `wled` extra)
     wled_port: int = 21324
 
+    # Audio visualizer capture (host input for the 'audio' content-mode)
+    audio_device: str = ""  # PortAudio input name/index; "" = system default (needs the `audio` extra)
+
     # Rendering
     render_width: int = 64
     render_height: int = 64
