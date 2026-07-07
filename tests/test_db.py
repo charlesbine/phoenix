@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from phoenix.db import AppDatabase, ConfigDatabase
+from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase, PlaylistDatabase
 
 
 @pytest.fixture
@@ -35,9 +35,8 @@ class TestAppDatabase:
         app_db.create("clock")
         app_db.create("weather")
         apps = app_db.list_apps()
-        assert len(apps) == 2
         names = {a.name for a in apps}
-        assert names == {"clock", "weather"}
+        assert {"clock", "weather"}.issubset(names)
 
     def test_update(self, app_db):
         app_db.create("clock", priority=0)
@@ -66,10 +65,56 @@ class TestAppDatabase:
         app_db.delete("clock")
         assert app_db.get("clock") is None
 
+    def test_delete_removes_rotation_and_playlist_references(self, tmp_path):
+        path = tmp_path / "test.db"
+        app_db = AppDatabase(path)
+        device_db = DeviceDatabase(path)
+        playlist_db = PlaylistDatabase(path)
+
+        app_db.create("clock")
+        app_db.create("weather")
+        device_db.create("apollo", "Apollo", "wled")
+        device_db.set_app("apollo", "clock")
+        playlist_db.create_playlist("daily", "Daily", ["clock", "weather"])
+
+        app_db.delete("clock")
+
+        assert app_db.get("clock") is None
+        assert [app.name for app in device_db.list_apps("apollo")] == []
+        assert playlist_db.get_playlist("daily")["app_names"] == ["weather"]
+
     def test_refresh_interval_roundtrip(self, app_db):
         app_db.create("clock", refresh_interval=timedelta(seconds=30))
         app = app_db.get("clock")
         assert app.refresh_interval == timedelta(seconds=30)
+
+    def test_builtin_spectrogram_config_is_seeded_and_preserved(self, tmp_path):
+        import phoenix.db as db_mod
+
+        path = tmp_path / "builtins.db"
+        db = AppDatabase(path)
+        bars = db.get("audio_bars")
+        assert bars is not None
+        assert bars.pixlet_config["bar_width"] == "2"
+        assert bars.pixlet_config["bar_spacing"] == "solid"
+        assert bars.pixlet_config["floor_db"] == "-55"
+        assert bars.pixlet_config["noise_gate"] == "0.08"
+        app = db.get("audio_spectrogram")
+        assert app is not None
+        assert app.pixlet_config["mode"] == "spectrogram"
+        assert app.pixlet_config["bar_width"] == "2"
+        assert app.pixlet_config["palette"] == "hue"
+        assert app.pixlet_config["contrast"] == "high"
+        assert app.pixlet_config["floor_db"] == "-62"
+        assert app.pixlet_config["noise_gate"] == "0.03"
+
+        db.upsert("audio_spectrogram", pixlet_config={"mode": "spectrogram", "bar_width": "1"})
+        db_mod._initialized.discard(str(path))
+
+        app = AppDatabase(path).get("audio_spectrogram")
+        assert app is not None
+        assert app.pixlet_config["bar_width"] == "1"
+        assert app.pixlet_config["palette"] == "hue"
 
 
 class TestConfigDatabase:

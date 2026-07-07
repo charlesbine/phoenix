@@ -74,6 +74,12 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
 
 def render_preview(name: str, settings: Settings) -> None:
     """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
+    app_db = AppDatabase()
+    existing = app_db.get(name)
+    if existing and existing.runtime.startswith("live_"):
+        app_db.upsert(name, last_updated=datetime.now())
+        return
+
     if _is_panel(name):
         from phoenix.preprocessors.dashboard_panel import run_panel
         panel_id = name.removeprefix("panel_")
@@ -99,13 +105,35 @@ def render_preview(name: str, settings: Settings) -> None:
     _render_dispatch(app, settings)
 
 
-def run_app(name: str, settings: Settings, app_db: AppDatabase) -> None:
+def _device_enabled_names(app_db: AppDatabase) -> set[str]:
+    """App names enabled on at least one panel — rendered even if off globally."""
+    try:
+        from phoenix.db import DeviceDatabase
+
+        return DeviceDatabase(app_db.path).enabled_app_names()
+    except Exception:
+        return set()
+
+
+def run_app(
+    name: str,
+    settings: Settings,
+    app_db: AppDatabase,
+    device_enabled: set[str] | None = None,
+) -> None:
     """Render a single app by name."""
     app = app_db.get(name)
     if app is None:
         raise ValueError(f"App '{name}' not found in database")
 
-    if not app.enabled:
+    if app.runtime.startswith("live_"):
+        app_db.upsert(name, last_updated=datetime.now())
+        return
+
+    # An app is worth rendering if it's on globally OR enabled on any panel.
+    if device_enabled is None:
+        device_enabled = _device_enabled_names(app_db)
+    if not app.enabled and name not in device_enabled:
         logger.debug("[%s] Skipping disabled app", name)
         return
 
@@ -167,10 +195,15 @@ def _is_due(app: AppConfig) -> bool:
     return elapsed >= app.refresh_interval
 
 
-def _render_one(name: str, settings: Settings, app_db: AppDatabase) -> None:
+def _render_one(
+    name: str,
+    settings: Settings,
+    app_db: AppDatabase,
+    device_enabled: set[str] | None = None,
+) -> None:
     """Render a single app with error handling."""
     try:
-        run_app(name, settings, app_db)
+        run_app(name, settings, app_db, device_enabled)
     except Exception:
         logger.exception("[%s] Render failed", name)
         app_db.upsert(name, last_updated=datetime.now())
@@ -192,7 +225,10 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         while True:
-            apps = [a for a in app_db.list_apps() if a.enabled]
+            # Render the union of globally-enabled apps and everything enabled on
+            # a panel, so per-device rotations always have fresh output.
+            device_enabled = _device_enabled_names(app_db)
+            apps = [a for a in app_db.list_apps() if a.enabled or a.name in device_enabled]
             if not apps:
                 logger.warning("No enabled apps found, waiting...")
                 sleep(MAX_TIME_BETWEEN_UPDATES.total_seconds())
@@ -221,7 +257,7 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
 
             # Submit all due apps to the thread pool
             futures = {
-                pool.submit(_render_one, a.name, settings, app_db): a.name
+                pool.submit(_render_one, a.name, settings, app_db, device_enabled): a.name
                 for a in due
             }
 

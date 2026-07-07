@@ -8,12 +8,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PHOENIX_", env_file=".env")
 
-    # Platform: "matrix" on Raspberry Pi, "serial" for Matrix Portal M4, "web" for dev/web viewing
-    platform: Literal["matrix", "serial", "web"] = "web"
+    # Platform: "matrix" on Raspberry Pi, "serial" for Matrix Portal M4,
+    # "wled" for an ESP32/WLED panel (Apollo M-1) over DNRGB UDP, "web" for dev
+    platform: Literal["matrix", "serial", "web", "wled"] = "web"
 
     # Serial display (Matrix Portal M4)
     serial_port: str = "/dev/ttyACM0"  # Linux (Pi); on macOS use /dev/cu.usbmodem101
     serial_brightness: int = 255  # 0-255, sent to M4 with each frame
+
+    # WLED display (ESP32 / Apollo M-1 over DNRGB realtime UDP)
+    wled_ip: str = "auto"  # explicit IP, or "auto" for mDNS discovery (needs the `wled` extra)
+    wled_port: int = 21324
+
+    # Audio visualizer capture (host input for the 'audio' content-mode)
+    audio_device: str = ""  # PortAudio input name/index; "" = system default (needs the `audio` extra)
 
     # Rendering
     render_width: int = 64
@@ -34,6 +42,7 @@ class Settings(BaseSettings):
     # Home Assistant
     ha_url: str = ""  # e.g. http://homeassistant.local:8123
     ha_token: str = ""  # Long-lived access token
+    ha_media_player: str = ""  # pin a media_player entity for now-playing; empty = auto-detect
 
     # Spotify
     spotify_client_id: str = ""

@@ -58,6 +58,7 @@ class AppConfig(BaseModel):
     priority: int = 0
     sort_order: int = 0
     source: str = ""  # e.g. "community" for tronbyt/apps imports
+    runtime: str = ""  # empty = file-backed; otherwise a built-in executor name
 
     @property
     def refresh_preset(self) -> str:

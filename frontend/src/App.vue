@@ -1,6 +1,11 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 import AppNav from '@/components/AppNav.vue'
+import { useMatrixStore } from '@/stores/matrix'
+
+// Populate the device switcher once for the whole app.
+onMounted(() => void useMatrixStore().loadDevices())
 </script>
 
 <template>

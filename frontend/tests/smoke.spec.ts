@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 
-const NAV = ['Home', 'Apps', 'Panels', 'Playlists', 'Store'] as const
+const NAV = ['Home', 'Apps', 'Panels', 'Playlists', 'Store', 'Devices'] as const
 
 /** Collect console errors + uncaught page errors so tests can assert none. */
 function trackErrors(page: Page): string[] {
@@ -36,7 +36,7 @@ test.describe('Phoenix control UI — smoke', () => {
     await page.locator('ul li button').first().click()
 
     // detail panel appears with real controls
-    await expect(page.getByRole('button', { name: 'delete' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'remove' })).toBeVisible()
     await expect(page.getByText('weight')).toBeVisible()
     await expect(page.locator('img[src*="/static/outputs/"]').first()).toBeVisible({ timeout: 20_000 })
   })
@@ -55,6 +55,34 @@ test.describe('Phoenix control UI — smoke', () => {
     await expect(page.getByRole('button', { name: /^mon$/i }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /^sun$/i }).first()).toBeVisible()
     await expect(page.locator('input[type="time"]').first()).toBeVisible()
+  })
+
+  test('Devices: switcher drives an independent per-device rotation', async ({ page }) => {
+    // self-cleaning: ensure no leftover from a prior run, delete again at the end
+    await page.request.delete('/api/devices/e2e_panel').catch(() => {})
+    page.on('dialog', (d) => void d.accept())
+
+    await page.goto('/devices')
+    await expect(page.getByRole('heading', { name: 'Panels' })).toBeVisible()
+    const switcher = page.getByRole('banner').getByRole('combobox')
+    await expect(switcher).toBeVisible()
+
+    // create a panel
+    await page.getByPlaceholder('id (e.g. apollo)').fill('e2e_panel')
+    await page.getByPlaceholder('Name').fill('E2E Panel')
+    await page.getByRole('button', { name: 'Add panel' }).click()
+    await expect(switcher.getByRole('option', { name: 'E2E Panel' })).toBeAttached()
+
+    // switch to it — its rotation is empty and independent of Main's
+    await switcher.selectOption({ label: 'E2E Panel' })
+    await page.getByRole('button', { name: 'Apps', exact: true }).click()
+    await expect(page.getByText(/Rotation · 0/)).toBeVisible()
+
+    // the selection survives a hard refresh (persisted to localStorage)
+    await page.reload()
+    await expect(page.getByText(/Rotation · 0/)).toBeVisible()
+
+    await page.request.delete('/api/devices/e2e_panel')
   })
 
   test('Store: catalog loads and a community app renders a preview', async ({ page }) => {

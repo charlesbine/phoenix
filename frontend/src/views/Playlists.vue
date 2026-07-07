@@ -13,13 +13,19 @@ const schedule = ref<Schedule | null>(null)
 const playlistError = ref('')
 const scheduleError = ref('')
 
-const newPlaylist = reactive<{ id: string; name: string }>({ id: '', name: '' })
+const newPlaylist = reactive<{ id: string; name: string; app_names: string[] }>({
+  id: '',
+  name: '',
+  app_names: [],
+})
 const newRule = reactive<{ playlist_id: string; start_time: string; end_time: string; days: string[] }>({
   playlist_id: '',
-  start_time: '',
-  end_time: '',
-  days: [],
+  start_time: '09:00',
+  end_time: '17:00',
+  days: [...DAYS],
 })
+
+const playlistApps = computed<AppItem[]>(() => apps.value.filter((app) => app.active))
 
 const activePlaylistLabel = computed<string>(() => {
   const active = schedule.value?.active_playlist
@@ -35,6 +41,14 @@ function errMsg(e: unknown): string {
 
 function orderedDays(days: string[]): string[] {
   return DAYS.filter((d: string): boolean => days.includes(d))
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 // --- loaders ---
@@ -84,6 +98,7 @@ async function removePlaylist(pl: Playlist): Promise<void> {
   try {
     await api.deletePlaylist(pl.id)
     await loadPlaylists()
+    await loadSchedule()
   } catch (e: unknown) {
     playlistError.value = errMsg(e)
   }
@@ -91,21 +106,23 @@ async function removePlaylist(pl: Playlist): Promise<void> {
 
 async function createPlaylist(): Promise<void> {
   playlistError.value = ''
-  const id = newPlaylist.id.trim()
+  const id = slugify(newPlaylist.id || newPlaylist.name)
   const name = newPlaylist.name.trim()
   if (!id || !name) {
-    playlistError.value = 'ID and name are required'
+    playlistError.value = 'Name is required'
     return
   }
   try {
-    const result = await api.createPlaylist({ id, name, app_names: [] })
+    const result = await api.createPlaylist({ id, name, app_names: [...newPlaylist.app_names] })
     if ('error' in result) {
       playlistError.value = result.error
       return
     }
     newPlaylist.id = ''
     newPlaylist.name = ''
+    newPlaylist.app_names = []
     await loadPlaylists()
+    await loadSchedule()
   } catch (e: unknown) {
     playlistError.value = errMsg(e)
   }
@@ -116,6 +133,12 @@ function toggleRuleDay(day: string): void {
   const idx = newRule.days.indexOf(day)
   if (idx === -1) newRule.days.push(day)
   else newRule.days.splice(idx, 1)
+}
+
+function toggleNewPlaylistMember(appName: string): void {
+  const idx = newPlaylist.app_names.indexOf(appName)
+  if (idx === -1) newPlaylist.app_names.push(appName)
+  else newPlaylist.app_names.splice(idx, 1)
 }
 
 async function addRule(): Promise<void> {
@@ -140,9 +163,9 @@ async function addRule(): Promise<void> {
       days: [...newRule.days],
     })
     newRule.playlist_id = ''
-    newRule.start_time = ''
-    newRule.end_time = ''
-    newRule.days = []
+    newRule.start_time = '09:00'
+    newRule.end_time = '17:00'
+    newRule.days = [...DAYS]
     await loadSchedule()
   } catch (e: unknown) {
     scheduleError.value = errMsg(e)
@@ -226,9 +249,9 @@ onMounted(() => {
             <!-- add / toggle from all apps -->
             <div class="mt-3 border-t border-[#1c0e14] pt-3">
               <p class="text-[10px] uppercase tracking-[0.18em] text-muted mb-1.5">Add apps</p>
-              <div v-if="apps.length" class="flex flex-wrap gap-1.5">
+              <div v-if="playlistApps.length" class="flex flex-wrap gap-1.5">
                 <button
-                  v-for="app in apps"
+                  v-for="app in playlistApps"
                   :key="app.name"
                   class="rounded px-2 py-0.5 text-[11px] uppercase tracking-wider"
                   :class="
@@ -251,25 +274,44 @@ onMounted(() => {
         <!-- new playlist form -->
         <div class="mt-4 border border-[#3a2016] rounded bg-panel p-3">
           <p class="text-[10px] uppercase tracking-[0.18em] text-muted mb-2">New playlist</p>
-          <form class="flex flex-wrap items-center gap-2" @submit.prevent="createPlaylist">
-            <input
-              v-model="newPlaylist.id"
-              type="text"
-              placeholder="id"
-              class="bg-[#120a10] border border-[#3a2016] text-gold px-2 py-1.5 text-xs rounded focus:outline-none focus:border-flame"
-            />
-            <input
-              v-model="newPlaylist.name"
-              type="text"
-              placeholder="name"
-              class="bg-[#120a10] border border-[#3a2016] text-gold px-2 py-1.5 text-xs rounded focus:outline-none focus:border-flame"
-            />
-            <button
-              type="submit"
-              class="rounded border border-[#3a2016] px-2.5 py-1 text-[11px] uppercase tracking-wider bg-flame text-[#160a0a]"
-            >
-              Create
-            </button>
+          <form class="flex flex-col gap-3" @submit.prevent="createPlaylist">
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                v-model="newPlaylist.name"
+                type="text"
+                placeholder="Playlist name"
+                class="bg-[#120a10] border border-[#3a2016] text-gold px-2 py-1.5 text-xs rounded focus:outline-none focus:border-flame"
+              />
+              <input
+                v-model="newPlaylist.id"
+                type="text"
+                :placeholder="slugify(newPlaylist.name) || 'id'"
+                class="bg-[#120a10] border border-[#3a2016] text-gold px-2 py-1.5 text-xs rounded focus:outline-none focus:border-flame"
+              />
+              <button
+                type="submit"
+                class="rounded border border-[#3a2016] px-2.5 py-1 text-[11px] uppercase tracking-wider bg-flame text-[#160a0a]"
+              >
+                Create
+              </button>
+            </div>
+
+            <div v-if="playlistApps.length" class="flex flex-wrap gap-1.5">
+              <button
+                v-for="app in playlistApps"
+                :key="app.name"
+                type="button"
+                class="rounded px-2 py-0.5 text-[11px] uppercase tracking-wider"
+                :class="
+                  newPlaylist.app_names.includes(app.name)
+                    ? 'bg-flame text-[#160a0a]'
+                    : 'border border-[#3a2016] text-dim hover:bg-[#251009]'
+                "
+                @click="toggleNewPlaylistMember(app.name)"
+              >
+                {{ app.name }}
+              </button>
+            </div>
           </form>
         </div>
       </section>

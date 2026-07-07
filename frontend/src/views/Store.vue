@@ -4,13 +4,30 @@ import { api } from '@/api/client'
 import type { StoreApp } from '@/api/types'
 
 const apps = ref<StoreApp[]>([])
-// The catalog is ~1000 apps; cap the DOM and let search narrow the rest.
-const CAP = 60
-const shownApps = computed(() => apps.value.slice(0, CAP))
+const PAGE_SIZE = 24
 const categories = ref<string[]>([])
 
 const q = ref('')
 const category = ref('')
+const tag = ref('')
+const mode = ref<'all' | 'available' | 'installed'>('all')
+const page = ref(1)
+const visibleApps = computed(() => {
+  if (mode.value === 'available') return apps.value.filter((app) => !app.installed)
+  if (mode.value === 'installed') return apps.value.filter((app) => app.installed)
+  return apps.value
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(visibleApps.value.length / PAGE_SIZE)))
+const shownApps = computed(() => visibleApps.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const topTags = computed(() => {
+  const counts = new Map<string, number>()
+  for (const app of apps.value) {
+    for (const t of app.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 18)
+})
 
 const loading = ref(false)
 const syncing = ref(false)
@@ -35,7 +52,8 @@ async function loadList(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    apps.value = await api.listStore(q.value, category.value)
+    apps.value = await api.listStore(q.value, category.value, tag.value)
+    page.value = 1
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Failed to load catalog'
   } finally {
@@ -49,6 +67,24 @@ function onSearch(): void {
 
 function onCategoryChange(): void {
   void loadList()
+}
+
+function setTag(next: string): void {
+  tag.value = tag.value === next ? '' : next
+  void loadList()
+}
+
+function setMode(next: 'all' | 'available' | 'installed'): void {
+  mode.value = next
+  page.value = 1
+}
+
+function nextPage(): void {
+  page.value = Math.min(page.value + 1, pageCount.value)
+}
+
+function previousPage(): void {
+  page.value = Math.max(page.value - 1, 1)
 }
 
 async function sync(): Promise<void> {
@@ -153,16 +189,57 @@ onMounted(() => {
           </button>
         </form>
 
+        <div class="mt-3 flex flex-wrap items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider">
+          <button
+            class="rounded border border-[#3a2016] px-2 py-1"
+            :class="mode === 'all' ? 'bg-flame text-[#160a0a]' : 'text-dim hover:text-gold'"
+            @click="setMode('all')"
+          >
+            All
+          </button>
+          <button
+            class="rounded border border-[#3a2016] px-2 py-1"
+            :class="mode === 'available' ? 'bg-flame text-[#160a0a]' : 'text-dim hover:text-gold'"
+            @click="setMode('available')"
+          >
+            Available
+          </button>
+          <button
+            class="rounded border border-[#3a2016] px-2 py-1"
+            :class="mode === 'installed' ? 'bg-flame text-[#160a0a]' : 'text-dim hover:text-gold'"
+            @click="setMode('installed')"
+          >
+            Installed
+          </button>
+        </div>
+
+        <div v-if="topTags.length" class="mt-3 flex flex-wrap gap-1">
+          <button
+            v-for="[name, count] in topTags"
+            :key="name"
+            class="rounded border px-1.5 py-0.5 text-[10px]"
+            :class="tag === name ? 'border-flame bg-flame text-[#160a0a]' : 'border-[#3a2016] text-[#c78a5a] hover:bg-[#251009] hover:text-gold'"
+            @click="setTag(name)"
+          >
+            #{{ name }} {{ count }}
+          </button>
+        </div>
+
         <!-- status row -->
-        <div class="mt-3 flex items-center gap-3 font-mono text-[11px] uppercase tracking-wider">
+        <div class="mt-3 flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-wider">
           <span v-if="loading" class="text-dim"><span class="blink">▮</span> Loading catalog…</span>
-          <span v-else class="text-dim">{{ apps.length }} app{{ apps.length === 1 ? '' : 's' }}<span v-if="apps.length > CAP"> · showing {{ CAP }} — search to narrow</span></span>
+          <span v-else class="text-dim">
+            {{ visibleApps.length }} app{{ visibleApps.length === 1 ? '' : 's' }}
+            <span v-if="tag"> · #{{ tag }}</span>
+            <span v-if="visibleApps.length"> · page {{ page }}/{{ pageCount }}</span>
+          </span>
+          <button v-if="tag" class="text-gold hover:text-core" @click="setTag('')">Clear tag</button>
         </div>
         <p v-if="error" class="mt-1 text-[11px] text-[#ff6a4a]">{{ error }}</p>
       </header>
 
       <!-- results -->
-      <div v-if="apps.length" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-if="visibleApps.length" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div
           v-for="app in shownApps"
           :key="app.name"
@@ -184,13 +261,14 @@ onMounted(() => {
           <p class="mt-1.5 text-xs text-muted">{{ app.summary }}</p>
 
           <div v-if="app.tags.length" class="mt-2 flex flex-wrap gap-1">
-            <span
+            <button
               v-for="tag in app.tags"
               :key="tag"
-              class="rounded bg-[#251009] px-1.5 py-0.5 text-[10px] text-[#c78a5a]"
+              class="rounded bg-[#251009] px-1.5 py-0.5 text-[10px] text-[#c78a5a] hover:text-gold"
+              @click="setTag(tag)"
             >
               #{{ tag }}
-            </span>
+            </button>
           </div>
 
           <!-- preview bezel -->
@@ -232,7 +310,25 @@ onMounted(() => {
         </div>
       </div>
 
-      <p v-else-if="!loading" class="font-mono text-[11px] text-dim">
+      <div v-if="visibleApps.length > PAGE_SIZE" class="mt-4 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-wider">
+        <button
+          class="rounded border border-[#3a2016] px-2.5 py-1 text-gold hover:bg-[#251009] disabled:opacity-40"
+          :disabled="page <= 1"
+          @click="previousPage"
+        >
+          Prev
+        </button>
+        <span class="text-dim">{{ page }} / {{ pageCount }}</span>
+        <button
+          class="rounded border border-[#3a2016] px-2.5 py-1 text-gold hover:bg-[#251009] disabled:opacity-40"
+          :disabled="page >= pageCount"
+          @click="nextPage"
+        >
+          Next
+        </button>
+      </div>
+
+      <p v-if="!loading && !visibleApps.length" class="font-mono text-[11px] text-dim">
         No apps found. Try a different search or sync the catalog.
       </p>
     </div>

@@ -11,9 +11,18 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from phoenix.cache import cache_get
-from phoenix.db import PanelDatabase, PlaylistDatabase
+from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
-from phoenix.paths import APPS_DIR, DATA_DIR, OUTPUTS_DIR, TEMPLATES_DIR, app_type, ensure_dirs
+from phoenix.paths import (
+    APPS_DIR,
+    DATA_DIR,
+    OUTPUTS_DIR,
+    TEMPLATES_DIR,
+    app_type,
+    current_app_file,
+    ensure_dirs,
+    show_now_file,
+)
 from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
 from phoenix.settings import get_settings
@@ -27,6 +36,9 @@ def create_app() -> FastAPI:
     settings = get_settings()
     mqtt_client = get_mqtt_client(settings)
     mqtt_client.start()
+
+    # Ensure a 'main' device exists so the UI always has a panel to drive.
+    seed_default_device(backend=settings.platform)
 
     # Serve rendered app images
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,6 +57,7 @@ def create_app() -> FastAPI:
         return PhoenixService()
 
     def _serialize_app(a):
+        kind = a.runtime or app_type(a.name)
         return {
             "name": a.name,
             "enabled": a.enabled,
@@ -56,9 +69,155 @@ def create_app() -> FastAPI:
             "sort_order": a.sort_order,
             "pixlet_config": a.pixlet_config,
             "refresh_preset": a.refresh_preset,
-            "app_type": app_type(a.name),
+            "app_type": kind,
+            "is_live": a.runtime.startswith("live_"),
             "source": a.source,
         }
+
+    def get_device_db() -> DeviceDatabase:
+        return DeviceDatabase()
+
+    def _device_apps(device_id: str):
+        """A device's rotation: global app definition with the per-device
+        enabled/priority/sort_order overlaid, ordered by device sort_order."""
+        svc = get_svc()
+        ddb = get_device_db()
+        out = []
+        for m in ddb.list_apps(device_id):
+            app = svc.app_db.get(m["app_name"])
+            if app is None:
+                continue  # membership references a deleted app
+            row = _serialize_app(app)
+            row["enabled"] = bool(m["enabled"])
+            row["priority"] = m["priority"]
+            row["sort_order"] = m["sort_order"]
+            out.append(row)
+        out.sort(key=lambda r: r["sort_order"])
+        return out
+
+    def _device_config(device_id: str) -> dict | None:
+        dev = get_device_db().get(device_id)
+        if dev is None:
+            return None
+        return {
+            "layout_mode": dev["layout_mode"],
+            "cycle_interval": dev["cycle_interval"],
+            "brightness": dev["brightness"],
+        }
+
+    def _device_app_row(device_id: str, name: str):
+        """One rotation row (global def + per-device overrides) after a mutation."""
+        for m in get_device_db().list_apps(device_id):
+            if m["app_name"] != name:
+                continue
+            app = get_svc().app_db.get(name)
+            row = _serialize_app(app) if app else {"name": name}
+            row["enabled"] = bool(m["enabled"])
+            row["priority"] = m["priority"]
+            row["sort_order"] = m["sort_order"]
+            return row
+        return {"error": f"{name} not in device {device_id}"}
+
+    def _runtime_schema(app_obj) -> list[dict]:
+        if not app_obj or app_obj.runtime != "live_audio":
+            return []
+        def audio_floor_gate_fields(floor_default: str, gate_default: str) -> list[dict]:
+            return [
+                {
+                    "type": "dropdown",
+                    "id": "floor_db",
+                    "name": "Noise floor",
+                    "desc": "Raises silence cutoff without changing frequency range.",
+                    "default": str(app_obj.pixlet_config.get("floor_db", floor_default)),
+                    "options": [
+                        {"display": "-50 dB", "value": "-50"},
+                        {"display": "-55 dB", "value": "-55"},
+                        {"display": "-62 dB", "value": "-62"},
+                        {"display": "-70 dB", "value": "-70"},
+                    ],
+                },
+                {
+                    "type": "dropdown",
+                    "id": "noise_gate",
+                    "name": "Noise gate",
+                    "desc": "Suppresses residual low-level energy after normalization.",
+                    "default": str(app_obj.pixlet_config.get("noise_gate", gate_default)),
+                    "options": [
+                        {"display": "Off", "value": "0"},
+                        {"display": "Light", "value": "0.04"},
+                        {"display": "Medium", "value": "0.08"},
+                        {"display": "Strong", "value": "0.12"},
+                    ],
+                },
+            ]
+        mode = app_obj.pixlet_config.get("mode")
+        if mode == "bars":
+            return [
+                {
+                    "type": "dropdown",
+                    "id": "bar_width",
+                    "name": "Bar width",
+                    "desc": "Every analyzer bar uses the same pixel width.",
+                    "default": str(app_obj.pixlet_config.get("bar_width", "2")),
+                    "options": [
+                        {"display": "1 px", "value": "1"},
+                        {"display": "2 px", "value": "2"},
+                    ],
+                },
+                {
+                    "type": "dropdown",
+                    "id": "bar_spacing",
+                    "name": "Bar spacing",
+                    "desc": "Solid removes gaps between bars.",
+                    "default": str(app_obj.pixlet_config.get("bar_spacing", "solid")),
+                    "options": [
+                        {"display": "Solid", "value": "solid"},
+                        {"display": "Separated", "value": "separated"},
+                    ],
+                },
+                *audio_floor_gate_fields("-55", "0.08"),
+            ]
+        if mode == "vu":
+            return audio_floor_gate_fields("-55", "0.06")
+        if mode != "spectrogram":
+            return []
+        return [
+            {
+                "type": "dropdown",
+                "id": "bar_width",
+                "name": "Spectrogram bar width",
+                "desc": "Frequency rows map evenly to the 64px panel.",
+                "default": str(app_obj.pixlet_config.get("bar_width", "2")),
+                "options": [
+                    {"display": "1 px", "value": "1"},
+                    {"display": "2 px", "value": "2"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "palette",
+                "name": "Palette",
+                "desc": "Hue gives frequency energy more color separation.",
+                "default": str(app_obj.pixlet_config.get("palette", "hue")),
+                "options": [
+                    {"display": "Hue", "value": "hue"},
+                    {"display": "Fire", "value": "fire"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "contrast",
+                "name": "Contrast",
+                "desc": "Higher contrast reveals quieter detail.",
+                "default": str(app_obj.pixlet_config.get("contrast", "high")),
+                "options": [
+                    {"display": "Classic", "value": "classic"},
+                    {"display": "High", "value": "high"},
+                    {"display": "Hot", "value": "hot"},
+                ],
+            },
+            *audio_floor_gate_fields("-62", "0.03"),
+        ]
 
     # -- SPA entry point --
 
@@ -73,7 +232,9 @@ def create_app() -> FastAPI:
     # -- JSON API --
 
     @app.get("/api/apps")
-    async def list_apps():
+    async def list_apps(device: str | None = Query(None)):
+        if device:
+            return _device_apps(device)
         svc = get_svc()
         apps = svc.list_apps()
         return [_serialize_app(a) for a in apps]
@@ -111,10 +272,14 @@ def create_app() -> FastAPI:
         return results
 
     @app.put("/api/reorder")
-    async def reorder_apps(request: Request):
-        """Set sort_order for active apps. Body: {"order": ["app1", "app2", ...]}"""
+    async def reorder_apps(request: Request, device: str | None = Query(None)):
+        """Set sort_order for the rotation. Body: {"order": ["app1", "app2", ...]}.
+        With ?device=, reorders that device's membership; else the global order."""
         body = await request.json()
         names = body.get("order", [])
+        if device:
+            get_device_db().reorder(device, names)
+            return {"ok": True}
         svc = get_svc()
         for i, name in enumerate(names):
             svc.app_db.upsert(name, sort_order=i)
@@ -126,6 +291,9 @@ def create_app() -> FastAPI:
 
     @app.get("/api/apps/{name}/schema")
     async def get_app_schema(name: str):
+        app_obj = get_svc().app_db.get(name)
+        if app_obj and app_obj.runtime:
+            return _runtime_schema(app_obj)
         from phoenix.paths import star_path
         path = star_path(name)
         if not path.exists():
@@ -138,11 +306,17 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/apps/{name}/enable")
-    async def enable_app(name: str):
+    async def enable_app(name: str, device: str | None = Query(None)):
+        if device:
+            get_device_db().set_app(device, name, enabled=True)
+            return _device_app_row(device, name)
         return _serialize_app(get_svc().enable_app(name))
 
     @app.post("/api/apps/{name}/disable")
-    async def disable_app(name: str):
+    async def disable_app(name: str, device: str | None = Query(None)):
+        if device:
+            get_device_db().set_app(device, name, enabled=False)
+            return _device_app_row(device, name)
         return _serialize_app(get_svc().disable_app(name))
 
     @app.post("/api/apps/{name}/activate")
@@ -154,25 +328,40 @@ def create_app() -> FastAPI:
         return _serialize_app(get_svc().set_active(name, False))
 
     @app.post("/api/apps/{name}/add")
-    async def add_app(name: str):
+    async def add_app(name: str, device: str | None = Query(None)):
+        # With ?device=, add an existing app to that panel's rotation; without,
+        # register a new global app.
+        if device:
+            get_device_db().set_app(device, name, enabled=True)
+            return _device_app_row(device, name)
         return _serialize_app(get_svc().create_app(name))
 
+    @app.post("/api/apps/{name}/remove")
+    async def remove_from_device(name: str, device: str = Query(...)):
+        """Remove an app from a panel's rotation (does not delete the app)."""
+        get_device_db().remove_app(device, name)
+        return {"ok": True, "removed": name, "device": device}
+
     @app.post("/api/apps/{name}/show")
-    async def show_app_now(name: str):
-        """Skip to this app immediately on the display."""
-        from phoenix.paths import DATA_DIR
-        show_file = DATA_DIR / "output" / "show_now.txt"
+    async def show_app_now(name: str, device: str | None = Query(None)):
+        """Skip to this app immediately — on one device, or all if unscoped."""
+        if device:
+            get_device_db().update(device, content_mode="apps")
+        show_file = show_now_file(device)
         show_file.parent.mkdir(parents=True, exist_ok=True)
         show_file.write_text(name)
-        return {"ok": True, "showing": name}
+        return {"ok": True, "showing": name, "device": device}
 
     @app.put("/api/apps/{name}/priority")
-    async def update_priority(name: str, request: Request):
+    async def update_priority(name: str, request: Request, device: str | None = Query(None)):
         body = await request.json()
         priority = body.get("priority")
-        if priority is not None:
-            return _serialize_app(get_svc().app_db.upsert(name, priority=int(priority)))
-        return {"error": "missing priority"}
+        if priority is None:
+            return {"error": "missing priority"}
+        if device:
+            get_device_db().set_app(device, name, priority=int(priority))
+            return _device_app_row(device, name)
+        return _serialize_app(get_svc().app_db.upsert(name, priority=int(priority)))
 
     @app.put("/api/apps/{name}/preset")
     async def update_preset(name: str, request: Request):
@@ -207,6 +396,8 @@ def create_app() -> FastAPI:
         try:
             svc = get_svc()
             app_obj = svc.app_db.get(name)
+            if app_obj and app_obj.runtime.startswith("live_"):
+                return {"info": f"{name}: live app streams directly to the panel"}
             if app_obj and not app_obj.enabled:
                 await asyncio.to_thread(svc.render_preview, name)
             else:
@@ -223,7 +414,11 @@ def create_app() -> FastAPI:
         """Render a preview for any app (even if not in DB or disabled)."""
         from phoenix.paths import output_path as _output_path
         try:
-            await asyncio.to_thread(get_svc().render_preview, name)
+            svc = get_svc()
+            app_obj = svc.app_db.get(name)
+            if app_obj and app_obj.runtime.startswith("live_"):
+                return {"info": f"{name}: live app preview uses the panel's latest frame"}
+            await asyncio.to_thread(svc.render_preview, name)
             if not _output_path(name).exists():
                 return {"info": f"{name}: no output (conditional skip — no data to display)"}
             return {"name": name, "preview": True}
@@ -497,17 +692,6 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
-        # USB power (check dmesg for overcurrent)
-        try:
-            import subprocess
-            dmesg = subprocess.run(["sudo", "dmesg"], capture_output=True, text=True, timeout=5)
-            if "over-current" in dmesg.stdout:
-                oc_count = dmesg.stdout.count("over-current")
-                result["issues"].append(f"USB overcurrent detected ({oc_count} events) — panel needs external PSU")
-                result["status"] = "degraded"
-        except Exception:
-            pass
-
         # Last render times
         log_file = PACKAGE_DIR / "logs" / "phoenix.log"
         render_times: dict[str, float] = {}
@@ -530,6 +714,11 @@ def create_app() -> FastAPI:
         from fastapi.responses import JSONResponse
         result = _check_health()
         return JSONResponse(content=result, status_code=200 if result["status"] == "ok" else 503)
+
+    @app.get("/api/status")
+    async def status():
+        """Dashboard diagnostics. Always 200 so degraded dependencies don't become UI errors."""
+        return _check_health()
 
     @app.get("/healthz")
     async def healthz():
@@ -594,12 +783,24 @@ def create_app() -> FastAPI:
 
         return stats
 
+    def _read_now_playing(device: str | None) -> str | None:
+        # Prefer the per-device sentinel; fall back to the legacy single-display
+        # one so now-playing keeps working before the device loop has run.
+        txt = current_app_file(device)
+        if not txt.exists() and device:
+            txt = current_app_file(None)
+        return txt.read_text().strip() if txt.exists() else None
+
+    def _is_live_app_name(name: str | None) -> bool:
+        if not name:
+            return False
+        app_obj = get_svc().app_db.get(name)
+        return bool(app_obj and app_obj.runtime.startswith("live_"))
+
     @app.get("/api/now-playing")
-    async def now_playing():
-        txt = DATA_DIR / "output" / "current_app.txt"
-        if txt.exists():
-            return {"app": txt.read_text().strip()}
-        return {"app": None}
+    async def now_playing(device: str | None = Query(None)):
+        current = _read_now_playing(device)
+        return {"app": current, "is_live": _is_live_app_name(current)}
 
     # -- Cache proxy --
 
@@ -662,7 +863,7 @@ def create_app() -> FastAPI:
                 "category": a.category,
                 "tags": a.tags,
                 "supports_2x": a.supports_2x,
-                "installed": a.name in installed,
+                "installed": a.name in installed or a.name.replace("-", "_") in installed,
             }
             for a in apps
         ]
@@ -761,39 +962,113 @@ def create_app() -> FastAPI:
     # -- Config --
 
     @app.get("/api/config")
-    async def get_config():
+    async def get_config(device: str | None = Query(None)):
+        if device:
+            cfg = _device_config(device)
+            return cfg if cfg is not None else {"error": f"no device {device}"}
         cfg = get_svc().get_display_config()
         return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval, "brightness": cfg.brightness}
 
     @app.put("/api/config")
-    async def update_config(request: Request):
+    async def update_config(request: Request, device: str | None = Query(None)):
         body = await request.json()
+        if device:
+            fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness") if k in body}
+            get_device_db().update(device, **fields)
+            cfg = _device_config(device)
+            return cfg if cfg is not None else {"error": f"no device {device}"}
         cfg = get_svc().update_display_config(**body)
         return {"layout_mode": cfg.layout_mode, "cycle_interval": cfg.cycle_interval, "brightness": cfg.brightness}
+
+    # -- Devices (physical panels) --
+
+    def _serialize_device(d: dict) -> dict:
+        return {
+            "id": d["id"],
+            "name": d["name"],
+            "backend": d["backend"],
+            "brightness": d["brightness"],
+            "layout_mode": d["layout_mode"],
+            "cycle_interval": d["cycle_interval"],
+            "mirror_of": d["mirror_of"],
+            "sort_order": d["sort_order"],
+            "enabled": bool(d["enabled"]),
+            "content_mode": d["content_mode"] if "content_mode" in d.keys() else "apps",
+            "audio_mode": d["audio_mode"] if "audio_mode" in d.keys() else "bars",
+            "address": d["address"] if "address" in d.keys() else "",
+        }
+
+    @app.get("/api/devices")
+    async def list_devices():
+        return [_serialize_device(d) for d in get_device_db().list_devices()]
+
+    @app.post("/api/devices")
+    async def create_device(request: Request):
+        body = await request.json()
+        device_id = body.get("id")
+        name = body.get("name")
+        backend = body.get("backend", "web")
+        if not device_id or not name:
+            return {"error": "id and name are required"}
+        ddb = get_device_db()
+        if ddb.get(device_id) is not None:
+            return {"error": f"device '{device_id}' already exists"}
+        extra = {
+            k: body[k]
+            for k in ("brightness", "layout_mode", "cycle_interval", "mirror_of", "sort_order", "enabled")
+            if k in body
+        }
+        return _serialize_device(ddb.create(device_id, name, backend, **extra))
+
+    @app.get("/api/devices/{device_id}")
+    async def get_device(device_id: str):
+        dev = get_device_db().get(device_id)
+        return _serialize_device(dev) if dev else {"error": f"no device {device_id}"}
+
+    @app.put("/api/devices/{device_id}")
+    async def update_device(device_id: str, request: Request):
+        body = await request.json()
+        dev = get_device_db().update(device_id, **body)
+        return _serialize_device(dev) if dev else {"error": f"no device {device_id}"}
+
+    @app.delete("/api/devices/{device_id}")
+    async def delete_device(device_id: str):
+        get_device_db().delete(device_id)
+        return {"ok": True, "deleted": device_id}
 
     # -- Realtime state push (replaces client polling) --
 
     @app.websocket("/ws/state")
     async def ws_state(ws: WebSocket):
         """Push {apps, config, now_playing} on connect and whenever it changes,
-        with a heartbeat every ~15s. One socket replaces per-client polling."""
+        with a heartbeat every ~15s. One socket replaces per-client polling.
+        Pass ?device=<id> to scope the push to a single panel."""
         await ws.accept()
+        device = ws.query_params.get("device") or None
         last_sig: str | None = None
         ticks = 0
         try:
             while True:
                 svc = get_svc()
-                cfg = svc.get_display_config()
-                np_file = DATA_DIR / "output" / "current_app.txt"
-                apps = [_serialize_app(a) for a in svc.list_apps()]
-                payload = {
-                    "apps": apps,
-                    "config": {
+                if device:
+                    apps = _device_apps(device)
+                    config = _device_config(device) or {
+                        "layout_mode": "cycle", "cycle_interval": 10, "brightness": 128,
+                    }
+                else:
+                    cfg = svc.get_display_config()
+                    apps = [_serialize_app(a) for a in svc.list_apps()]
+                    config = {
                         "layout_mode": cfg.layout_mode,
                         "cycle_interval": cfg.cycle_interval,
                         "brightness": cfg.brightness,
-                    },
-                    "now_playing": np_file.read_text().strip() if np_file.exists() else None,
+                    }
+                current = _read_now_playing(device)
+                payload = {
+                    "apps": apps,
+                    "config": config,
+                    "now_playing": current,
+                    "now_playing_is_live": _is_live_app_name(current),
                 }
                 # change detection ignores the humanized/volatile timestamps
                 sig = json.dumps(

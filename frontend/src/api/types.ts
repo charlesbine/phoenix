@@ -11,7 +11,8 @@ export interface AppItem {
   sort_order: number
   pixlet_config: Record<string, unknown>
   refresh_preset: string | null
-  app_type: 'star' | 'python' | 'static' | 'panel' | 'unknown'
+  app_type: 'star' | 'python' | 'static' | 'panel' | 'live_audio' | 'live_nowplaying' | 'unknown'
+  is_live: boolean
   source: string | null
 }
 
@@ -23,10 +24,67 @@ export interface Config {
 
 export interface NowPlaying {
   app: string | null
+  is_live: boolean
+}
+
+/** A physical panel. Content (rotation), brightness and layout are per-device;
+ * mirror_of makes this panel follow another. */
+export interface Device {
+  id: string
+  name: string
+  backend: 'web' | 'serial' | 'wled' | 'matrix'
+  brightness: number
+  layout_mode: 'cycle' | 'random' | 'single'
+  cycle_interval: number
+  mirror_of: string | null
+  sort_order: number
+  enabled: boolean
+  content_mode: 'apps' | 'audio' | 'nowplaying'
+  audio_mode: 'bars' | 'vu' | 'spectrogram'
+  address: string
 }
 
 export interface Health {
   status: string
+  issues?: string[]
+  m4?: {
+    connected?: boolean
+    port?: string
+  }
+  mqtt?: {
+    connected?: boolean
+    broker?: string | null
+  }
+  memory?: {
+    total_mb?: number
+    available_mb?: number
+    used_pct?: number
+  }
+  load?: {
+    '1m'?: number
+    '5m'?: number
+    '15m'?: number
+  }
+  uptime?: string
+  [key: string]: unknown
+}
+
+export interface LogLines {
+  lines: string[]
+}
+
+export interface Stats {
+  render_times?: Record<string, number>
+  load?: {
+    '1m'?: number
+    '5m'?: number
+    '15m'?: number
+  }
+  memory?: {
+    total_mb?: number
+    available_mb?: number
+    used_mb?: number
+  }
   [key: string]: unknown
 }
 
@@ -44,12 +102,16 @@ export interface SchemaField {
 export type PanelLayout = 'big_number' | 'key_value' | 'marquee' | 'multi_stat' | 'sparkline'
 
 export interface DataSource {
-  type?: 'http' | 'mqtt' | 'ha'
+  type?: 'static' | 'http' | 'mqtt' | 'ha'
   url?: string
+  ttl?: number
   json_path?: string
-  entity?: string
+  entity_id?: string
   topic?: string
   label?: string
+  mappings?: Record<string, unknown>
+  auth?: Record<string, unknown>
+  headers?: Record<string, string>
   [key: string]: unknown
 }
 

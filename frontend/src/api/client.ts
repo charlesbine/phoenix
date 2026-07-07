@@ -1,6 +1,7 @@
 import type {
   AppItem,
   Config,
+  Device,
   NowPlaying,
   Health,
   SchemaField,
@@ -9,6 +10,8 @@ import type {
   ScheduleRule,
   Schedule,
   StoreApp,
+  LogLines,
+  Stats,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -22,24 +25,42 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const enc = encodeURIComponent
+/** ?device=<id> when scoped to a panel, else '' for the global/legacy view. */
+const qd = (device?: string) => (device ? `?device=${enc(device)}` : '')
+
+async function healthReq(): Promise<Health> {
+  const res = await fetch('/api/status')
+  const body = (await res.json()) as Health
+  if (!res.ok && !body.status) throw new Error(`GET /api/status → ${res.status}`)
+  return body
+}
 
 export const api = {
-  // --- apps ---
-  listApps: () => req<AppItem[]>('/api/apps'),
+  // --- apps (device-scoped when a device id is passed) ---
+  listApps: (device?: string) => req<AppItem[]>(`/api/apps${qd(device)}`),
   availableApps: () => req<string[]>('/api/apps/available'),
-  getConfig: () => req<Config>('/api/config'),
-  setConfig: (patch: Partial<Config>) =>
-    req<Config>('/api/config', { method: 'PUT', body: JSON.stringify(patch) }),
-  nowPlaying: () => req<NowPlaying>('/api/now-playing'),
-  health: () => req<Health>('/api/health'),
+  getConfig: (device?: string) => req<Config>(`/api/config${qd(device)}`),
+  setConfig: (patch: Partial<Config>, device?: string) =>
+    req<Config>(`/api/config${qd(device)}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  nowPlaying: (device?: string) => req<NowPlaying>(`/api/now-playing${qd(device)}`),
+  health: healthReq,
+  logs: (lines = 100) => req<LogLines>(`/api/logs?lines=${lines}`),
+  stats: () => req<Stats>('/api/stats'),
 
-  enable: (name: string) => req<AppItem>(`/api/apps/${enc(name)}/enable`, { method: 'POST' }),
-  disable: (name: string) => req<AppItem>(`/api/apps/${enc(name)}/disable`, { method: 'POST' }),
+  enable: (name: string, device?: string) =>
+    req<AppItem>(`/api/apps/${enc(name)}/enable${qd(device)}`, { method: 'POST' }),
+  disable: (name: string, device?: string) =>
+    req<AppItem>(`/api/apps/${enc(name)}/disable${qd(device)}`, { method: 'POST' }),
   activate: (name: string) => req<AppItem>(`/api/apps/${enc(name)}/activate`, { method: 'POST' }),
   deactivate: (name: string) => req<AppItem>(`/api/apps/${enc(name)}/deactivate`, { method: 'POST' }),
-  addApp: (name: string) => req<AppItem>(`/api/apps/${enc(name)}/add`, { method: 'POST' }),
+  addApp: (name: string, device?: string) =>
+    req<AppItem>(`/api/apps/${enc(name)}/add${qd(device)}`, { method: 'POST' }),
+  /** Remove an app from a panel's rotation (leaves the global app intact). */
+  removeFromDevice: (name: string, device: string) =>
+    req<{ ok: boolean }>(`/api/apps/${enc(name)}/remove${qd(device)}`, { method: 'POST' }),
   deleteApp: (name: string) => req<{ ok: boolean }>(`/api/apps/${enc(name)}`, { method: 'DELETE' }),
-  showNow: (name: string) => req<void>(`/api/apps/${enc(name)}/show`, { method: 'POST' }),
+  showNow: (name: string, device?: string) =>
+    req<void>(`/api/apps/${enc(name)}/show${qd(device)}`, { method: 'POST' }),
   preview: (name: string) =>
     req<{ name?: string; info?: string; error?: string }>(`/api/apps/${enc(name)}/preview`, {
       method: 'POST',
@@ -50,8 +71,11 @@ export const api = {
   getSchema: (name: string) => req<SchemaField[]>(`/api/apps/${enc(name)}/schema`),
   setAppConfig: (name: string, config: Record<string, unknown>) =>
     req<AppItem>(`/api/apps/${enc(name)}/config`, { method: 'PUT', body: JSON.stringify(config) }),
-  setPriority: (name: string, priority: number) =>
-    req<AppItem>(`/api/apps/${enc(name)}/priority`, { method: 'PUT', body: JSON.stringify({ priority }) }),
+  setPriority: (name: string, priority: number, device?: string) =>
+    req<AppItem>(`/api/apps/${enc(name)}/priority${qd(device)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ priority }),
+    }),
   setPreset: (name: string, preset: string) =>
     req<AppItem>(`/api/apps/${enc(name)}/preset`, { method: 'PUT', body: JSON.stringify({ preset }) }),
   setRefreshInterval: (name: string, refresh_interval: number) =>
@@ -59,8 +83,19 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ refresh_interval }),
     }),
-  reorder: (order: string[]) =>
-    req<{ ok: boolean }>('/api/reorder', { method: 'PUT', body: JSON.stringify({ order }) }),
+  reorder: (order: string[], device?: string) =>
+    req<{ ok: boolean }>(`/api/reorder${qd(device)}`, { method: 'PUT', body: JSON.stringify({ order }) }),
+
+  // --- devices (physical panels) ---
+  listDevices: () => req<Device[]>('/api/devices'),
+  createDevice: (d: Partial<Device> & { id: string; name: string }) =>
+    req<Device | { error: string }>('/api/devices', { method: 'POST', body: JSON.stringify(d) }),
+  updateDevice: (id: string, patch: Partial<Device>) =>
+    req<Device | { error: string }>(`/api/devices/${enc(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  deleteDevice: (id: string) => req<{ ok: boolean }>(`/api/devices/${enc(id)}`, { method: 'DELETE' }),
 
   // --- panels ---
   listPanels: () => req<Panel[]>('/api/panels'),
@@ -89,8 +124,8 @@ export const api = {
   deleteRule: (id: number) => req<{ ok: boolean }>(`/api/schedule/${id}`, { method: 'DELETE' }),
 
   // --- community store ---
-  listStore: (q = '', category = '') =>
-    req<StoreApp[]>(`/api/store?q=${enc(q)}&category=${enc(category)}`),
+  listStore: (q = '', category = '', tag = '') =>
+    req<StoreApp[]>(`/api/store?q=${enc(q)}&category=${enc(category)}&tag=${enc(tag)}`),
   storeCategories: () => req<string[]>('/api/store/categories'),
   installStore: (name: string) =>
     req<AppItem | { error: string }>(`/api/store/${enc(name)}/install`, { method: 'POST' }),
@@ -100,4 +135,6 @@ export const api = {
 
   /** Latest rendered frame for an app (magnified webp), cache-busted by the caller. */
   frameUrl: (name: string) => `/static/outputs/${enc(name)}.large.webp`,
+  /** Live frame a panel is currently streaming (audio/now-playing modes). */
+  liveFrameUrl: (device: string) => `/data/output/current_display__${enc(device)}.webp`,
 }
