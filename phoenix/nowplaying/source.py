@@ -18,16 +18,6 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Checked in order; first one 'playing' wins.
-MEDIA_PLAYER_ENTITIES = [
-    "media_player.spotify_charlesbine",
-    "media_player.unnamed_room",
-    "media_player.living_room",
-    "media_player.bedroom",
-    "media_player.bathroom",
-    "media_player.kitchen",
-]
-
 
 @dataclass
 class Track:
@@ -62,8 +52,8 @@ class HANowPlayingSource:
         self._last_poll = 0.0
         self._track: Track | None = None
 
-    def _fetch_entity(self, entity_id: str) -> dict:
-        url = f"{self._settings.ha_url.rstrip('/')}/api/states/{entity_id}"
+    def _get(self, path: str) -> object | None:
+        url = f"{self._settings.ha_url.rstrip('/')}/api/{path}"
         headers = {"Authorization": f"Bearer {self._settings.ha_token}"}
         try:
             status, body, _ = cache_get(url, ttl=2, headers=headers)
@@ -73,13 +63,29 @@ class HANowPlayingSource:
                 return json.loads(body)
         except Exception:
             pass
-        return {}
+        return None
 
     def _find_playing(self) -> dict | None:
-        for entity_id in MEDIA_PLAYER_ENTITIES:
-            data = self._fetch_entity(entity_id)
-            if data.get("state") == "playing":
+        """The active media_player — a pinned one if configured, else whichever
+        is 'playing' (falling back to 'paused') across all of them."""
+        def has_media(e: dict) -> bool:
+            return bool(e.get("attributes", {}).get("media_title"))
+
+        pinned = self._settings.ha_media_player.strip()
+        if pinned:
+            data = self._get(f"states/{pinned}")
+            if isinstance(data, dict) and data.get("state") in ("playing", "paused") and has_media(data):
                 return data
+            return None
+
+        states = self._get("states")
+        if not isinstance(states, list):
+            return None
+        players = [e for e in states if e.get("entity_id", "").startswith("media_player.")]
+        for want in ("playing", "paused"):  # prefer actively playing, and only with real media
+            for e in players:
+                if e.get("state") == want and has_media(e):
+                    return e
         return None
 
     def _download_art(self, url: str) -> Image.Image | None:
@@ -136,7 +142,7 @@ class HANowPlayingSource:
             album=attrs.get("media_album_name", "") or "",
             art=art,
             duration=duration,
-            playing=True,
+            playing=player.get("state") == "playing",
             _position=position,
             _captured_at=now,
         )

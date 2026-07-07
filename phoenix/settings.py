@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Home Assistant
     ha_url: str = ""  # e.g. http://homeassistant.local:8123
     ha_token: str = ""  # Long-lived access token
+    ha_media_player: str = ""  # pin a media_player entity for now-playing; empty = auto-detect
 
     # Spotify
     spotify_client_id: str = ""
