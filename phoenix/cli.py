@@ -242,23 +242,31 @@ def display(
 def visualize(
     ip: Annotated[Optional[str], typer.Option("--ip", help="WLED panel IP (else PHOENIX_WLED_IP / mDNS)")] = None,
     device: Annotated[Optional[str], typer.Option("--device", "-D", help="Audio input device (name substring or index)")] = None,
+    file: Annotated[Optional[str], typer.Option("--file", "-f", help="Visualize an audio file instead of live capture")] = None,
+    record: Annotated[Optional[str], typer.Option("--record", "-r", help="Write the visualization to a video file (no panel needed)")] = None,
+    start: Annotated[float, typer.Option(help="Seconds into the file to start (with --file)")] = 0.0,
+    duration: Annotated[Optional[float], typer.Option(help="Seconds to render (with --file)")] = None,
+    scale: Annotated[int, typer.Option(help="Upscale factor for the recorded video")] = 8,
     bands: Annotated[int, typer.Option(help="Spectrum bands (bars)")] = 24,
-    samplerate: Annotated[int, typer.Option(help="Capture sample rate (Hz)")] = 44100,
+    samplerate: Annotated[int, typer.Option(help="Sample rate (Hz)")] = 44100,
     block: Annotated[int, typer.Option(help="Samples per block; fps ≈ samplerate/block")] = 1024,
     brightness: Annotated[Optional[int], typer.Option(help="Set WLED master brightness 0-255 on start")] = None,
     list_devices: Annotated[bool, typer.Option("--list-devices", help="List audio input devices and exit")] = False,
 ):
     """Stream a live audio spectrum visualizer to the WLED panel.
 
-    Capture a loopback of what the Mac is playing (Scarlett Loopback or
-    BlackHole) with --device, and point --ip at the panel:
+    Live from a loopback of what the Mac is playing:
 
         phoenix visualize --list-devices
         phoenix visualize --ip 192.168.1.50 --device "Loopback"
+
+    Or render an audio file to a video (no panel needed):
+
+        phoenix visualize --file song.webm --record out.mp4 --duration 25
     """
     try:
         from phoenix.audio.analyzer import SpectrumAnalyzer
-        from phoenix.audio.source import DeviceAudioSource, list_input_devices
+        from phoenix.audio.source import DeviceAudioSource, FileAudioSource, list_input_devices
         from phoenix.audio.visualizer import SpectrumBars
     except ImportError as e:
         console.print(f"[red]Audio extra not installed.[/] Run: [bold]uv sync --extra audio[/]  ({e})")
@@ -269,33 +277,56 @@ def visualize(
             console.print(f"  [{i}] {name}")
         return
 
-    from phoenix.display.wled import WLEDDisplayBackend
+    fps = max(1.0, samplerate / block)
 
-    sink = WLEDDisplayBackend(ip=ip)
-    if not sink._ip:
-        console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
-        raise typer.Exit(1)
-    if brightness is not None:
-        sink.set_brightness(brightness)
+    # Outputs: a panel (default), a recorded video, or both.
+    recorder = None
+    if record:
+        from phoenix.audio.record import FrameRecorder
 
-    source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
+        recorder = FrameRecorder(record, fps=fps, scale=scale)
+
+    sink = None
+    if ip is not None or recorder is None:  # panel is the default unless only recording
+        from phoenix.display.wled import WLEDDisplayBackend
+
+        sink = WLEDDisplayBackend(ip=ip)
+        if not sink._ip:
+            if recorder is None:
+                console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
+                raise typer.Exit(1)
+            sink = None  # recording-only, panel not required
+        elif brightness is not None:
+            sink.set_brightness(brightness)
+
+    if file:
+        source = FileAudioSource(file, samplerate=samplerate, blocksize=block, start=start, duration=duration)
+    else:
+        source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
+
     analyzer = SpectrumAnalyzer(samplerate=samplerate, fft_size=block, bands=bands)
     viz = SpectrumBars(bands=bands)
 
-    console.print(
-        f"[green]Visualizing[/] → WLED [bold]{sink._ip}[/] · {bands} bands · "
-        f"~{samplerate // block}fps · Ctrl-C to stop"
-    )
+    dest = " + ".join(x for x in [f"WLED {sink._ip}" if sink else None, record] if x)
+    console.print(f"[green]Visualizing[/] {file or 'live'} → {dest} · {bands} bands · ~{fps:.0f}fps")
+    frames = 0
     try:
         for blk in source.blocks():
-            levels, peaks = analyzer.process(blk)
-            sink.send_frame(viz.render(levels, peaks))
+            frame = viz.render(*analyzer.process(blk))
+            if sink:
+                sink.send_frame(frame)
+            if recorder:
+                recorder.add(frame)
+            frames += 1
     except KeyboardInterrupt:
         pass
     finally:
         source.close()
-        sink.clear()
-        console.print("\nStopped.")
+        if recorder:
+            recorder.close()
+        if sink:
+            sink.clear()
+        console.print(f"\nDone — {frames} frames.")
 
 
 @app.command()

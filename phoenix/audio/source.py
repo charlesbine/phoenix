@@ -6,6 +6,8 @@ can be tested without hardware. New sources (a network feed, a file) only need
 ``blocks()`` + ``close()``.
 """
 
+import subprocess
+from pathlib import Path
 from typing import Iterator, Protocol
 
 import numpy as np
@@ -81,6 +83,51 @@ class DeviceAudioSource:
             except Exception:
                 pass
             self._stream = None
+
+
+class FileAudioSource:
+    """Decodes an audio file to mono float32 blocks via ffmpeg.
+
+    Yields as fast as it can (not real-time paced) — ideal for rendering a
+    visualization to a video offline, or previewing a track without the panel.
+    Handles anything ffmpeg reads (webm/opus, m4a, mp3, wav, …).
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        samplerate: int = 44100,
+        blocksize: int = 1024,
+        start: float = 0.0,
+        duration: float | None = None,
+    ):
+        self.path = str(path)
+        self.samplerate = samplerate
+        self.blocksize = blocksize
+        self.start = start
+        self.duration = duration
+        self._audio: np.ndarray | None = None
+
+    def _decode(self) -> np.ndarray:
+        cmd = ["ffmpeg", "-v", "error"]
+        if self.start:
+            cmd += ["-ss", str(self.start)]
+        cmd += ["-i", self.path]
+        if self.duration:
+            cmd += ["-t", str(self.duration)]
+        cmd += ["-ac", "1", "-ar", str(self.samplerate), "-f", "f32le", "-"]
+        raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+        return np.frombuffer(raw, dtype=np.float32)
+
+    def blocks(self) -> Iterator[np.ndarray]:
+        if self._audio is None:
+            self._audio = self._decode()
+        n = self.blocksize
+        for i in range(0, len(self._audio) - n + 1, n):
+            yield self._audio[i : i + n]
+
+    def close(self) -> None:
+        self._audio = None
 
 
 class SyntheticSource:

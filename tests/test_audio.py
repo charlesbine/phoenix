@@ -4,10 +4,14 @@ No hardware: SyntheticSource stands in for the capture device, so the FFT
 banding and the frame rendering are fully deterministic.
 """
 
+import shutil
+import wave
+
 import numpy as np
+import pytest
 
 from phoenix.audio.analyzer import SpectrumAnalyzer
-from phoenix.audio.source import SyntheticSource
+from phoenix.audio.source import FileAudioSource, SyntheticSource
 from phoenix.audio.visualizer import SpectrumBars
 
 
@@ -55,6 +59,30 @@ def test_bars_light_only_the_active_band():
     assert frame[:, 0:3].any()        # leftmost band's columns are lit
     assert not frame[:, -3:].any()    # rightmost columns stay dark
     assert frame[0, 0:3].any()        # a full-height bar reaches the top row
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg required to decode files")
+def test_file_source_decodes_and_locates_tone(tmp_path):
+    sr, n, bands = 44100, 2048, 24
+    t = np.arange(sr) / sr  # 1 second
+    pcm = (0.6 * np.sin(2 * np.pi * 1000.0 * t) * 32767).astype("<i2")
+    wav = tmp_path / "tone.wav"
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sr)
+        w.writeframes(pcm.tobytes())
+
+    blocks = list(FileAudioSource(wav, samplerate=sr, blocksize=n).blocks())
+    assert len(blocks) > 10 and all(b.shape == (n,) for b in blocks)
+
+    analyzer = SpectrumAnalyzer(samplerate=sr, fft_size=n, bands=bands)
+    levels = np.zeros(bands, dtype=np.float32)
+    for b in blocks[:12]:
+        levels, _ = analyzer.process(b)
+    edges = np.logspace(np.log10(40), np.log10(16000), bands + 1)
+    expected = int(np.searchsorted(edges, 1000.0) - 1)
+    assert abs(int(np.argmax(levels)) - expected) <= 1
 
 
 def test_bars_peak_cap_sits_above_a_short_bar():
