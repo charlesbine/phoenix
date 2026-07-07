@@ -10,5 +10,6 @@ export const router = createRouter({
     { path: '/playlists', component: () => import('@/views/Playlists.vue') },
     { path: '/store', component: () => import('@/views/Store.vue') },
     { path: '/devices', component: () => import('@/views/Devices.vue') },
+    { path: '/diagnostics', component: () => import('@/views/Diagnostics.vue') },
   ],
 })

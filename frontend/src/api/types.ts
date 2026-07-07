@@ -46,6 +46,45 @@ export interface Device {
 
 export interface Health {
   status: string
+  issues?: string[]
+  m4?: {
+    connected?: boolean
+    port?: string
+  }
+  mqtt?: {
+    connected?: boolean
+    broker?: string | null
+  }
+  memory?: {
+    total_mb?: number
+    available_mb?: number
+    used_pct?: number
+  }
+  load?: {
+    '1m'?: number
+    '5m'?: number
+    '15m'?: number
+  }
+  uptime?: string
+  [key: string]: unknown
+}
+
+export interface LogLines {
+  lines: string[]
+}
+
+export interface Stats {
+  render_times?: Record<string, number>
+  load?: {
+    '1m'?: number
+    '5m'?: number
+    '15m'?: number
+  }
+  memory?: {
+    total_mb?: number
+    available_mb?: number
+    used_mb?: number
+  }
   [key: string]: unknown
 }
 
@@ -63,12 +102,16 @@ export interface SchemaField {
 export type PanelLayout = 'big_number' | 'key_value' | 'marquee' | 'multi_stat' | 'sparkline'
 
 export interface DataSource {
-  type?: 'http' | 'mqtt' | 'ha'
+  type?: 'static' | 'http' | 'mqtt' | 'ha'
   url?: string
+  ttl?: number
   json_path?: string
-  entity?: string
+  entity_id?: string
   topic?: string
   label?: string
+  mappings?: Record<string, unknown>
+  auth?: Record<string, unknown>
+  headers?: Record<string, string>
   [key: string]: unknown
 }
 

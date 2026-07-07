@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMatrixStore } from '@/stores/matrix'
+import { api } from '@/api/client'
+import type { Health } from '@/api/types'
 import MatrixPreview from '@/components/MatrixPreview.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
@@ -11,16 +13,39 @@ const { rotation, config, nowPlaying, nowPlayingLive, online, tick, note, previe
   storeToRefs(store)
 
 const showDisabled = ref(false)
+const health = ref<Health | null>(null)
+const healthError = ref<string | null>(null)
+let healthTimer: number | null = null
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
 )
 const previewLive = computed(() => selectedApp.value?.is_live ?? (following.value && nowPlayingLive.value))
+const healthStatus = computed(() => health.value?.status ?? (healthError.value ? 'offline' : 'checking'))
+const healthIssues = computed(() => health.value?.issues ?? (healthError.value ? [healthError.value] : []))
+const m4Connected = computed(() => Boolean(health.value?.m4?.connected))
+const mqttConnected = computed(() => Boolean(health.value?.mqtt?.connected))
+const load1m = computed(() => health.value?.load?.['1m'])
+const memoryUsed = computed(() => health.value?.memory?.used_pct)
+
+async function refreshHealth(): Promise<void> {
+  try {
+    health.value = await api.health()
+    healthError.value = null
+  } catch (e) {
+    healthError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 
 onMounted(() => {
   void store.refresh()
   store.connect()
+  void refreshHealth()
+  healthTimer = window.setInterval(() => void refreshHealth(), 60_000)
 })
-onUnmounted(() => store.disconnect())
+onUnmounted(() => {
+  store.disconnect()
+  if (healthTimer !== null) window.clearInterval(healthTimer)
+})
 
 </script>
 
@@ -65,6 +90,40 @@ onUnmounted(() => store.disconnect())
 
       <!-- rotation -->
       <section class="flex flex-col gap-4">
+        <div class="rounded border border-[#3a2016] bg-panel p-3">
+          <div class="mb-3 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+            <span>System · {{ healthStatus }}</span>
+            <button class="text-gold hover:text-core" @click="refreshHealth">Refresh</button>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
+            <div class="rounded border border-[#24121c] px-2 py-1.5">
+              <div class="flex items-center gap-1.5 text-dim">
+                <span class="h-2 w-2 rounded-full" :class="m4Connected ? 'bg-flame' : 'bg-[#7a4a34]'"></span>
+                M4
+              </div>
+              <div class="mt-1 truncate text-gold">{{ health?.m4?.port ?? '—' }}</div>
+            </div>
+            <div class="rounded border border-[#24121c] px-2 py-1.5">
+              <div class="flex items-center gap-1.5 text-dim">
+                <span class="h-2 w-2 rounded-full" :class="mqttConnected ? 'bg-flame' : 'bg-[#7a4a34]'"></span>
+                MQTT
+              </div>
+              <div class="mt-1 truncate text-gold">{{ health?.mqtt?.broker ?? '—' }}</div>
+            </div>
+            <div class="rounded border border-[#24121c] px-2 py-1.5">
+              <div class="text-dim">Load</div>
+              <div class="mt-1 truncate text-gold">
+                {{ load1m ?? '—' }}<span v-if="memoryUsed !== undefined" class="text-dim"> · {{ memoryUsed }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="healthIssues.length" class="mt-3 space-y-1 border-t border-[#1c0e14] pt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#c78a5a]">
+            <div v-for="issue in healthIssues" :key="issue">{{ issue }}</div>
+          </div>
+        </div>
+
         <BrightnessSlider v-if="config" :value="config.brightness" @commit="store.setBrightness" />
         <div>
           <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">

@@ -10,6 +10,8 @@ import type {
   ScheduleRule,
   Schedule,
   StoreApp,
+  LogLines,
+  Stats,
 } from './types'
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -26,6 +28,13 @@ const enc = encodeURIComponent
 /** ?device=<id> when scoped to a panel, else '' for the global/legacy view. */
 const qd = (device?: string) => (device ? `?device=${enc(device)}` : '')
 
+async function healthReq(): Promise<Health> {
+  const res = await fetch('/api/status')
+  const body = (await res.json()) as Health
+  if (!res.ok && !body.status) throw new Error(`GET /api/status → ${res.status}`)
+  return body
+}
+
 export const api = {
   // --- apps (device-scoped when a device id is passed) ---
   listApps: (device?: string) => req<AppItem[]>(`/api/apps${qd(device)}`),
@@ -34,7 +43,9 @@ export const api = {
   setConfig: (patch: Partial<Config>, device?: string) =>
     req<Config>(`/api/config${qd(device)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   nowPlaying: (device?: string) => req<NowPlaying>(`/api/now-playing${qd(device)}`),
-  health: () => req<Health>('/api/health'),
+  health: healthReq,
+  logs: (lines = 100) => req<LogLines>(`/api/logs?lines=${lines}`),
+  stats: () => req<Stats>('/api/stats'),
 
   enable: (name: string, device?: string) =>
     req<AppItem>(`/api/apps/${enc(name)}/enable${qd(device)}`, { method: 'POST' }),
@@ -113,8 +124,8 @@ export const api = {
   deleteRule: (id: number) => req<{ ok: boolean }>(`/api/schedule/${id}`, { method: 'DELETE' }),
 
   // --- community store ---
-  listStore: (q = '', category = '') =>
-    req<StoreApp[]>(`/api/store?q=${enc(q)}&category=${enc(category)}`),
+  listStore: (q = '', category = '', tag = '') =>
+    req<StoreApp[]>(`/api/store?q=${enc(q)}&category=${enc(category)}&tag=${enc(tag)}`),
   storeCategories: () => req<string[]>('/api/store/categories'),
   installStore: (name: string) =>
     req<AppItem | { error: string }>(`/api/store/${enc(name)}/install`, { method: 'POST' }),

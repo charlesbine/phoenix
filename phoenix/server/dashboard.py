@@ -715,6 +715,11 @@ def create_app() -> FastAPI:
         result = _check_health()
         return JSONResponse(content=result, status_code=200 if result["status"] == "ok" else 503)
 
+    @app.get("/api/status")
+    async def status():
+        """Dashboard diagnostics. Always 200 so degraded dependencies don't become UI errors."""
+        return _check_health()
+
     @app.get("/healthz")
     async def healthz():
         """Liveness probe — 200 if the HTTP server is up. Dependency state (MQTT,
@@ -858,7 +863,7 @@ def create_app() -> FastAPI:
                 "category": a.category,
                 "tags": a.tags,
                 "supports_2x": a.supports_2x,
-                "installed": a.name in installed,
+                "installed": a.name in installed or a.name.replace("-", "_") in installed,
             }
             for a in apps
         ]

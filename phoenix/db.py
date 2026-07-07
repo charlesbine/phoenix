@@ -270,6 +270,16 @@ class AppDatabase:
 
     def delete(self, name: str) -> None:
         with _connect(self._path) as conn:
+            conn.execute("DELETE FROM device_apps WHERE app_name = ?", (name,))
+            rows = conn.execute("SELECT id, app_names FROM playlists").fetchall()
+            for row in rows:
+                app_names = json.loads(row["app_names"])
+                updated = [app for app in app_names if app != name]
+                if updated != app_names:
+                    conn.execute(
+                        "UPDATE playlists SET app_names = ? WHERE id = ?",
+                        (json.dumps(updated), row["id"]),
+                    )
             conn.execute("DELETE FROM apps WHERE name = ?", (name,))
             conn.commit()
 

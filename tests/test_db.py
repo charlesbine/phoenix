@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 
-from phoenix.db import AppDatabase, ConfigDatabase
+from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase, PlaylistDatabase
 
 
 @pytest.fixture
@@ -64,6 +64,24 @@ class TestAppDatabase:
         app_db.create("clock")
         app_db.delete("clock")
         assert app_db.get("clock") is None
+
+    def test_delete_removes_rotation_and_playlist_references(self, tmp_path):
+        path = tmp_path / "test.db"
+        app_db = AppDatabase(path)
+        device_db = DeviceDatabase(path)
+        playlist_db = PlaylistDatabase(path)
+
+        app_db.create("clock")
+        app_db.create("weather")
+        device_db.create("apollo", "Apollo", "wled")
+        device_db.set_app("apollo", "clock")
+        playlist_db.create_playlist("daily", "Daily", ["clock", "weather"])
+
+        app_db.delete("clock")
+
+        assert app_db.get("clock") is None
+        assert [app.name for app in device_db.list_apps("apollo")] == []
+        assert playlist_db.get_playlist("daily")["app_names"] == ["weather"]
 
     def test_refresh_interval_roundtrip(self, app_db):
         app_db.create("clock", refresh_interval=timedelta(seconds=30))

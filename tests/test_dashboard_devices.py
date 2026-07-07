@@ -220,3 +220,7 @@ def test_health_check_does_not_run_privileged_commands(client, monkeypatch):
 
     assert res.status_code in {200, 503}
     assert "status" in res.json()
+
+    status = client.get("/api/status")
+    assert status.status_code == 200
+    assert "status" in status.json()
