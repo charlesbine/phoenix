@@ -53,9 +53,13 @@ def test_send_dnrgb_reassembles_full_frame() -> None:
     recv.close()
 
 
-def test_backend_satisfies_display_protocol() -> None:
+def test_backend_satisfies_frame_sink_protocol() -> None:
+    from phoenix.display.sink import FrameSink
     from phoenix.display.wled import WLEDDisplayBackend
 
-    # Same seam as SerialDisplayBackend / MatrixDisplayBackend.
-    assert callable(getattr(WLEDDisplayBackend, "display_image", None))
-    assert callable(getattr(WLEDDisplayBackend, "clear", None))
+    # Same seam as SerialDisplayBackend / MatrixDisplayBackend — a FrameSink.
+    for method in ("send_frame", "set_brightness", "clear", "close"):
+        assert callable(getattr(WLEDDisplayBackend, method, None)), method
+    # WLED is lossy → asks the player to re-send stills.
+    assert WLEDDisplayBackend.still_refresh > 0
+    assert issubclass(WLEDDisplayBackend, FrameSink)

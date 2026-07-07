@@ -1,17 +1,28 @@
-"""Display manager — picks which apps to show and delegates to a backend."""
+"""Display manager — picks which apps to show and drives a backend.
+
+The manager owns the *policy* (which app, for how long, per device) and the
+per-app bookkeeping (sentinels, brightness, show-now/notification interrupts).
+The *mechanics* of putting pixels on a panel live in the backend: streaming
+sinks (serial/wled/matrix) go through the shared FramePlayer, while the web
+backend just hands its file to the browser.
+"""
 
 import json
 import logging
 import random
+import shutil
 import time
+from pathlib import Path
 
 from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase, PlaylistDatabase
 from phoenix.display.backend import DisplayBackend
+from phoenix.display.sink import FramePlayer, FrameSink
 from phoenix.models import AppConfig
 from phoenix.mqtt import pop_notification
 from phoenix.paths import (
     DATA_DIR,
     current_app_file,
+    current_display_file,
     ensure_dirs,
     output_path,
     show_now_file,
@@ -40,7 +51,7 @@ class DisplayManager:
 
     def __init__(
         self,
-        backend: DisplayBackend,
+        backend: "DisplayBackend | FrameSink",
         app_db: AppDatabase | None = None,
         config_db: ConfigDatabase | None = None,
         device_id: str | None = None,
@@ -49,6 +60,9 @@ class DisplayManager:
         debug_mode: bool = False,
     ):
         self.backend = backend
+        # Streaming backends (serial/wled/matrix) are driven frame-by-frame via
+        # the shared player; file backends (web) use display_image directly.
+        self.player = FramePlayer(backend) if isinstance(backend, FrameSink) else None
         self.app_db = app_db or AppDatabase()
         self.config_db = config_db or ConfigDatabase()
         self.device_id = device_id
@@ -154,9 +168,66 @@ class DisplayManager:
         sentinel = current_app_file(target_id)
         name = sentinel.read_text().strip() if sentinel.exists() else ""
         if name and output_path(name).exists():
-            self.backend.display_image(output_path(name), MIRROR_SLICE)
+            self._show(output_path(name), MIRROR_SLICE, name)
         else:
             time.sleep(MIRROR_SLICE)
+
+    # -- putting an app on the panel --
+
+    def _show(self, path: Path, duration: int, app_name: str) -> None:
+        """Display one app's rendered frame(s) for ``duration`` seconds.
+
+        Streaming sinks go through the shared FramePlayer (which owns the
+        still/animation timing); file backends get the path directly. Either
+        way the manager records the now-playing sentinels so the dashboard and
+        any mirror can follow.
+        """
+        if self.player is not None:
+            self._write_sentinels(app_name, path)
+            self.player.play(path, duration, self._current_brightness, self._pending_notification)
+        else:
+            # web backend writes its own sentinels as it copies the frame
+            self.backend.display_image(path, duration)
+
+    def _write_sentinels(self, app_name: str, path: Path) -> None:
+        """Record what this panel is showing (legacy + per-device) and copy the
+        frame for the dashboard's live preview."""
+        large = path.with_suffix(".large.webp")
+        src = large if large.exists() else path
+        out = DATA_DIR / "output"
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, out / "current_display.webp")
+            (out / "current_app.txt").write_text(app_name)
+            if self.device_id:
+                shutil.copy(src, current_display_file(self.device_id))
+                current_app_file(self.device_id).write_text(app_name)
+        except Exception:
+            pass
+
+    def _current_brightness(self) -> int:
+        """Live brightness for the player — per-device, else global config."""
+        try:
+            if self.device_id:
+                dev = self.device_db.get(self.device_id)
+                if dev is not None:
+                    return dev["brightness"]
+            return self.config_db.get().brightness
+        except Exception:
+            return 255
+
+    def _pending_notification(self) -> bool:
+        """Non-consuming peek so the player can break out for a notification."""
+        try:
+            from phoenix.mqtt import _connect
+
+            with _connect() as conn:
+                return (
+                    conn.execute("SELECT 1 FROM notifications WHERE displayed = 0 LIMIT 1").fetchone()
+                    is not None
+                )
+        except Exception:
+            return False
 
     @staticmethod
     def _weighted_list(apps: list[AppConfig]) -> list[AppConfig]:
@@ -209,7 +280,7 @@ class DisplayManager:
             return
 
         logger.info("Displaying %s for %ds", fresh.name, duration)
-        self.backend.display_image(path, duration)
+        self._show(path, duration, fresh.name)
 
     def _check_show_now(self) -> AppConfig | None:
         """Check if a 'show now' request is pending for this device."""
@@ -261,6 +332,6 @@ class DisplayManager:
 
             notif_output = output_path("panel__notification")
             if notif_output.exists():
-                self.backend.display_image(notif_output, notif["duration"])
+                self._show(notif_output, notif["duration"], "panel__notification")
         except Exception:
             logger.exception("[notify] Failed to render notification")

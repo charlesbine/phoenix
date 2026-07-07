@@ -1,10 +1,8 @@
-"""RGB LED matrix display backend for Raspberry Pi."""
+"""RGB LED matrix frame sink for Raspberry Pi (rpi-rgb-led-matrix)."""
 
 import logging
-import time
-from pathlib import Path
 
-from PIL import Image, ImageSequence
+from PIL import Image
 
 from phoenix.settings import get_settings
 
@@ -70,31 +68,31 @@ class _MockCanvas:
 
 
 class MatrixDisplayBackend:
-    """DisplayBackend implementation for RGB LED matrix."""
+    """FrameSink for a Pi-driven RGB LED matrix.
+
+    The shared FramePlayer hands us decoded RGB frames; we push each onto the
+    panel via SetImage. Brightness on rpi-rgb-led-matrix is set at construction,
+    so per-frame set_brightness is a no-op here.
+    """
+
+    still_refresh = 0.0  # hardware holds the frame — no re-send needed
 
     def __init__(self, device_id: str | None = None):
-        # device_id accepted for a uniform backend constructor; the Pi matrix
-        # has no per-device sentinel/brightness path of its own yet.
         self._device_id = device_id
         self._matrix = _get_matrix()
 
-    def display_image(self, image_path: Path, duration: int) -> None:
-        try:
-            with Image.open(image_path) as image:
-                is_animated = getattr(image, "is_animated", False)
-                if not is_animated:
-                    try:
-                        is_animated = len(ImageSequence.all_frames(image)) > 1
-                    except Exception:
-                        is_animated = False
+    # -- FrameSink protocol --
 
-                if is_animated:
-                    self._display_animation(image, duration)
-                else:
-                    self._display_still(image, duration)
+    def set_brightness(self, level: int) -> None:
+        pass  # library brightness is fixed at init; nothing live to set
+
+    def send_frame(self, rgb: bytes) -> bool:
+        try:
+            self._matrix.SetImage(Image.frombytes("RGB", (64, 64), rgb))
+            return True
         except Exception:
-            logger.exception("Error displaying %s", image_path)
-            self.clear()
+            logger.exception("Error sending frame to matrix")
+            return False
 
     def clear(self) -> None:
         try:
@@ -102,29 +100,5 @@ class MatrixDisplayBackend:
         except Exception:
             logger.exception("Error clearing matrix")
 
-    def _display_still(self, image: Image.Image, duration: int) -> None:
-        self._matrix.Clear()
-        self._matrix.SetImage(image.convert("RGB"))
-        time.sleep(duration)
-
-    def _display_animation(self, image: Image.Image, duration: int) -> None:
-        # Pre-process all frames into canvases
-        canvases: list = []
-        durations: list[float] = []
-        for frame in ImageSequence.Iterator(image):
-            canvas = self._matrix.CreateFrameCanvas()
-            canvas.SetImage(frame.convert("RGB"))
-            canvases.append(canvas)
-            durations.append(frame.info.get("duration", 100) / 1000)
-
-        image.close()
-
-        if not canvases:
-            return
-
-        # Loop animation until duration elapsed
-        start = time.perf_counter()
-        while time.perf_counter() - start < duration:
-            for canvas, delay in zip(canvases, durations):
-                self._matrix.SwapOnVSync(canvas)
-                time.sleep(delay)
+    def close(self) -> None:
+        pass

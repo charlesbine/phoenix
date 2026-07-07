@@ -1,15 +1,15 @@
-"""Serial display backend — streams raw RGB frames to a Matrix Portal M4 over USB serial."""
+"""Serial frame sink — streams raw RGB frames to a Matrix Portal M4 over USB serial.
+
+Reliable, high-fps transport: brightness rides in-band in each frame header and
+there's no need to re-send stills. The decode/animation timing lives in
+phoenix.display.sink.FramePlayer; this only knows how to put a frame on the wire.
+"""
 
 import logging
-import shutil
 import time
-from pathlib import Path
 
 import serial
-from PIL import Image, ImageSequence
 
-from phoenix.db import ConfigDatabase, DeviceDatabase
-from phoenix.paths import DATA_DIR, current_app_file, current_display_file
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -20,16 +20,15 @@ RECONNECT_DELAY = 2  # seconds between reconnection attempts
 
 
 class SerialDisplayBackend:
-    """DisplayBackend implementation that streams frames to a Matrix Portal M4."""
+    """FrameSink that streams frames to a Matrix Portal M4."""
+
+    still_refresh = 0.0  # reliable link — no self-heal re-sends needed
 
     def __init__(self, device_id: str | None = None) -> None:
         self._settings = get_settings()
-        self._config_db = ConfigDatabase()
         self._device_id = device_id
+        self._brightness = 255
         self._port: serial.Serial | None = None
-        self._web_output = DATA_DIR / "output"
-        self._web_output.mkdir(parents=True, exist_ok=True)
-        self._current_display = self._web_output / "current_display.webp"
         self._connect()
 
     def _connect(self) -> None:
@@ -47,8 +46,7 @@ class SerialDisplayBackend:
             logger.warning("M4 not available on %s, will retry", self._settings.serial_port)
             self._port = None
 
-    def _send_frame(self, rgb_bytes: bytes, brightness: int) -> bool:
-        """Send a single frame. Returns True on success."""
+    def _write(self, brightness: int, rgb_bytes: bytes) -> bool:
         if self._port is None or not self._port.is_open:
             self._connect()
         if self._port is None:
@@ -61,112 +59,26 @@ class SerialDisplayBackend:
             return True
         except serial.SerialException:
             logger.warning("Serial write failed, closing connection")
-            self._close()
+            self.close()
             return False
 
-    def _close(self) -> None:
+    # -- FrameSink protocol --
+
+    def set_brightness(self, level: int) -> None:
+        self._brightness = max(0, min(255, level))
+
+    def send_frame(self, rgb: bytes) -> bool:
+        return self._write(self._brightness, rgb)
+
+    def clear(self) -> None:
+        """Send a blank (black) frame at zero brightness."""
+        if not self._write(0, b"\x00" * FRAME_SIZE):
+            time.sleep(RECONNECT_DELAY)
+
+    def close(self) -> None:
         if self._port is not None:
             try:
                 self._port.close()
             except Exception:
                 pass
             self._port = None
-
-    def display_image(self, image_path: Path, duration: int) -> None:
-        # Copy large version for dashboard live preview
-        large_path = image_path.with_suffix(".large.webp")
-        src = large_path if large_path.exists() else image_path
-        app_name = image_path.stem.removesuffix(".large")
-        try:
-            shutil.copy(src, self._current_display)
-            (self._web_output / "current_app.txt").write_text(app_name)
-            if self._device_id:
-                shutil.copy(src, current_display_file(self._device_id))
-                current_app_file(self._device_id).write_text(app_name)
-        except Exception:
-            pass
-
-        try:
-            with Image.open(image_path) as image:
-                is_animated = getattr(image, "is_animated", False)
-                if not is_animated:
-                    try:
-                        is_animated = len(ImageSequence.all_frames(image)) > 1
-                    except Exception:
-                        is_animated = False
-
-                if is_animated:
-                    self._display_animation(image, duration)
-                else:
-                    self._display_still(image, duration)
-        except Exception:
-            logger.exception("Error displaying %s", image_path)
-
-    def clear(self) -> None:
-        """Send a blank (black) frame."""
-        black = b"\x00" * FRAME_SIZE
-        if not self._send_frame(black, 0):
-            time.sleep(RECONNECT_DELAY)
-
-    def _image_to_rgb_bytes(self, image: Image.Image) -> bytes:
-        """Convert a PIL Image to raw 64x64 RGB888 bytes."""
-        frame = image.convert("RGB").resize((64, 64), Image.Resampling.LANCZOS)
-        return frame.tobytes()
-
-    def _get_brightness(self) -> int:
-        """Read brightness live — per-device when bound to one, else global config."""
-        try:
-            if self._device_id:
-                dev = DeviceDatabase().get(self._device_id)
-                if dev is not None:
-                    return dev["brightness"]
-            return self._config_db.get().brightness
-        except Exception:
-            return 255
-
-    def _has_pending_notification(self) -> bool:
-        """Check if a notification is waiting without consuming it."""
-        from phoenix.mqtt import _connect
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM notifications WHERE displayed = 0 LIMIT 1"
-            ).fetchone()
-            return row is not None
-
-    def _display_still(self, image: Image.Image, duration: int) -> None:
-        rgb = self._image_to_rgb_bytes(image)
-        brightness = self._get_brightness()
-        if not self._send_frame(rgb, brightness):
-            time.sleep(RECONNECT_DELAY)
-            return
-        # Sleep in short intervals so we can interrupt for notifications
-        elapsed = 0.0
-        while elapsed < duration:
-            if self._has_pending_notification():
-                return  # break out — display manager will handle the notification
-            time.sleep(min(0.5, duration - elapsed))
-            elapsed += 0.5
-
-    def _display_animation(self, image: Image.Image, duration: int) -> None:
-        # Pre-extract all frames and their durations
-        frames: list[bytes] = []
-        durations: list[float] = []
-        for frame in ImageSequence.Iterator(image):
-            frames.append(self._image_to_rgb_bytes(frame))
-            durations.append(frame.info.get("duration", 100) / 1000)
-
-        if not frames:
-            return
-
-        start = time.perf_counter()
-        while time.perf_counter() - start < duration:
-            brightness = self._get_brightness()
-            for rgb, delay in zip(frames, durations):
-                if time.perf_counter() - start >= duration:
-                    return
-                if self._has_pending_notification():
-                    return  # break out for notification
-                if not self._send_frame(rgb, brightness):
-                    time.sleep(RECONNECT_DELAY)
-                    return
-                time.sleep(delay)
