@@ -39,6 +39,7 @@ export interface Device {
   enabled: boolean
   content_mode: 'apps' | 'audio' | 'nowplaying'
   audio_mode: 'bars' | 'vu' | 'spectrogram'
+  address: string
 }
 
 export interface Health {

@@ -165,8 +165,10 @@ def config_cmd(
     console.print(f"[green]Updated:[/] {cfg.model_dump()}")
 
 
-def _make_backend(backend_type: str, device_id: str | None = None):
-    """Instantiate a display backend by name, bound to a device when given."""
+def _make_backend(backend_type: str, device_id: str | None = None, address: str = ""):
+    """Instantiate a display backend by name, bound to a device + its address
+    (wled IP / serial port; empty falls back to the env default)."""
+    addr = address.strip() or None
     if backend_type == "matrix":
         from phoenix.display.matrix import MatrixDisplayBackend
 
@@ -174,11 +176,11 @@ def _make_backend(backend_type: str, device_id: str | None = None):
     elif backend_type == "serial":
         from phoenix.display.serial import SerialDisplayBackend
 
-        return SerialDisplayBackend(device_id=device_id)
+        return SerialDisplayBackend(device_id=device_id, port=addr)
     elif backend_type == "wled":
         from phoenix.display.wled import WLEDDisplayBackend
 
-        return WLEDDisplayBackend(device_id=device_id)
+        return WLEDDisplayBackend(device_id=device_id, ip=addr)
     else:
         from phoenix.display.web import WebDisplayBackend
 
@@ -222,7 +224,7 @@ def display(
 
     threads: list[threading.Thread] = []
     for i, d in enumerate(devices):
-        backend = _make_backend(d["backend"], d["id"])
+        backend = _make_backend(d["backend"], d["id"], d.get("address", ""))
         dm = DisplayManager(backend, device_id=d["id"], primary=(i == 0))
         mode = f"mirror→{d['mirror_of']}" if d.get("mirror_of") else d["backend"]
         console.print(f"Starting device [bold]{d['id']}[/] ({mode})...")

@@ -880,6 +880,7 @@ def create_app() -> FastAPI:
             "enabled": bool(d["enabled"]),
             "content_mode": d["content_mode"] if "content_mode" in d.keys() else "apps",
             "audio_mode": d["audio_mode"] if "audio_mode" in d.keys() else "bars",
+            "address": d["address"] if "address" in d.keys() else "",
         }
 
     @app.get("/api/devices")

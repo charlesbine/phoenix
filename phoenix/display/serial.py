@@ -24,9 +24,10 @@ class SerialDisplayBackend:
 
     still_refresh = 0.0  # reliable link — no self-heal re-sends needed
 
-    def __init__(self, device_id: str | None = None) -> None:
+    def __init__(self, device_id: str | None = None, port: str | None = None) -> None:
         self._settings = get_settings()
         self._device_id = device_id
+        self._port_name = port or self._settings.serial_port  # per-device override else env
         self._brightness = 255
         self._port: serial.Serial | None = None
         self._connect()
@@ -37,13 +38,13 @@ class SerialDisplayBackend:
             return
         try:
             self._port = serial.Serial(
-                self._settings.serial_port,
+                self._port_name,
                 baudrate=2_000_000,  # ignored for native USB CDC, but required by pyserial
                 timeout=1,
             )
-            logger.info("Connected to M4 on %s", self._settings.serial_port)
+            logger.info("Connected to M4 on %s", self._port_name)
         except serial.SerialException:
-            logger.warning("M4 not available on %s, will retry", self._settings.serial_port)
+            logger.warning("M4 not available on %s, will retry", self._port_name)
             self._port = None
 
     def _write(self, brightness: int, rgb_bytes: bytes) -> bool:

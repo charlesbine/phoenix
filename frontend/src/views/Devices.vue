@@ -118,6 +118,16 @@ async function remove(d: Device): Promise<void> {
             </select>
           </label>
 
+          <label v-if="d.backend === 'wled' || d.backend === 'serial'" class="flex items-center justify-between gap-2">
+            <span class="text-dim">{{ d.backend === 'wled' ? 'IP' : 'port' }}</span>
+            <input
+              :value="d.address"
+              :placeholder="d.backend === 'wled' ? '192.168.1.166' : '/dev/tty…'"
+              class="w-40 rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-right text-gold focus:border-flame focus:outline-none"
+              @change="patch(d, { address: ($event.target as HTMLInputElement).value.trim() })"
+            />
+          </label>
+
           <label class="flex items-center justify-between gap-2">
             <span class="text-dim">mirror of</span>
             <select

@@ -77,8 +77,9 @@ CREATE TABLE IF NOT EXISTS devices (
     mirror_of TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
-    content_mode TEXT NOT NULL DEFAULT 'apps',   -- 'apps' rotation | 'audio' live visualizer
-    audio_mode TEXT NOT NULL DEFAULT 'bars'      -- bars | vu | spectrogram
+    content_mode TEXT NOT NULL DEFAULT 'apps',   -- 'apps' rotation | 'audio' | 'nowplaying'
+    audio_mode TEXT NOT NULL DEFAULT 'bars',     -- bars | vu | spectrogram
+    address TEXT NOT NULL DEFAULT ''             -- wled IP / serial port (empty = env default)
 );
 
 CREATE TABLE IF NOT EXISTS device_apps (
@@ -119,6 +120,8 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
                 conn.execute("ALTER TABLE devices ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'apps'")
             if "audio_mode" not in device_cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN audio_mode TEXT NOT NULL DEFAULT 'bars'")
+            if "address" not in device_cols:
+                conn.execute("ALTER TABLE devices ADD COLUMN address TEXT NOT NULL DEFAULT ''")
             _initialized.add(path)
         yield conn
     finally:
@@ -278,7 +281,7 @@ class DeviceDatabase:
 
     _DEVICE_FIELDS = (
         "name", "backend", "brightness", "layout_mode", "cycle_interval",
-        "mirror_of", "sort_order", "enabled", "content_mode", "audio_mode",
+        "mirror_of", "sort_order", "enabled", "content_mode", "audio_mode", "address",
     )
     _MEMBER_FIELDS = ("enabled", "priority", "sort_order")
 
