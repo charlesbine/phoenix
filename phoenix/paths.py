@@ -73,6 +73,12 @@ def current_display_file(device_id: str | None = None) -> Path:
     return base / (f"current_display__{device_id}.webp" if device_id else "current_display.webp")
 
 
+def show_now_file(device_id: str | None = None) -> Path:
+    """Sentinel asking a device to jump to a named app immediately."""
+    base = DATA_DIR / "output"
+    return base / (f"show_now__{device_id}.txt" if device_id else "show_now.txt")
+
+
 def output_path(name: str) -> Path:
     return OUTPUTS_DIR / f"{name}.webp"
 

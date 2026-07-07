@@ -14,6 +14,7 @@ from phoenix.paths import (
     current_app_file,
     ensure_dirs,
     output_path,
+    show_now_file,
     star_path,
 )
 from phoenix.settings import Settings
@@ -211,8 +212,8 @@ class DisplayManager:
         self.backend.display_image(path, duration)
 
     def _check_show_now(self) -> AppConfig | None:
-        """Check if a 'show now' request is pending."""
-        show_file = DATA_DIR / "output" / "show_now.txt"
+        """Check if a 'show now' request is pending for this device."""
+        show_file = show_now_file(self.device_id)
         if not show_file.exists():
             return None
         try:
