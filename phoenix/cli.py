@@ -254,6 +254,8 @@ def visualize(
     samplerate: Annotated[int, typer.Option(help="Sample rate (Hz)")] = 44100,
     block: Annotated[int, typer.Option(help="Samples per block; fps ≈ samplerate/block")] = 1024,
     brightness: Annotated[Optional[int], typer.Option(help="Set WLED master brightness 0-255 on start")] = None,
+    redundancy: Annotated[int, typer.Option(help="Send each UDP packet N times — insurance on a lossy WiFi link")] = 1,
+    fps: Annotated[Optional[float], typer.Option(help="Cap output frames/sec (fewer, more-complete frames on a bad link)")] = None,
     list_devices: Annotated[bool, typer.Option("--list-devices", help="List audio input devices and exit")] = False,
 ):
     """Stream a live audio spectrum visualizer to the WLED panel.
@@ -280,20 +282,22 @@ def visualize(
             console.print(f"  [{i}] {name}")
         return
 
-    fps = max(1.0, samplerate / block)
+    native_fps = max(1.0, samplerate / block)
+    stride = max(1, round(native_fps / fps)) if fps else 1  # emit every Nth block
+    out_fps = native_fps / stride
 
     # Outputs: a panel (default), a recorded video, or both.
     recorder = None
     if record:
         from phoenix.audio.record import FrameRecorder
 
-        recorder = FrameRecorder(record, fps=fps, scale=scale)
+        recorder = FrameRecorder(record, fps=out_fps, scale=scale)
 
     sink = None
     if ip is not None or recorder is None:  # panel is the default unless only recording
         from phoenix.display.wled import WLEDDisplayBackend
 
-        sink = WLEDDisplayBackend(ip=ip)
+        sink = WLEDDisplayBackend(ip=ip, redundancy=redundancy)
         if not sink._ip:
             if recorder is None:
                 console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
@@ -318,11 +322,17 @@ def visualize(
         raise typer.Exit(1)
 
     dest = " + ".join(x for x in [f"WLED {sink._ip}" if sink else None, record] if x)
-    console.print(f"[green]Visualizing[/] {file or 'live'} → {dest} · {bands} bands · ~{fps:.0f}fps")
+    rtag = f" · {redundancy}x" if redundancy > 1 else ""
+    console.print(
+        f"[green]Visualizing[/] {file or 'live'} → {dest} · {bands} bands · ~{out_fps:.0f}fps{rtag}"
+    )
     frames = 0
     try:
-        for blk in source.blocks():
-            frame = viz.render(*analyzer.process(blk))
+        for i, blk in enumerate(source.blocks()):
+            levels_peaks = analyzer.process(blk)  # run every block to keep smoothing continuous
+            if i % stride:
+                continue  # fps cap: skip emitting this block's frame
+            frame = viz.render(*levels_peaks)
             if sink:
                 sink.send_frame(frame)
             if recorder:

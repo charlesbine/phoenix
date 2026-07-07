@@ -31,17 +31,24 @@ FRAME_SIZE = TOTAL_LEDS * 3
 RECONNECT_DELAY = 2  # seconds
 
 
-def send_dnrgb(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes) -> None:
+def send_dnrgb(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes, repeat: int = 1) -> None:
     """Send one full 64x64 frame as DNRGB UDP packets (<=480 LEDs each).
 
     sendto() syscall overhead plus WiFi radio serialization provide natural
     pacing; the whole 9-packet burst is well under a millisecond.
+
+    ``repeat`` sends each packet N times — a full frame needs all 9 packets to
+    survive, so on a lossy link redundancy sharply raises the odds of a coherent
+    frame (repeat=3 turns ~13% complete into ~93% at 20% loss). Duplicates are
+    idempotent (same LEDs, same values).
     """
     offset = 0
     while offset < TOTAL_LEDS:
         chunk = min(MAX_LEDS_PER_PACKET, TOTAL_LEDS - offset)
         header = bytes([DNRGB_PROTOCOL, DNRGB_TIMEOUT, (offset >> 8) & 0xFF, offset & 0xFF])
-        sock.sendto(header + rgb_bytes[offset * 3 : (offset + chunk) * 3], (ip, port))
+        packet = header + rgb_bytes[offset * 3 : (offset + chunk) * 3]
+        for _ in range(repeat):
+            sock.sendto(packet, (ip, port))
         offset += chunk
 
 
@@ -84,11 +91,14 @@ class WLEDDisplayBackend:
 
     still_refresh = 0.5  # lossy link — re-send stills to self-heal dropped packets
 
-    def __init__(self, device_id: str | None = None, ip: str | None = None) -> None:
+    def __init__(
+        self, device_id: str | None = None, ip: str | None = None, redundancy: int = 1
+    ) -> None:
         self._settings = get_settings()
         self._device_id = device_id
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._last_brightness = -1
+        self._redundancy = max(1, redundancy)  # send each packet N times (lossy-link insurance)
         # An explicit ip skips settings/mDNS discovery (used by `phoenix visualize`).
         self._ip = ip.strip() if ip else self._resolve_ip()
 
@@ -126,7 +136,7 @@ class WLEDDisplayBackend:
         if not self._ip:
             return False
         try:
-            send_dnrgb(self._sock, self._ip, self._settings.wled_port, rgb)
+            send_dnrgb(self._sock, self._ip, self._settings.wled_port, rgb, repeat=self._redundancy)
             return True
         except OSError as e:
             logger.warning("WLED send failed: %s", e)
