@@ -239,6 +239,66 @@ def display(
 
 
 @app.command()
+def visualize(
+    ip: Annotated[Optional[str], typer.Option("--ip", help="WLED panel IP (else PHOENIX_WLED_IP / mDNS)")] = None,
+    device: Annotated[Optional[str], typer.Option("--device", "-D", help="Audio input device (name substring or index)")] = None,
+    bands: Annotated[int, typer.Option(help="Spectrum bands (bars)")] = 24,
+    samplerate: Annotated[int, typer.Option(help="Capture sample rate (Hz)")] = 44100,
+    block: Annotated[int, typer.Option(help="Samples per block; fps ≈ samplerate/block")] = 1024,
+    brightness: Annotated[Optional[int], typer.Option(help="Set WLED master brightness 0-255 on start")] = None,
+    list_devices: Annotated[bool, typer.Option("--list-devices", help="List audio input devices and exit")] = False,
+):
+    """Stream a live audio spectrum visualizer to the WLED panel.
+
+    Capture a loopback of what the Mac is playing (Scarlett Loopback or
+    BlackHole) with --device, and point --ip at the panel:
+
+        phoenix visualize --list-devices
+        phoenix visualize --ip 192.168.1.50 --device "Loopback"
+    """
+    try:
+        from phoenix.audio.analyzer import SpectrumAnalyzer
+        from phoenix.audio.source import DeviceAudioSource, list_input_devices
+        from phoenix.audio.visualizer import SpectrumBars
+    except ImportError as e:
+        console.print(f"[red]Audio extra not installed.[/] Run: [bold]uv sync --extra audio[/]  ({e})")
+        raise typer.Exit(1)
+
+    if list_devices:
+        for i, name in list_input_devices():
+            console.print(f"  [{i}] {name}")
+        return
+
+    from phoenix.display.wled import WLEDDisplayBackend
+
+    sink = WLEDDisplayBackend(ip=ip)
+    if not sink._ip:
+        console.print("[red]No WLED panel found.[/] Pass --ip or set PHOENIX_WLED_IP.")
+        raise typer.Exit(1)
+    if brightness is not None:
+        sink.set_brightness(brightness)
+
+    source = DeviceAudioSource(device=device, samplerate=samplerate, blocksize=block)
+    analyzer = SpectrumAnalyzer(samplerate=samplerate, fft_size=block, bands=bands)
+    viz = SpectrumBars(bands=bands)
+
+    console.print(
+        f"[green]Visualizing[/] → WLED [bold]{sink._ip}[/] · {bands} bands · "
+        f"~{samplerate // block}fps · Ctrl-C to stop"
+    )
+    try:
+        for blk in source.blocks():
+            levels, peaks = analyzer.process(blk)
+            sink.send_frame(viz.render(levels, peaks))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        source.close()
+        sink.clear()
+        console.print("\nStopped.")
+
+
+@app.command()
 def dashboard():
     """Run the FastAPI web dashboard."""
     import uvicorn

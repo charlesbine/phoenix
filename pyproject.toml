@@ -23,6 +23,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
 wled = ["zeroconf>=0.80"]  # mDNS auto-discovery for the WLED backend
+audio = [
+    "numpy>=1.26",       # FFT + framebuffer math for the audio visualizer
+    "sounddevice>=0.4",  # PortAudio capture (loopback / mic) for live audio
+]
 
 [project.scripts]
 phoenix = "phoenix.cli:app"

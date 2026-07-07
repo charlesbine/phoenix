@@ -84,12 +84,13 @@ class WLEDDisplayBackend:
 
     still_refresh = 0.5  # lossy link — re-send stills to self-heal dropped packets
 
-    def __init__(self, device_id: str | None = None) -> None:
+    def __init__(self, device_id: str | None = None, ip: str | None = None) -> None:
         self._settings = get_settings()
         self._device_id = device_id
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._last_brightness = -1
-        self._ip = self._resolve_ip()
+        # An explicit ip skips settings/mDNS discovery (used by `phoenix visualize`).
+        self._ip = ip.strip() if ip else self._resolve_ip()
 
     def _resolve_ip(self) -> str | None:
         ip = (self._settings.wled_ip or "").strip()
