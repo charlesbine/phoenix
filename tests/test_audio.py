@@ -12,7 +12,13 @@ import pytest
 
 from phoenix.audio.analyzer import SpectrumAnalyzer
 from phoenix.audio.source import FileAudioSource, SyntheticSource
-from phoenix.audio.visualizer import Spectrogram, SpectrumBars, VUMeter, make_visualizer
+from phoenix.audio.visualizer import (
+    SPECTROGRAM_PALETTE_OPTIONS,
+    Spectrogram,
+    SpectrumBars,
+    VUMeter,
+    make_visualizer,
+)
 
 
 def test_synthetic_source_shape():
@@ -51,6 +57,20 @@ def test_analyzer_noise_gate_suppresses_quiet_residual_energy():
 
     assert open_levels.max() > 0.0
     assert gated_levels.max() < open_levels.max()
+
+
+def test_analyzer_onset_boost_emphasizes_positive_spectral_changes():
+    quiet = next(SyntheticSource(80.0, blocksize=1024, blocks=1, amplitude=0.02).blocks())
+    loud = next(SyntheticSource([80.0, 1200.0], blocksize=1024, blocks=1, amplitude=0.18).blocks())
+    plain = SpectrumAnalyzer(fft_size=1024, floor_db=-70, noise_gate=0.0, onset_boost=0.0)
+    boosted = SpectrumAnalyzer(fft_size=1024, floor_db=-70, noise_gate=0.0, onset_boost=1.4)
+
+    plain.process(quiet)
+    boosted.process(quiet)
+    plain_levels, _ = plain.process(loud)
+    boosted_levels, _ = boosted.process(loud)
+
+    assert boosted_levels.max() > plain_levels.max()
 
 
 def test_bars_render_black_when_silent():
@@ -148,6 +168,21 @@ def test_spectrogram_can_render_exact_two_pixel_frequency_rows():
 
     for y in range(0, 64, 2):
         assert np.array_equal(newest[y], newest[y + 1])
+
+
+@pytest.mark.parametrize("palette", [value for value, _display in SPECTROGRAM_PALETTE_OPTIONS])
+def test_spectrogram_palettes_color_by_intensity_not_frequency(palette):
+    viz = Spectrogram(bands=32, size=64, bar_width=2, palette=palette)
+    levels = np.zeros(32, dtype=np.float32)
+    levels[0] = 0.7
+    levels[-1] = 0.7
+
+    frame = np.frombuffer(viz.render(levels, levels), dtype=np.uint8).reshape(64, 64, 3)
+    newest = frame[:, 63]
+
+    assert newest[0].any()
+    assert newest[-1].any()
+    assert np.array_equal(newest[0], newest[-1])
 
 
 def test_make_visualizer_selects_mode():

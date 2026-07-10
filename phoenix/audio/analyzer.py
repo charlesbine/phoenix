@@ -25,6 +25,7 @@ class SpectrumAnalyzer:
         tilt: float = 3.0,      # dB/octave lift on highs (pink-noise comp) — evens the spectrum
         gain_db: float = 6.0,   # overall sensitivity bump
         tilt_pivot: float = 1000.0,
+        onset_boost: float = 0.0,
     ):
         self.samplerate = samplerate
         self.fft_size = fft_size
@@ -35,6 +36,7 @@ class SpectrumAnalyzer:
         self.release = release
         self.peak_decay = peak_decay
         self.gain_db = gain_db
+        self.onset_boost = max(0.0, float(onset_boost))
 
         self._window = np.hanning(fft_size).astype(np.float32)
         freqs = np.fft.rfftfreq(fft_size, 1.0 / samplerate)
@@ -54,6 +56,7 @@ class SpectrumAnalyzer:
 
         self._levels = np.zeros(bands, dtype=np.float32)
         self._peaks = np.zeros(bands, dtype=np.float32)
+        self._prev_raw = np.zeros(bands, dtype=np.float32)
 
     def process(self, block: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """One PCM block → (levels, peaks), each length ``bands`` in [0, 1]."""
@@ -73,6 +76,12 @@ class SpectrumAnalyzer:
         if self.noise_gate > 0.0:
             raw = np.where(raw < self.noise_gate, 0.0, (raw - self.noise_gate) / (1.0 - self.noise_gate))
 
+        target = raw
+        if self.onset_boost > 0.0:
+            onset = np.maximum(target - self._prev_raw, 0.0)
+            raw = np.clip(target + self.onset_boost * onset, 0.0, 1.0)
+        self._prev_raw = target
+
         # Attack/release: rise fast, fall slow.
         coeff = np.where(raw > self._levels, self.attack, self.release).astype(np.float32)
         self._levels += coeff * (raw - self._levels)
@@ -83,3 +92,4 @@ class SpectrumAnalyzer:
     def reset(self) -> None:
         self._levels[:] = 0.0
         self._peaks[:] = 0.0
+        self._prev_raw[:] = 0.0

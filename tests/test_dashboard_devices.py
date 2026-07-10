@@ -98,7 +98,7 @@ def test_builtin_live_apps_are_regular_device_apps(client):
     assert apps["audio_bars"]["pixlet_config"]["bar_spacing"] == "solid"
     assert apps["audio_bars"]["pixlet_config"]["noise_gate"] == "0.08"
     assert apps["audio_spectrogram"]["pixlet_config"]["bar_width"] == "2"
-    assert apps["audio_spectrogram"]["pixlet_config"]["noise_gate"] == "0.03"
+    assert apps["audio_spectrogram"]["pixlet_config"]["noise_gate"] == "0.02"
     assert apps["nowplaying"]["enabled"] is False  # available, not globally rotating
 
     client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
@@ -113,7 +113,16 @@ def test_builtin_live_apps_are_regular_device_apps(client):
 def test_live_spectrogram_schema_exposes_bar_width(client):
     schema = client.get("/api/apps/audio_spectrogram/schema").json()
 
-    assert [field["id"] for field in schema] == ["bar_width", "palette", "contrast", "floor_db", "noise_gate"]
+    assert [field["id"] for field in schema] == [
+        "bar_width",
+        "palette",
+        "contrast",
+        "tilt_db",
+        "gain_db",
+        "onset_boost",
+        "floor_db",
+        "noise_gate",
+    ]
     assert schema[0] == {
         "type": "dropdown",
         "id": "bar_width",
@@ -126,9 +135,20 @@ def test_live_spectrogram_schema_exposes_bar_width(client):
         ],
     }
     assert schema[1]["default"] == "hue"
+    assert schema[1]["desc"] == "Color map for intensity. Frequency position never changes the color."
+    assert schema[1]["options"] == [
+        {"display": "Hue heat", "value": "hue"},
+        {"display": "Fire", "value": "fire"},
+        {"display": "Ice", "value": "ice"},
+        {"display": "Aurora", "value": "aurora"},
+        {"display": "Mono", "value": "mono"},
+    ]
     assert schema[2]["default"] == "high"
-    assert schema[3]["default"] == "-62"
-    assert schema[4]["default"] == "0.03"
+    assert schema[3]["default"] == "4.5"
+    assert schema[4]["default"] == "10"
+    assert schema[5]["default"] == "1.4"
+    assert schema[6]["default"] == "-66"
+    assert schema[7]["default"] == "0.02"
 
 
 def test_live_bars_schema_exposes_uniform_spacing_controls(client):
@@ -167,6 +187,7 @@ def test_live_bars_schema_exposes_uniform_spacing_controls(client):
                 {"display": "-50 dB", "value": "-50"},
                 {"display": "-55 dB", "value": "-55"},
                 {"display": "-62 dB", "value": "-62"},
+                {"display": "-66 dB", "value": "-66"},
                 {"display": "-70 dB", "value": "-70"},
             ],
         },
@@ -178,6 +199,7 @@ def test_live_bars_schema_exposes_uniform_spacing_controls(client):
             "default": "0.08",
             "options": [
                 {"display": "Off", "value": "0"},
+                {"display": "Very light", "value": "0.02"},
                 {"display": "Light", "value": "0.04"},
                 {"display": "Medium", "value": "0.08"},
                 {"display": "Strong", "value": "0.12"},

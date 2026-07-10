@@ -43,31 +43,74 @@ def _fire_gradient(height: int) -> np.ndarray:
     return _ramp(_PALETTE, height)
 
 
-# Heat colormap for the spectrogram: black (silent) → fire → core (loudest).
-_HEAT = _ramp(
-    np.array(
-        [(0, 0, 0), (40, 10, 6), (179, 36, 26), (255, 90, 42),
-         (255, 158, 61), (255, 217, 138), (255, 242, 207)],
-        dtype=np.float32,
-    ),
-    256,
+def _spectrogram_palette(colors: list[tuple[int, int, int]]) -> np.ndarray:
+    return _ramp(np.array(colors, dtype=np.float32), 256)
+
+
+SPECTROGRAM_PALETTE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("hue", "Hue heat"),
+    ("fire", "Fire"),
+    ("ice", "Ice"),
+    ("aurora", "Aurora"),
+    ("mono", "Mono"),
 )
-_HUE_HEAT = _ramp(
-    np.array(
+
+# Every spectrogram palette is an intensity map: black/silent at index 0,
+# loudest energy at index 255. Frequency position never changes the color.
+_SPECTROGRAM_PALETTES = {
+    "hue": _spectrogram_palette(
         [
-            (0, 0, 0),       # silent
-            (9, 12, 55),     # deep blue
-            (18, 55, 145),   # blue
-            (0, 170, 210),   # cyan
-            (20, 205, 125),  # green
-            (255, 217, 64),  # yellow
-            (255, 104, 34),  # orange
-            (255, 242, 207), # hot core
-        ],
-        dtype=np.float32,
+            (0, 0, 0),
+            (9, 12, 55),
+            (18, 55, 145),
+            (0, 170, 210),
+            (20, 205, 125),
+            (255, 217, 64),
+            (255, 104, 34),
+            (255, 242, 207),
+        ]
     ),
-    256,
-)
+    "fire": _spectrogram_palette(
+        [
+            (0, 0, 0),
+            (40, 10, 6),
+            (179, 36, 26),
+            (255, 90, 42),
+            (255, 158, 61),
+            (255, 217, 138),
+            (255, 242, 207),
+        ]
+    ),
+    "ice": _spectrogram_palette(
+        [
+            (0, 0, 0),
+            (5, 18, 36),
+            (12, 72, 120),
+            (28, 150, 195),
+            (112, 220, 232),
+            (220, 252, 255),
+        ]
+    ),
+    "aurora": _spectrogram_palette(
+        [
+            (0, 0, 0),
+            (12, 28, 40),
+            (23, 108, 92),
+            (34, 205, 138),
+            (140, 238, 86),
+            (250, 255, 190),
+        ]
+    ),
+    "mono": _spectrogram_palette(
+        [
+            (0, 0, 0),
+            (24, 24, 24),
+            (84, 84, 84),
+            (160, 160, 160),
+            (255, 255, 255),
+        ]
+    ),
+}
 # VU ramp: amber when quiet → red-hot when slammed.
 _VU = _ramp(
     np.array([(120, 62, 18), (255, 158, 61), (255, 217, 138), (255, 90, 42), (196, 28, 14)],
@@ -171,7 +214,7 @@ class Spectrogram:
         self.size = size
         self.bands = bands
         self.bar_width = bar_width
-        self._heat = _HUE_HEAT if palette == "hue" else _HEAT
+        self._heat = _SPECTROGRAM_PALETTES.get(palette, _SPECTROGRAM_PALETTES["hue"])
         self._gamma = _CONTRAST_GAMMA.get(contrast, _CONTRAST_GAMMA["high"])
         self._buf = np.zeros((size, size, 3), dtype=np.uint8)
         self._src = np.arange(bands)
@@ -187,7 +230,7 @@ class Spectrogram:
     def render(self, levels: np.ndarray, peaks: np.ndarray) -> bytes:
         col = np.clip(np.interp(self._dst, self._src, levels), 0.0, 1.0)
         col = np.power(col, self._gamma)
-        rgb = self._heat[(col * 255).astype(int)]     # index 0 = lowest freq
+        rgb = self._heat[(col * 255).astype(int)]     # color by intensity, independent of frequency row
         if self.bar_width is not None:
             rgb = np.repeat(rgb, self.bar_width, axis=0)
         self._buf[:, :-1] = self._buf[:, 1:]     # scroll left

@@ -128,6 +128,17 @@ _BUILTIN_APPS: tuple[dict, ...] = (
             "bar_width": "2",
             "palette": "hue",
             "contrast": "high",
+            "floor_db": "-66",
+            "noise_gate": "0.02",
+            "tilt_db": "4.5",
+            "gain_db": "10",
+            "onset_boost": "1.4",
+        },
+        "previous_pixlet_config": {
+            "mode": "spectrogram",
+            "bar_width": "2",
+            "palette": "hue",
+            "contrast": "high",
             "floor_db": "-62",
             "noise_gate": "0.03",
             "tilt_db": "1.5",
@@ -199,7 +210,11 @@ def _seed_builtin_apps(conn: sqlite3.Connection) -> None:
             try:
                 current = json.loads(existing["pixlet_config"])
                 if isinstance(current, dict):
-                    pixlet_config.update(current)
+                    previous = app.get("previous_pixlet_config", {})
+                    for key, value in current.items():
+                        if key in previous and key in pixlet_config and str(value) == str(previous[key]):
+                            continue
+                        pixlet_config[key] = value
             except (TypeError, json.JSONDecodeError):
                 pass
         conn.execute(

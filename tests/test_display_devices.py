@@ -88,8 +88,11 @@ def test_audio_analyzer_kwargs_are_db_configurable_without_frequency_shift():
 
     assert bars["floor_db"] == -50.0
     assert bars["noise_gate"] == 0.12
-    assert spectrogram["floor_db"] == -62.0
-    assert spectrogram["noise_gate"] == 0.03
+    assert spectrogram["floor_db"] == -66.0
+    assert spectrogram["noise_gate"] == 0.02
+    assert spectrogram["tilt"] == 4.5
+    assert spectrogram["gain_db"] == 10.0
+    assert spectrogram["onset_boost"] == 1.4
 
 
 def test_global_mode_ignores_devices(tmp_path):

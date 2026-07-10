@@ -105,8 +105,11 @@ class TestAppDatabase:
         assert app.pixlet_config["bar_width"] == "2"
         assert app.pixlet_config["palette"] == "hue"
         assert app.pixlet_config["contrast"] == "high"
-        assert app.pixlet_config["floor_db"] == "-62"
-        assert app.pixlet_config["noise_gate"] == "0.03"
+        assert app.pixlet_config["floor_db"] == "-66"
+        assert app.pixlet_config["noise_gate"] == "0.02"
+        assert app.pixlet_config["tilt_db"] == "4.5"
+        assert app.pixlet_config["gain_db"] == "10"
+        assert app.pixlet_config["onset_boost"] == "1.4"
 
         db.upsert("audio_spectrogram", pixlet_config={"mode": "spectrogram", "bar_width": "1"})
         db_mod._initialized.discard(str(path))
@@ -115,6 +118,29 @@ class TestAppDatabase:
         assert app is not None
         assert app.pixlet_config["bar_width"] == "1"
         assert app.pixlet_config["palette"] == "hue"
+
+        db.upsert(
+            "audio_spectrogram",
+            pixlet_config={
+                "mode": "spectrogram",
+                "bar_width": "2",
+                "palette": "hue",
+                "contrast": "high",
+                "floor_db": "-62",
+                "noise_gate": "0.03",
+                "tilt_db": "1.5",
+                "gain_db": "8",
+            },
+        )
+        db_mod._initialized.discard(str(path))
+
+        app = AppDatabase(path).get("audio_spectrogram")
+        assert app is not None
+        assert app.pixlet_config["floor_db"] == "-66"
+        assert app.pixlet_config["noise_gate"] == "0.02"
+        assert app.pixlet_config["tilt_db"] == "4.5"
+        assert app.pixlet_config["gain_db"] == "10"
+        assert app.pixlet_config["onset_boost"] == "1.4"
 
 
 class TestConfigDatabase:

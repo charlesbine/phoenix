@@ -94,17 +94,21 @@ def _analyzer_kwargs(mode: str, config: dict) -> dict[str, float]:
     if mode == "bars":
         tilt_default = 0.0
         gain_default = 8.0
+        onset_default = 0.0
     elif mode == "spectrogram":
-        tilt_default = 1.5
-        gain_default = 8.0
+        tilt_default = 4.5
+        gain_default = 10.0
+        onset_default = 1.4
     else:
         tilt_default = 0.0
         gain_default = 6.0
+        onset_default = 0.0
     return {
-        "floor_db": _config_float(config, "floor_db", -55.0 if mode in {"bars", "vu"} else -62.0),
-        "noise_gate": _config_float(config, "noise_gate", 0.08 if mode == "bars" else 0.03),
+        "floor_db": _config_float(config, "floor_db", -55.0 if mode in {"bars", "vu"} else -66.0),
+        "noise_gate": _config_float(config, "noise_gate", 0.08 if mode == "bars" else 0.02),
         "tilt": _config_float(config, "tilt_db", tilt_default),
         "gain_db": _config_float(config, "gain_db", gain_default),
+        "onset_boost": _config_float(config, "onset_boost", onset_default),
     }
 
 

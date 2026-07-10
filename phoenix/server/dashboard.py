@@ -10,6 +10,7 @@ from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from phoenix.audio.visualizer import SPECTROGRAM_PALETTE_OPTIONS
 from phoenix.cache import cache_get
 from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
@@ -133,6 +134,7 @@ def create_app() -> FastAPI:
                         {"display": "-50 dB", "value": "-50"},
                         {"display": "-55 dB", "value": "-55"},
                         {"display": "-62 dB", "value": "-62"},
+                        {"display": "-66 dB", "value": "-66"},
                         {"display": "-70 dB", "value": "-70"},
                     ],
                 },
@@ -144,6 +146,7 @@ def create_app() -> FastAPI:
                     "default": str(app_obj.pixlet_config.get("noise_gate", gate_default)),
                     "options": [
                         {"display": "Off", "value": "0"},
+                        {"display": "Very light", "value": "0.02"},
                         {"display": "Light", "value": "0.04"},
                         {"display": "Medium", "value": "0.08"},
                         {"display": "Strong", "value": "0.12"},
@@ -197,11 +200,11 @@ def create_app() -> FastAPI:
                 "type": "dropdown",
                 "id": "palette",
                 "name": "Palette",
-                "desc": "Hue gives frequency energy more color separation.",
+                "desc": "Color map for intensity. Frequency position never changes the color.",
                 "default": str(app_obj.pixlet_config.get("palette", "hue")),
                 "options": [
-                    {"display": "Hue", "value": "hue"},
-                    {"display": "Fire", "value": "fire"},
+                    {"display": display, "value": value}
+                    for value, display in SPECTROGRAM_PALETTE_OPTIONS
                 ],
             },
             {
@@ -216,7 +219,45 @@ def create_app() -> FastAPI:
                     {"display": "Hot", "value": "hot"},
                 ],
             },
-            *audio_floor_gate_fields("-62", "0.03"),
+            {
+                "type": "dropdown",
+                "id": "tilt_db",
+                "name": "High lift",
+                "desc": "Compensates bass-heavy rolloff so high rows stay visible.",
+                "default": str(app_obj.pixlet_config.get("tilt_db", "4.5")),
+                "options": [
+                    {"display": "Light", "value": "1.5"},
+                    {"display": "Balanced", "value": "3"},
+                    {"display": "Modern", "value": "4.5"},
+                    {"display": "Aggressive", "value": "6"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "gain_db",
+                "name": "Sensitivity",
+                "desc": "Overall analysis gain before contrast mapping.",
+                "default": str(app_obj.pixlet_config.get("gain_db", "10")),
+                "options": [
+                    {"display": "Low", "value": "8"},
+                    {"display": "Normal", "value": "10"},
+                    {"display": "High", "value": "12"},
+                ],
+            },
+            {
+                "type": "dropdown",
+                "id": "onset_boost",
+                "name": "Transient punch",
+                "desc": "Boosts spectrum changes so kicks draw clear vertical lines.",
+                "default": str(app_obj.pixlet_config.get("onset_boost", "1.4")),
+                "options": [
+                    {"display": "Off", "value": "0"},
+                    {"display": "Light", "value": "0.8"},
+                    {"display": "Modern", "value": "1.4"},
+                    {"display": "Hard", "value": "1.8"},
+                ],
+            },
+            *audio_floor_gate_fields("-66", "0.02"),
         ]
 
     # -- SPA entry point --
