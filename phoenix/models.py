@@ -78,6 +78,9 @@ class AppConfig(BaseModel):
         remaining = self.refresh_interval - elapsed
         return max(0.0, remaining.total_seconds())
 
+    def is_stale(self) -> bool:
+        return self.seconds_until_refresh() == 0.0
+
 
 class DisplayConfig(BaseModel):
     layout_mode: Literal["cycle", "single", "random"] = "cycle"

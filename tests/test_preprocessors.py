@@ -59,6 +59,6 @@ def test_pixel_planet_writes_json():
 
 def test_spotify_skips_without_credentials():
     settings = Settings(spotify_client_id="", spotify_client_secret="")
-    fn = get_preprocessor("spotify")
+    fn = get_preprocessor("spotify_now_playing")
     result = fn(settings)
     assert result.status == AppStatus.SKIP

@@ -3,16 +3,19 @@
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).parent
+REPO_DIR = PACKAGE_DIR.parent
 APPS_DIR = PACKAGE_DIR / "apps"
 DATA_DIR = PACKAGE_DIR / "data"
 OUTPUTS_DIR = PACKAGE_DIR / "outputs"
 PREPROCESSORS_DIR = PACKAGE_DIR / "preprocessors"
 ASSETS_DIR = PREPROCESSORS_DIR / "assets"
 TEMPLATES_DIR = PACKAGE_DIR / "templates"
+FRONTEND_DIR = REPO_DIR / "frontend"
+FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 
 DB_PATH = PACKAGE_DIR / "phoenix.db"
 
-COMMUNITY_DIR = PACKAGE_DIR.parent / "community"
+COMMUNITY_DIR = REPO_DIR / "community"
 
 
 def ensure_dirs() -> None:

@@ -3,6 +3,25 @@ set -e
 
 echo "Installing Phoenix services..."
 
+if ! command -v bun >/dev/null 2>&1 && [ -x "$HOME/.bun/bin/bun" ]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+    echo "Missing bun. Install it first: curl -fsSL https://bun.sh/install | bash"
+    exit 1
+fi
+
+echo "Installing Python dependencies..."
+uv sync
+
+echo "Building dashboard frontend..."
+(
+    cd frontend
+    bun install --frozen-lockfile
+    bun run build
+)
+
 # Copy service files
 sudo cp deploy/phoenix-*.service /etc/systemd/system/
 

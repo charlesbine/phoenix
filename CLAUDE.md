@@ -14,7 +14,7 @@ Community apps come from **metaember/phoenix-apps** (https://github.com/metaembe
 
 - **Renderer** (`phoenix render`): Renders apps via pixlet (Starlark) or direct Python, outputs .webp
 - **Display** (`phoenix display`): Picks apps, streams RGB888 frames to M4 over USB serial
-- **Dashboard** (`phoenix dashboard`): FastAPI + Preact SPA on port 7002
+- **Dashboard** (`phoenix dashboard`): FastAPI JSON API + built Vue SPA on port 7002
 - **M4 Firmware**: Dumb frame receiver, Protomatter DMA, gamma correction
 
 ## App Types

@@ -30,6 +30,7 @@ The Pi handles all rendering, scheduling, and the web dashboard. The M4 is a dum
 ```bash
 # Install deps
 curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -fsSL https://bun.sh/install | bash
 curl -fsSL https://github.com/tidbyt/pixlet/releases/download/v0.34.0/pixlet_0.34.0_linux_arm64.tar.gz \
   | sudo tar -xz -C /usr/local/bin pixlet
 
@@ -39,7 +40,6 @@ cd phoenix
 cp .env.example .env  # edit with your settings
 
 # Install and start
-uv sync
 bash deploy/install.sh
 ```
 
@@ -49,14 +49,16 @@ Dashboard at `http://<pi-ip>:7002`
 
 ```bash
 uv sync
-just dev          # web backend + mprocs
-just dev-serial   # with M4 connected
+cd frontend && bun install
+just dev           # backend on :7002 + Vue dashboard on :5173
+just dev-backend   # FastAPI API + production bundle server on :7002
+just dev-frontend  # Vue dev server on :5173, proxies API to :7002
 ```
 
 ### Deployment
 
 ```bash
-just deploy       # git pull + restart on Pi
+just deploy       # git pull + sync deps + build Vue bundle + restart on Pi
 just status       # check services
 just logs         # live tail logs
 just render-times # see what's slow

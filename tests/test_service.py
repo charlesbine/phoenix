@@ -18,8 +18,9 @@ class TestAppManagement:
     def test_create_and_list(self, svc):
         svc.create_app("clock")
         apps = svc.list_apps()
-        assert len(apps) == 1
-        assert apps[0].name == "clock"
+        user_apps = [app for app in apps if app.source != "builtin"]
+        assert len(user_apps) == 1
+        assert user_apps[0].name == "clock"
 
     def test_get_app(self, svc):
         svc.create_app("clock")

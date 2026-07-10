@@ -12,12 +12,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 
 # Install uv for fast dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
-# Install dependencies first (cache layer)
+# Install Python dependencies first (cache layer)
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-group dev --no-install-project --no-group dev
+
+# Build frontend first (cache layer)
+COPY frontend/package.json frontend/bun.lock ./frontend/
+RUN cd frontend && bun install --frozen-lockfile
+
+# Copy frontend source and build dashboard assets
+COPY frontend/ frontend/
+RUN cd frontend && bun run build
 
 # Copy project
 COPY phoenix/ phoenix/
@@ -32,8 +41,7 @@ ENV UV_NO_GROUP=dev
 
 EXPOSE 7002
 
-# Run all three services via a simple process manager
-# We don't need mprocs in the container — just a shell script
+# Run all three services via the entrypoint shell script.
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

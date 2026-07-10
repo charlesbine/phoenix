@@ -3,7 +3,7 @@ remote_dir := "/home/charles/phoenix"
 
 # Deploy latest code to Lyra and restart services
 deploy:
-    ssh {{host}} "cd {{remote_dir}} && git pull && sudo systemctl restart phoenix-dashboard phoenix-renderer phoenix-display"
+    ssh {{host}} "export PATH=\"\$HOME/.bun/bin:\$PATH\" && cd {{remote_dir}} && git pull && uv sync && cd frontend && bun install --frozen-lockfile && bun run build && cd .. && sudo systemctl restart phoenix-dashboard phoenix-renderer phoenix-display"
 
 # Check service status on Lyra
 status:
@@ -42,10 +42,30 @@ flash-m4:
     arduino-cli compile --fqbn adafruit:samd:adafruit_matrixportal_m4 firmware/matrix_portal_m4
     arduino-cli upload --fqbn adafruit:samd:adafruit_matrixportal_m4 -p /dev/cu.usbmodem101 firmware/matrix_portal_m4
 
-# Run locally (dev mode)
+# Run the local dashboard stack
 dev:
-    PHOENIX_PLATFORM=web mprocs
+    @echo "Starting Phoenix backend on :7002 and Vue dashboard on :5173"
+    PHOENIX_PLATFORM=web uv run phoenix dashboard & backend_pid=$!; trap 'kill "$backend_pid" 2>/dev/null' EXIT INT TERM; cd frontend && bun run dev -- --host 0.0.0.0
 
-# Run locally with serial display
-dev-serial:
-    PHOENIX_PLATFORM=serial PHOENIX_SERIAL_PORT=/dev/cu.usbmodem101 mprocs
+# Run the local FastAPI backend
+dev-backend:
+    PHOENIX_PLATFORM=web uv run phoenix dashboard
+
+# Run the Vue dashboard dev server
+dev-frontend:
+    cd frontend && bun run dev -- --host 0.0.0.0
+
+# Build the production dashboard bundle served by phoenix dashboard
+build-frontend:
+    cd frontend && bun run build
+
+# Run local display services without the dashboard UI dev server
+dev-display:
+    PHOENIX_PLATFORM=web uv run phoenix render & render_pid=$!; trap 'kill "$render_pid" 2>/dev/null' EXIT INT TERM; PHOENIX_PLATFORM=web uv run phoenix display
+
+# Run local display services with serial output
+dev-display-serial:
+    PHOENIX_PLATFORM=serial PHOENIX_SERIAL_PORT=/dev/cu.usbmodem101 uv run phoenix render & render_pid=$!; trap 'kill "$render_pid" 2>/dev/null' EXIT INT TERM; PHOENIX_PLATFORM=serial PHOENIX_SERIAL_PORT=/dev/cu.usbmodem101 uv run phoenix display
+
+# Backwards-compatible serial runner name
+dev-serial: dev-display-serial
