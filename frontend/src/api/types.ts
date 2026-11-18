@@ -22,9 +22,24 @@ export interface Config {
   brightness: number
 }
 
+export type NodeSyncStatus = 'pending' | 'offline' | 'synced'
+
 export interface NowPlaying {
   app: string | null
   is_live: boolean
+  node_sync?: NodeSyncStatus
+}
+
+export interface BrightnessSchedule {
+  enabled: boolean
+  mode: 'night' | 'custom'
+  steps: { time: string; brightness: number }[]
+}
+
+export interface DisplaySettings {
+  timezone: string
+  latitude: number | null
+  longitude: number | null
 }
 
 /** A physical panel. Content (rotation), brightness and layout are per-device;
@@ -34,6 +49,7 @@ export interface Device {
   name: string
   backend: 'web' | 'serial' | 'wled' | 'matrix'
   brightness: number
+  brightness_schedule: BrightnessSchedule | null
   layout_mode: 'cycle' | 'random' | 'single'
   cycle_interval: number
   mirror_of: string | null

@@ -1,5 +1,7 @@
 import type {
   AppItem,
+  BrightnessSchedule,
+  DisplaySettings,
   Config,
   Device,
   NowPlaying,
@@ -21,7 +23,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
-  if (!res.ok) throw new Error(`${init?.method ?? 'GET'} ${path} → ${res.status}`)
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    const detail = body?.detail
+    const message = typeof detail === 'string' ? detail : detail?.[0]?.msg
+    throw new Error(message?.replace(/^Value error, /, '') ?? `${init?.method ?? 'GET'} ${path} → ${res.status}`)
+  }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -92,6 +99,10 @@ export const api = {
   reorder: (order: string[], device?: string) =>
     req<{ ok: boolean }>(`/api/reorder${qd(device)}`, { method: 'PUT', body: JSON.stringify({ order }) }),
 
+  getDisplaySettings: () => req<{ settings: DisplaySettings; timezones: string[] }>('/api/settings/display'),
+  setDisplaySettings: (settings: DisplaySettings) =>
+    req<DisplaySettings>('/api/settings/display', { method: 'PUT', body: JSON.stringify(settings) }),
+
   // --- devices (physical panels) ---
   listDevices: () => req<Device[]>('/api/devices'),
   createDevice: (d: Partial<Device> & { id: string; name: string }) =>
@@ -100,6 +111,10 @@ export const api = {
     req<Device | { error: string }>(`/api/devices/${enc(id)}`, {
       method: 'PUT',
       body: JSON.stringify(patch),
+    }),
+  setBrightnessSchedule: (id: string, schedule: BrightnessSchedule) =>
+    req<BrightnessSchedule>(`/api/devices/${enc(id)}/brightness-schedule`, {
+      method: 'PUT', body: JSON.stringify(schedule),
     }),
   deleteDevice: (id: string) => req<{ ok: boolean }>(`/api/devices/${enc(id)}`, { method: 'DELETE' }),
 

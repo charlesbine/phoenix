@@ -75,6 +75,52 @@ def test_per_device_config_and_priority(client):
     assert row["name"] == "clock" and row["priority"] == 3
 
 
+def test_panel_brightness_schedule_persists_without_changing_fallback(client):
+    from datetime import datetime, timezone
+
+    from phoenix.models import BrightnessSchedule, DisplaySettings
+
+    client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled", "brightness": 64})
+    schedule = {
+        "enabled": True,
+        "mode": "custom",
+        "steps": [
+            {"time": "23:00", "brightness": 0},
+            {"time": "07:00", "brightness": 16},
+            {"time": "09:00", "brightness": 64},
+            {"time": "18:00", "brightness": 24},
+        ],
+    }
+    default = client.get("/api/devices/apollo").json()["brightness_schedule"]
+    assert default == {"mode": "night", "enabled": True, "steps": []}
+    settings = {"timezone": "America/New_York", "latitude": 40.71, "longitude": -74.01}
+    assert client.put("/api/settings/display", json=settings).json() == settings
+    global_settings = client.get("/api/settings/display").json()
+    assert global_settings["settings"] == settings
+    assert "America/New_York" in global_settings["timezones"]
+    assert client.put("/api/settings/display", json={"timezone": "Mars/Olympus"}).status_code == 422
+    assert client.put("/api/settings/display", json={"latitude": 1}).status_code == 422
+    endpoint = "/api/devices/apollo/brightness-schedule"
+    assert client.put(endpoint, json=schedule).status_code == 200
+    apollo = client.get("/api/devices/apollo").json()
+    assert apollo["brightness"] == 64
+    assert client.get("/api/devices/main").json()["brightness_schedule"] is None
+    saved = BrightnessSchedule.model_validate(apollo["brightness_schedule"])
+    assert [saved.level_at(DisplaySettings(**settings), 64, datetime(2026, 11, 17, hour, tzinfo=timezone.utc))
+            for hour in (2, 4, 10, 12, 14, 23)] == [24, 0, 0, 16, 64, 24]
+
+    assert client.put(endpoint, json={**schedule, "steps": schedule["steps"] * 2}).status_code == 422
+    assert client.put(endpoint, json={**schedule, "steps": []}).status_code == 422
+    assert client.put("/api/devices/main/brightness-schedule", json=schedule).status_code == 422
+    assert client.put(endpoint, json={**schedule, "enabled": False}).status_code == 200
+    assert not client.get("/api/devices/apollo").json()["brightness_schedule"]["enabled"]
+
+    client.delete("/api/devices/apollo")
+    assert client.put(endpoint, json=schedule).status_code == 404
+    client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
+    assert client.get("/api/devices/apollo").json()["brightness_schedule"] == default
+
+
 def test_content_mode_toggle(client):
     # Seeded main defaults to the app rotation.
     main = client.get("/api/devices/main").json()

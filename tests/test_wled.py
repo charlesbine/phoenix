@@ -63,3 +63,42 @@ def test_backend_satisfies_frame_sink_protocol() -> None:
     # WLED is lossy → asks the player to re-send stills.
     assert WLEDDisplayBackend.still_refresh > 0
     assert issubclass(WLEDDisplayBackend, FrameSink)
+
+
+def test_managed_wled_repairs_scheduled_brightness_after_panel_restart(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    import phoenix.db as db_module
+    from phoenix.display import wled
+    from phoenix.models import BrightnessSchedule
+
+    monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "devices.sqlite")
+    db = db_module.DeviceDatabase()
+    db.create("panel", "Panel", "wled")
+    get = Mock(return_value=Mock(json=Mock(return_value={"on": True, "bri": 64})))
+    post = Mock()
+    monkeypatch.setattr(wled.httpx, "get", get)
+    monkeypatch.setattr(wled.httpx, "post", post)
+    clock = Mock(return_value=100.0)
+    monkeypatch.setattr(wled.time, "monotonic", clock)
+
+    backend = wled.WLEDDisplayBackend(device_id="panel", ip="127.0.0.1")
+    try:
+        backend.set_brightness(16)
+        backend.set_brightness(16)
+        assert post.call_count == 1
+        get.assert_not_called()
+
+        clock.return_value += wled.BRIGHTNESS_CHECK_INTERVAL
+        backend.set_brightness(16)
+        get.assert_called_once()
+        assert post.call_count == 2
+        assert post.call_args.kwargs["json"] == {"on": True, "bri": 16}
+
+        db.set_brightness_schedule("panel", BrightnessSchedule(enabled=False))
+        clock.return_value += wled.BRIGHTNESS_CHECK_INTERVAL
+        backend.set_brightness(16)
+        assert get.call_count == 1
+        assert post.call_count == 2
+    finally:
+        backend.close()

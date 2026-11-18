@@ -217,7 +217,7 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
     _check_pixlet()
     ensure_dirs()
 
-    max_workers = min(os.cpu_count() or 2, 4)
+    max_workers = settings.render_workers or min(os.cpu_count() or 2, 4)
     logger.info("Renderer starting with %d workers", max_workers)
 
     app_db.mark_all_stale()

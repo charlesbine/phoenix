@@ -64,17 +64,16 @@ test.describe('Phoenix control UI — smoke', () => {
 
     await page.goto('/devices')
     await expect(page.getByRole('heading', { name: 'Panels' })).toBeVisible()
-    const switcher = page.getByRole('banner').getByRole('combobox')
-    await expect(switcher).toBeVisible()
+    const switcher = page.getByRole('banner').getByRole('button', { name: 'E2E Panel', exact: true })
 
     // create a panel
     await page.getByPlaceholder('id (e.g. apollo)').fill('e2e_panel')
     await page.getByPlaceholder('Name').fill('E2E Panel')
     await page.getByRole('button', { name: 'Add panel' }).click()
-    await expect(switcher.getByRole('option', { name: 'E2E Panel' })).toBeAttached()
+    await expect(switcher).toBeVisible()
 
     // switch to it — its rotation is empty and independent of Main's
-    await switcher.selectOption({ label: 'E2E Panel' })
+    await switcher.click()
     await page.getByRole('button', { name: 'Apps', exact: true }).click()
     await expect(page.getByText(/Rotation · 0/)).toBeVisible()
 

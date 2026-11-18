@@ -211,7 +211,7 @@ def display(
     seed_default_device(backend=settings.platform)
 
     ddb = DeviceDatabase()
-    devices = [d for d in ddb.list_devices() if d["enabled"]]
+    devices = [d for d in ddb.list_devices() if d["enabled"] and d["id"] != settings.node_device]
     if device:
         devices = [d for d in devices if d["id"] == device]
         if not devices:
@@ -238,6 +238,37 @@ def display(
                 t.join(timeout=0.5)
     except KeyboardInterrupt:
         console.print("Display stopped.")
+
+
+@app.command()
+def node():
+    """Run local serial playback and accept a paired dashboard's HTTPS pushes."""
+    import threading
+
+    import uvicorn
+
+    from phoenix.db import DeviceDatabase
+    from phoenix.display.manager import DisplayManager
+    from phoenix.server.nodes import create_receiver
+    from phoenix.settings import get_settings
+
+    settings = get_settings()
+    if not all((settings.node_device, settings.node_peer, settings.node_token_file,
+                settings.node_bind, settings.node_tls_cert, settings.node_tls_key)):
+        console.print("[red]The display node requires its HTTPS listener, controller address and token.[/]")
+        raise typer.Exit(1)
+    db = DeviceDatabase()
+    device = db.create(settings.node_device, settings.node_device, "serial", brightness=0)
+    wake = threading.Event()
+    receiver = create_receiver(settings, db, wake)
+    server = uvicorn.Server(uvicorn.Config(
+        receiver, host=settings.node_bind, port=settings.node_port, access_log=False,
+        proxy_headers=False, ssl_certfile=settings.node_tls_cert, ssl_keyfile=settings.node_tls_key,
+    ))
+    thread = threading.Thread(target=server.run, daemon=True, name="phoenix-node-receiver")
+    thread.start()
+    DisplayManager(_make_backend("serial", device["id"], device["address"]), device_id=device["id"],
+                   wake=wake).run()
 
 
 @app.command()

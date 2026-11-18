@@ -5,15 +5,20 @@ import json
 import humanize
 from datetime import datetime
 from urllib.parse import unquote
+from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from phoenix import paths as phoenix_paths
-from phoenix.audio.visualizer import SPECTROGRAM_PALETTE_OPTIONS
 from phoenix.cache import cache_get
 from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
+from phoenix.models import (
+    BRIGHTNESS_SCHEDULE_BACKENDS, SPECTROGRAM_PALETTE_OPTIONS, BrightnessSchedule,
+    DisplaySettings, brightness_schedule_for,
+)
+from phoenix.node import NodePublisher
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
 from phoenix.paths import (
     APPS_DIR,
@@ -37,6 +42,18 @@ def create_app() -> FastAPI:
 
     # Start MQTT client
     settings = get_settings()
+    publisher = NodePublisher(settings) if settings.node_device and settings.node_url else None
+    if publisher is not None:
+        app.add_event_handler("startup", publisher.start)
+        app.add_event_handler("shutdown", publisher.stop)
+
+        @app.middleware("http")
+        async def notify_display_node(request: Request, call_next):
+            response = await call_next(request)
+            if (request.method in {"POST", "PUT", "DELETE"} and request.url.path.startswith("/api/")
+                    and response.status_code < 300):
+                publisher.notify()
+            return response
     mqtt_client = get_mqtt_client(settings)
     mqtt_client.start()
 
@@ -827,6 +844,9 @@ def create_app() -> FastAPI:
         return stats
 
     def _read_now_playing(device: str | None) -> str | None:
+        if device and device == settings.node_device:
+            report = publisher.report if publisher else None
+            return report.now_playing if report else None
         # Prefer the per-device sentinel; fall back to the legacy single-display
         # one so now-playing keeps working before the device loop has run.
         txt = current_app_file(device)
@@ -843,7 +863,10 @@ def create_app() -> FastAPI:
     @app.get("/api/now-playing")
     async def now_playing(device: str | None = Query(None)):
         current = _read_now_playing(device)
-        return {"app": current, "is_live": _is_live_app_name(current)}
+        result = {"app": current, "is_live": _is_live_app_name(current)}
+        if publisher and device == settings.node_device:
+            result["node_sync"] = publisher.sync_status
+        return result
 
     # -- Cache proxy --
 
@@ -1031,6 +1054,7 @@ def create_app() -> FastAPI:
             "name": d["name"],
             "backend": d["backend"],
             "brightness": d["brightness"],
+            "brightness_schedule": brightness_schedule_for(d),
             "layout_mode": d["layout_mode"],
             "cycle_interval": d["cycle_interval"],
             "mirror_of": d["mirror_of"],
@@ -1040,6 +1064,18 @@ def create_app() -> FastAPI:
             "audio_mode": d["audio_mode"] if "audio_mode" in d.keys() else "bars",
             "address": d["address"] if "address" in d.keys() else "",
         }
+
+    @app.get("/api/settings/display")
+    async def get_display_settings():
+        return {
+            "settings": get_device_db().get_display_settings(),
+            "timezones": sorted(available_timezones() | {"UTC"}),
+        }
+
+    @app.put("/api/settings/display")
+    async def update_display_settings(settings: DisplaySettings):
+        get_device_db().set_display_settings(settings)
+        return settings
 
     @app.get("/api/devices")
     async def list_devices():
@@ -1079,6 +1115,18 @@ def create_app() -> FastAPI:
         get_device_db().delete(device_id)
         return {"ok": True, "deleted": device_id}
 
+    @app.put("/api/devices/{device_id}/brightness-schedule")
+    async def update_brightness_schedule(device_id: str, schedule: BrightnessSchedule):
+        ddb = get_device_db()
+        device = ddb.get(device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail="Panel does not exist")
+        if schedule.enabled and device["backend"] not in BRIGHTNESS_SCHEDULE_BACKENDS:
+            raise HTTPException(status_code=422, detail="Brightness scheduling requires a WLED or serial panel")
+        if not ddb.set_brightness_schedule(device_id, schedule):
+            raise HTTPException(status_code=404, detail="Panel does not exist")
+        return schedule
+
     # -- Realtime state push (replaces client polling) --
 
     @app.websocket("/ws/state")
@@ -1113,6 +1161,8 @@ def create_app() -> FastAPI:
                     "now_playing": current,
                     "now_playing_is_live": _is_live_app_name(current),
                 }
+                if publisher and device == settings.node_device:
+                    payload["node_sync"] = publisher.sync_status
                 # change detection ignores the humanized/volatile timestamps
                 sig = json.dumps(
                     {
@@ -1122,6 +1172,7 @@ def create_app() -> FastAPI:
                         ],
                         "c": payload["config"],
                         "n": payload["now_playing"],
+                        "node_sync": payload.get("node_sync"),
                     },
                     default=str,
                     sort_keys=True,

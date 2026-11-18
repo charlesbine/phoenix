@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/api/client'
-import type { AppItem, Config, Device } from '@/api/types'
+import type { AppItem, Config, Device, NodeSyncStatus } from '@/api/types'
 
 interface StatePush {
   apps: AppItem[]
   config: Config
   now_playing: string | null
   now_playing_is_live: boolean
+  node_sync?: NodeSyncStatus
 }
 
 export const useMatrixStore = defineStore('matrix', () => {
@@ -15,6 +16,7 @@ export const useMatrixStore = defineStore('matrix', () => {
   const config = ref<Config | null>(null)
   const nowPlaying = ref<string | null>(null)
   const nowPlayingLive = ref(false)
+  const nodeSync = ref<NodeSyncStatus>()
   const online = ref(false)
   const error = ref<string | null>(null)
   const tick = ref(0) // bumps on every state push / render — cache-busts the preview frame
@@ -64,6 +66,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     config.value = s.config
     nowPlaying.value = s.now_playing
     nowPlayingLive.value = s.now_playing_is_live
+    nodeSync.value = s.node_sync
     online.value = true
     error.value = null
     tick.value++
@@ -73,7 +76,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     const d = activeDevice.value
     try {
       const [a, c, np] = await Promise.all([api.listApps(d), api.getConfig(d), api.nowPlaying(d)])
-      apply({ apps: a, config: c, now_playing: np.app, now_playing_is_live: np.is_live })
+      apply({ apps: a, config: c, now_playing: np.app, now_playing_is_live: np.is_live, node_sync: np.node_sync })
     } catch (e) {
       online.value = false
       error.value = e instanceof Error ? e.message : String(e)
@@ -172,7 +175,8 @@ export const useMatrixStore = defineStore('matrix', () => {
   /** Push an app to the physical display right now. */
   async function showNow(name: string): Promise<void> {
     await api.showNow(name, activeDevice.value)
-    nowPlaying.value = name
+    if (nodeSync.value === 'synced') nodeSync.value = 'pending'
+    if (!nodeSync.value) nowPlaying.value = name
   }
 
   function replace(updated: AppItem): void {
@@ -181,7 +185,7 @@ export const useMatrixStore = defineStore('matrix', () => {
   }
 
   return {
-    apps, config, nowPlaying, nowPlayingLive, online, error, tick, note,
+    apps, config, nowPlaying, nowPlayingLive, nodeSync, online, error, tick, note,
     devices, activeDevice, activeDeviceObj,
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,

@@ -5,7 +5,7 @@ Summary: Human readable time
 Description: Display the time in a groovy, human-readable way.
 """
 
-load("render.star", "canvas", "render")
+load("render.star", "render")
 load("schema.star", "schema")
 load("time.star", "time")
 
@@ -284,9 +284,7 @@ def fuzzy_time(hours, minutes, language):
     return pattern.format(hour = cur_hour, next_hour = next_hour).split(",")
 
 def main(config):
-    now = time.now().in_location(time.tz())
-    scale = 2 if canvas.is2x() else 1
-
+    now = time.now().in_location(config.get("$tz", "America/New_York"))
     hours = now.hour
     minutes = now.minute
     language = config.get("dialect") or "en-US"
@@ -300,13 +298,12 @@ def main(config):
     fuzzed = fuzzy_time(hours, minutes, language)
 
     # Add some left padding for ~style~.
-    font = "terminus-16" if scale == 2 else "5x8"
-    texts = [render.Text(" " * i * scale + s, font = font) for i, s in enumerate(fuzzed)]
+    texts = [render.Text(" " * i + s, font = "5x8") for i, s in enumerate(fuzzed)]
 
     return render.Root(
         max_age = 60 * 10,
         child = render.Padding(
-            pad = (3 * scale, 4 * scale, 3 * scale, 4 * scale),
+            pad = (3, 4, 3, 4),
             child = render.Column(
                 children = texts,
                 main_align = "space_evenly",

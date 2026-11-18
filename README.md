@@ -6,11 +6,15 @@ A smart LED matrix display manager that drives a 64x64 HUB75 panel via an Adafru
 
 ## Architecture
 
-```
-Pi (renderer + dashboard)  --USB serial-->  Matrix Portal M4 (DMA)  --HUB75-->  64x64 Panel
-```
+In an all-in-one installation the dashboard, renderer, and display player run
+on the same machine. WLED panels receive DDP over the LAN. A Matrix Portal M4
+receives RGB frames over USB and drives its HUB75 panel.
 
-The Pi handles all rendering, scheduling, and the web dashboard. The M4 is a dumb frame receiver — it gets raw RGB bytes over USB serial and drives the panel via Protomatter DMA at ~200Hz. Zero tearing, zero jitter.
+In a split installation the dashboard and renderer run on a server. A paired
+serial player runs `phoenix node` on the machine connected to the M4. The
+dashboard pushes settings and changed WebPs over private HTTPS. The player
+caches the rotation and keeps playing on its own during a server outage.
+The dashboard reports whether the player has accepted the update.
 
 ## Features
 
@@ -20,6 +24,7 @@ The Pi handles all rendering, scheduling, and the web dashboard. The M4 is a dum
 - **Starlark apps** — compatible with the Tidbyt/Pixlet ecosystem. Run community apps or write your own.
 - **Python apps** — for anything that doesn't fit Starlark. Direct Pillow rendering, no limitations.
 - **Playlist scheduling** — time-based playlists with day-of-week rules. Clock at night, stats during work hours.
+- **Brightness scheduling** — daily brightness and power changes per WLED or serial panel, configured in Devices.
 - **Priority cycling** — important apps show more often (2x, 3x, 4x weighting).
 - **HTTP cache proxy** — transparent caching with stale-on-failure fallback. External APIs going down won't break your display.
 
@@ -55,7 +60,7 @@ just dev-backend   # FastAPI API + production bundle server on :7002
 just dev-frontend  # Vue dev server on :5173, proxies API to :7002
 ```
 
-### Deployment
+### Deployment — all-in-one (Pi)
 
 ```bash
 just deploy       # git pull + sync deps + build Vue bundle + restart on Pi
@@ -63,6 +68,11 @@ just status       # check services
 just logs         # live tail logs
 just render-times # see what's slow
 ```
+
+### Deployment — split server and serial player
+
+See [Split deployment](deploy/europa/README.md) for the loopback-only Compose
+example, private HTTPS pairing, and native serial player setup.
 
 ## Hardware
 
@@ -80,6 +90,14 @@ All settings via environment variables (`.env` file):
 PHOENIX_PLATFORM=serial
 PHOENIX_SERIAL_PORT=/dev/ttyACM0
 
+# Which services a process runs (space-separated): dashboard render display.
+# All-in-one leaves this unset (runs all three); a brain sets "dashboard render".
+PHOENIX_SERVICES="dashboard render display"
+# Concurrent pixlet renders. 0 = auto (min(cores, 4)). Set 1 on a low-RAM Pi.
+PHOENIX_RENDER_WORKERS=0
+# Optional SQLite path. The parent directory must exist. Keep it out of /data.
+# PHOENIX_DB_PATH=/var/lib/phoenix/phoenix.db
+
 PHOENIX_MQTT_BROKER=mqtt.example.com
 PHOENIX_MQTT_PORT=8883
 PHOENIX_MQTT_TLS=true
@@ -89,6 +107,21 @@ PHOENIX_MQTT_PASSWORD=pass
 PHOENIX_HA_URL=http://homeassistant.local:8123
 PHOENIX_HA_TOKEN=your-long-lived-token
 ```
+
+## Brightness and Night Mode
+
+In **Devices**, choose a time zone once under **Global display settings**. A city's
+latitude and longitude give Night Mode its local sunset and sunrise. Without a
+location, it dims between 7 p.m. and 7 a.m. local time.
+
+Night Mode is enabled by default for WLED and serial panels without a saved
+schedule. The panel uses its brightness slider in daylight and 25% of that
+level after dark. It powers off midnight–8 a.m. Monday through Friday and
+2–9 a.m. on Saturday and Sunday mornings. One button turns Night Mode on or
+off. Use **Custom schedule** for daily start times and brightness levels,
+including 0 for off. Switching to Night Mode keeps your saved custom times.
+Scheduled WLED panels periodically recover their configured brightness and
+power state after a controller restart.
 
 ## API
 
@@ -101,6 +134,9 @@ PHOENIX_HA_TOKEN=your-long-lived-token
 | `GET /api/apps` | List registered apps |
 | `POST /api/notify` | Send a notification |
 | `GET /api/panels` | List dashboard panels |
+| `GET /api/settings/display` | Read the global time zone, solar location, and supported time zones |
+| `PUT /api/settings/display` | Set the global `timezone`, `latitude`, and `longitude` |
+| `PUT /api/devices/{id}/brightness-schedule` | Set `enabled`, `mode` (`night` or `custom`), and saved custom `steps` with `time` and `brightness` |
 | `POST /api/panels` | Create a panel |
 | `GET /proxy?url=...&ttl=300` | HTTP cache proxy |
 

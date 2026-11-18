@@ -9,7 +9,7 @@ import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
 
 const store = useMatrixStore()
-const { rotation, config, nowPlaying, nowPlayingLive, online, tick, note, previewApp, selectedApp, following } =
+const { rotation, config, nowPlaying, nowPlayingLive, nodeSync, online, tick, note, previewApp, selectedApp, following } =
   storeToRefs(store)
 
 const showDisabled = ref(false)
@@ -68,6 +68,9 @@ onUnmounted(() => {
           <span class="flex items-center gap-1.5 text-dim">
             <span class="h-2 w-2 rounded-full" :class="online ? 'bg-flame blink' : 'bg-[#7a4a34]'" style="box-shadow: 0 0 9px #ff6a2a"></span>
             live <b class="text-gold">{{ nowPlaying ?? '—' }}</b>
+          </span>
+          <span v-if="nodeSync" class="text-muted" role="status">
+            {{ nodeSync === 'synced' ? 'Player synced' : nodeSync === 'pending' ? 'Player update pending' : 'Player offline · sync on reconnect' }}
           </span>
           <button v-if="!following" class="text-flame hover:text-gold" @click="store.followLive()">◉ follow live</button>
         </div>
@@ -132,7 +135,18 @@ onUnmounted(() => {
           </div>
 
           <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_7rem]">
-            <BrightnessSlider :value="config.brightness" @commit="store.setBrightness" />
+            <div>
+              <BrightnessSlider :value="config.brightness" @commit="store.setBrightness" />
+              <RouterLink
+                v-if="store.activeDeviceObj?.brightness_schedule?.enabled"
+                to="/devices"
+                class="mt-1 inline-block text-[11px] text-gold underline"
+              >
+                {{ store.activeDeviceObj?.brightness_schedule?.mode === 'night'
+                  ? 'Night Mode active · slider sets daytime brightness'
+                  : 'Custom schedule active · slider sets the fallback' }}
+              </RouterLink>
+            </div>
 
             <label class="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
               Layout
