@@ -26,6 +26,7 @@ The dashboard reports whether the player has accepted the update.
 - **Playlist scheduling** — time-based playlists with day-of-week rules. Clock at night, stats during work hours.
 - **Brightness scheduling** — daily brightness and power changes per WLED or serial panel, configured in Devices.
 - **Quick app settings** — select an app on Home and open Settings under its preview. Save & render updates the shared app configuration and renders the preview. Apps has the custom key editor and app management.
+- **Programming Excuses** — rotates a bundled list and learns new excuses from [programmerexcuses.com](http://programmerexcuses.com/) as it renders, at most once every 15 minutes. The site serves one random excuse per request. The local pool in `phoenix/data/programming_excuses_pool.json` works offline and grows over time.
 - **Priority cycling** — important apps show more often (2x, 3x, 4x weighting).
 - **HTTP cache proxy** — transparent caching with stale-on-failure fallback. External APIs going down won't break your display.
 
