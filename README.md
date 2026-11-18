@@ -23,6 +23,7 @@ The dashboard reports whether the player has accepted the update.
 - **Home Assistant integration** — auto-discovers as a dimmable light in HA. Brightness slider, app switching, layout mode — all from HA dashboards and automations.
 - **Starlark apps** — compatible with the Tidbyt/Pixlet ecosystem. Run community apps or write your own.
 - **Python apps** — for anything that doesn't fit Starlark. Direct Pillow rendering, no limitations.
+- **Procedural Planet** — continuously rotating, seamlessly looping planets. Speed is bounded to `0.08`–`0.16` in either direction, with `0` for a still image. Slower turns use more frames to keep frame holds between 40 and 70 ms.
 - **Playlist scheduling** — time-based playlists with day-of-week rules. Clock at night, stats during work hours.
 - **Brightness scheduling** — daily brightness and power changes per WLED or serial panel, configured in Devices.
 - **Quick app settings** — select an app on Home and open Settings under its preview. Save & render updates the shared app configuration and renders the preview. Apps has the custom key editor and app management.
