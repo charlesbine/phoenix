@@ -1,0 +1,26 @@
+services:
+  phoenix:
+    build: ../..
+    image: phoenix:local
+    environment:
+      PHOENIX_SERVICES: "dashboard render"
+      PHOENIX_PLATFORM: web
+      PHOENIX_RENDER_WORKERS: "1"
+      PHOENIX_DB_PATH: /var/lib/phoenix/phoenix.db
+    volumes:
+      - phoenix-state:/var/lib/phoenix
+      - phoenix-data:/app/phoenix/data
+      - phoenix-outputs:/app/phoenix/outputs
+    ports:
+      - "127.0.0.1:7002:7002"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  phoenix-state:
+  phoenix-data:
+  phoenix-outputs:

@@ -13,11 +13,12 @@ import random
 import shutil
 import time
 from pathlib import Path
+from threading import Event
 
 from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase, PlaylistDatabase
 from phoenix.display.backend import DisplayBackend
 from phoenix.display.sink import FramePlayer, FrameSink
-from phoenix.models import AppConfig
+from phoenix.models import AppConfig, device_brightness
 from phoenix.mqtt import pop_notification
 from phoenix.paths import (
     DATA_DIR,
@@ -133,6 +134,7 @@ class DisplayManager:
         device_db: DeviceDatabase | None = None,
         primary: bool = True,
         debug_mode: bool = False,
+        wake: Event | None = None,
     ):
         self.backend = backend
         # Streaming backends (serial/wled/matrix) are driven frame-by-frame via
@@ -146,25 +148,32 @@ class DisplayManager:
         # notification isn't raced away onto a random panel.
         self.primary = primary
         self.debug_mode = debug_mode
+        self.wake = wake
+
+    def _wait(self, seconds: float) -> None:
+        if self.wake is not None:
+            self.wake.wait(seconds)
+        else:
+            time.sleep(seconds)
+
+    def _should_interrupt(self) -> bool:
+        return (self.wake is not None and self.wake.is_set()) or self._pending_notification()
 
     def run(self) -> None:
         """Main display loop."""
+        blanked = False
         while True:
-            if self.primary:
-                self._check_notifications()
-
+            if self.wake is not None:
+                self.wake.clear()
             # Resolve this iteration's brightness / layout / interval, either
             # from the device row or the global config.
             if self.device_id:
                 dev = self.device_db.get(self.device_id)
                 if dev is None:
                     logger.warning("Device %r vanished, waiting…", self.device_id)
-                    time.sleep(NO_APPS_WAIT)
+                    self._wait(NO_APPS_WAIT)
                     continue
-                if dev.get("mirror_of"):
-                    self._mirror_tick(dev["mirror_of"])
-                    continue
-                brightness = dev["brightness"]
+                brightness = device_brightness(dev) if dev["enabled"] else 0
                 layout_mode = dev["layout_mode"]
                 cycle_interval = dev["cycle_interval"]
             else:
@@ -175,8 +184,19 @@ class DisplayManager:
 
             # If brightness is 0, display is "off" — skip rendering
             if brightness == 0:
-                self._clear_display_state()
-                time.sleep(1)
+                if not blanked:
+                    self._clear_display_state()
+                    blanked = True
+                elif self.player is not None:
+                    self.backend.set_brightness(0)
+                self._wait(1)
+                continue
+            blanked = False
+
+            if self.primary:
+                self._check_notifications()
+            if self.device_id and dev.get("mirror_of"):
+                self._mirror_tick(dev["mirror_of"])
                 continue
 
             active = self._collect_active()
@@ -198,7 +218,7 @@ class DisplayManager:
             if not active:
                 logger.warning("No active apps, waiting %ds...", NO_APPS_WAIT)
                 self._clear_display_state()
-                time.sleep(NO_APPS_WAIT)
+                self._wait(NO_APPS_WAIT)
                 continue
 
             # Don't skip stale apps — show them anyway. Better stale content than black screen.
@@ -214,7 +234,7 @@ class DisplayManager:
                 random.shuffle(weighted)
                 self._display_cycle(weighted, cycle_interval)
             elif layout_mode == "single":
-                self._display_app(active[0], cycle_interval)
+                self._display_app(self._check_show_now() or active[0], cycle_interval)
             else:
                 logger.error("Unknown layout mode: %s", layout_mode)
 
@@ -262,15 +282,9 @@ class DisplayManager:
     def _live_slot_active(self, name: str, start: float, duration: int | None) -> bool:
         if duration is not None and time.perf_counter() - start >= duration:
             return False
-        if self._pending_notification():
+        if self._should_interrupt():
             return False
-        if not self.device_id:
-            return self.config_db.get().brightness > 0
-        dev = self.device_db.get(self.device_id)
-        if dev is None or dev["brightness"] == 0:
-            return False
-
-        return True
+        return self._current_brightness() > 0
 
     def _display_audio_app(self, name: str, config: dict, duration: int | None) -> None:
         """Stream the live audio visualizer for one app slot."""
@@ -433,7 +447,7 @@ class DisplayManager:
         """
         if self.player is not None:
             self._write_sentinels(app_name, path)
-            self.player.play(path, duration, self._current_brightness, self._pending_notification)
+            self.player.play(path, duration, self._current_brightness, self._should_interrupt)
         else:
             # web backend writes its own sentinels as it copies the frame
             self.backend.display_image(path, duration)
@@ -459,8 +473,7 @@ class DisplayManager:
         try:
             if self.device_id:
                 dev = self.device_db.get(self.device_id)
-                if dev is not None:
-                    return dev["brightness"]
+                return device_brightness(dev) if dev is not None and dev["enabled"] else 0
             return self.config_db.get().brightness
         except Exception:
             return 255
@@ -509,12 +522,18 @@ class DisplayManager:
 
     def _display_cycle(self, apps: list[AppConfig], duration: int) -> None:
         for app in apps:
+            if self.wake is not None and self.wake.is_set():
+                return
+            if self._current_brightness() == 0:
+                return
             # Check for notifications between each app
             self._check_notifications()
             # Check for "show now" override
             show_now = self._check_show_now()
             if show_now:
                 self._display_app(show_now, duration)
+                if self.wake is not None and self.wake.is_set():
+                    return
             self._display_app(app, duration)
 
     def _display_app(self, app: AppConfig, duration: int) -> None:

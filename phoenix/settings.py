@@ -27,9 +27,21 @@ class Settings(BaseSettings):
     render_width: int = 64
     render_height: int = 64
     magnification: int = 5
+    render_workers: int = 0  # concurrent pixlet renders; 0 = auto (min(cores, 4)). Set 1 on low-RAM hosts.
 
     # Dashboard (also serves preprocessor data, cache proxy at /proxy)
     dashboard_port: int = 7002
+
+    # A paired serial display receives playback state and rendered files.
+    node_device: str = ""
+    node_token_file: str = ""
+    node_url: str = ""
+    node_ca_file: str = ""
+    node_bind: str = ""
+    node_port: int = 7443
+    node_peer: str = ""
+    node_tls_cert: str = ""
+    node_tls_key: str = ""
 
     # MQTT
     mqtt_broker: str = ""  # e.g. europa.local — leave empty to disable

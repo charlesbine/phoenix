@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
-from phoenix.models import AppConfig, DisplayConfig
+from phoenix.models import AppConfig, BrightnessSchedule, DisplayConfig, DisplaySettings, display_settings_from_json
 from phoenix.paths import DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,16 @@ CREATE TABLE IF NOT EXISTS device_apps (
     priority INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (device_id, app_name)
+);
+
+CREATE TABLE IF NOT EXISTS display_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    config TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS device_brightness_schedules (
+    device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+    config TEXT NOT NULL
 );
 """
 
@@ -176,6 +186,18 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
                 conn.execute("ALTER TABLE devices ADD COLUMN audio_mode TEXT NOT NULL DEFAULT 'bars'")
             if "address" not in device_cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN address TEXT NOT NULL DEFAULT ''")
+            with conn:
+                conn.execute("""
+                    INSERT OR IGNORE INTO display_settings (id, config)
+                    SELECT 1, json_object('timezone', json_extract(config, '$.timezone'))
+                    FROM device_brightness_schedules
+                    WHERE json_type(config, '$.timezone') = 'text'
+                    ORDER BY json_extract(config, '$.enabled') DESC, device_id LIMIT 1
+                """)
+                conn.execute("""
+                    UPDATE device_brightness_schedules SET config = json_remove(config, '$.timezone')
+                    WHERE json_type(config, '$.timezone') = 'text'
+                """)
             _seed_builtin_apps(conn)
             _initialized.add(path)
         yield conn
@@ -384,6 +406,12 @@ class DeviceDatabase:
         "mirror_of", "sort_order", "enabled", "content_mode", "audio_mode", "address",
     )
     _MEMBER_FIELDS = ("enabled", "priority", "sort_order")
+    _SELECT_DEVICE = """
+        SELECT devices.*, device_brightness_schedules.config AS brightness_schedule,
+            display_settings.config AS display_settings
+        FROM devices LEFT JOIN device_brightness_schedules ON device_brightness_schedules.device_id = devices.id
+        LEFT JOIN display_settings ON display_settings.id = 1
+    """
 
     def __init__(self, path: str | Path | None = None):
         self._path = str(path or DB_PATH)
@@ -392,7 +420,7 @@ class DeviceDatabase:
 
     def list_devices(self) -> list[dict]:
         with _connect(self._path) as conn:
-            rows = conn.execute("SELECT * FROM devices ORDER BY sort_order, name").fetchall()
+            rows = conn.execute(self._SELECT_DEVICE + "ORDER BY sort_order, name").fetchall()
             return [dict(r) for r in rows]
 
     def enabled_app_names(self) -> set[str]:
@@ -411,7 +439,7 @@ class DeviceDatabase:
 
     def get(self, device_id: str) -> dict | None:
         with _connect(self._path) as conn:
-            row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+            row = conn.execute(self._SELECT_DEVICE + "WHERE devices.id = ?", (device_id,)).fetchone()
             return dict(row) if row else None
 
     def create(self, device_id: str, name: str, backend: str, **kwargs: object) -> dict:
@@ -441,7 +469,57 @@ class DeviceDatabase:
         with _connect(self._path) as conn:
             conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
             conn.execute("DELETE FROM device_apps WHERE device_id = ?", (device_id,))
+            conn.execute("DELETE FROM device_brightness_schedules WHERE device_id = ?", (device_id,))
             conn.commit()
+
+    def get_display_settings(self) -> DisplaySettings:
+        with _connect(self._path) as conn:
+            row = conn.execute("SELECT config FROM display_settings WHERE id = 1").fetchone()
+        return display_settings_from_json(row["config"] if row else None)
+
+    @staticmethod
+    def _write_display_settings(conn: sqlite3.Connection, settings: DisplaySettings) -> None:
+        conn.execute("INSERT OR REPLACE INTO display_settings (id, config) VALUES (1, ?)",
+                     (settings.model_dump_json(),))
+
+    def set_display_settings(self, settings: DisplaySettings) -> None:
+        with _connect(self._path) as conn, conn:
+            self._write_display_settings(conn, settings)
+
+    def set_brightness_schedule(self, device_id: str, schedule: BrightnessSchedule) -> bool:
+        with _connect(self._path) as conn, conn:
+            result = conn.execute(
+                """
+                INSERT INTO device_brightness_schedules (device_id, config)
+                SELECT id, ? FROM devices WHERE id = ?
+                ON CONFLICT(device_id) DO UPDATE SET config = excluded.config
+                """,
+                (schedule.model_dump_json(), device_id),
+            )
+            return result.rowcount == 1
+
+    def apply_node_rotation(self, device_id: str, config: dict, schedule: BrightnessSchedule | None,
+                            apps: list[AppConfig], settings: DisplaySettings | None = None) -> None:
+        """Install a complete cached rotation before the local player sees it."""
+        with _connect(self._path) as conn, conn:
+            if settings is not None:
+                self._write_display_settings(conn, settings)
+            conn.execute(
+                "UPDATE devices SET layout_mode = ?, cycle_interval = ?, brightness = ?, enabled = ? WHERE id = ?",
+                (config["layout_mode"], config["cycle_interval"], config["brightness"], config["enabled"], device_id),
+            )
+            conn.execute("DELETE FROM device_brightness_schedules WHERE device_id = ?", (device_id,))
+            if schedule is not None:
+                conn.execute("INSERT INTO device_brightness_schedules VALUES (?, ?)",
+                             (device_id, schedule.model_dump_json()))
+            conn.execute("DELETE FROM device_apps WHERE device_id = ?", (device_id,))
+            conn.executemany(
+                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated,
+                   pixlet_config, priority, sort_order, source, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [AppDatabase._config_to_row(app) for app in apps],
+            )
+            conn.executemany("INSERT INTO device_apps (device_id, app_name, enabled, priority, sort_order) VALUES (?, ?, ?, ?, ?)",
+                             [(device_id, app.name, app.enabled, app.priority, app.sort_order) for app in apps])
 
     # -- per-device rotation membership --
 
@@ -690,17 +768,16 @@ class PlaylistDatabase:
 
     def get_active_playlist(self) -> dict | None:
         """Get the playlist that should be active right now based on schedule rules."""
-        from datetime import datetime
-        now = datetime.now()
-        current_time = now.strftime("%H:%M")
-        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-        current_day = day_names[now.weekday()]
-
         with _connect(self._path) as conn:
+            settings = conn.execute("SELECT config FROM display_settings WHERE id = 1").fetchone()
             rows = conn.execute(
                 "SELECT r.*, p.name, p.app_names FROM schedule_rules r "
                 "JOIN playlists p ON r.playlist_id = p.id"
             ).fetchall()
+        now = display_settings_from_json(settings["config"]).local_time() if settings else datetime.now()
+        current_time = now.strftime("%H:%M")
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
 
         for r in rows:
             days = json.loads(r["days"])

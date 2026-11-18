@@ -10,6 +10,8 @@ from typing import Protocol
 
 import numpy as np
 
+from phoenix.models import SPECTROGRAM_PALETTE_OPTIONS as SPECTROGRAM_PALETTE_OPTIONS
+
 SIZE = 64
 
 # Ember-CRT fire ramp, base → tip.
@@ -46,14 +48,6 @@ def _fire_gradient(height: int) -> np.ndarray:
 def _spectrogram_palette(colors: list[tuple[int, int, int]]) -> np.ndarray:
     return _ramp(np.array(colors, dtype=np.float32), 256)
 
-
-SPECTROGRAM_PALETTE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("hue", "Hue heat"),
-    ("fire", "Fire"),
-    ("ice", "Ice"),
-    ("aurora", "Aurora"),
-    ("mono", "Mono"),
-)
 
 # Every spectrogram palette is an intensity map: black/silent at index 0,
 # loudest energy at index 255. Frequency position never changes the color.

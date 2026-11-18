@@ -18,6 +18,8 @@ import time
 
 import httpx
 
+from phoenix.db import DeviceDatabase
+from phoenix.models import brightness_schedule_for
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ MAX_LEDS_PER_PACKET = 480  # 480*3+4 = 1444 bytes; 489 causes artifacts on ESP32
 TOTAL_LEDS = 64 * 64
 FRAME_SIZE = TOTAL_LEDS * 3
 RECONNECT_DELAY = 2  # seconds
+BRIGHTNESS_CHECK_INTERVAL = 20  # seconds
 
 
 def send_dnrgb(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes, repeat: int = 1) -> None:
@@ -112,8 +115,8 @@ class WLEDDisplayBackend:
     """FrameSink that streams frames to a WLED HUB75 panel over DNRGB UDP.
 
     WLED applies master brightness itself, so ``set_brightness`` pushes it over
-    HTTP when it changes and we stream full-brightness RGB. UDP is best-effort,
-    so ``still_refresh`` asks the player to re-send static frames periodically.
+    HTTP and periodically checks for panel resets. UDP is best-effort, so
+    ``still_refresh`` asks the player to re-send static frames periodically.
     """
 
     still_refresh = 0.5  # lossy link — re-send stills to self-heal dropped packets
@@ -130,6 +133,7 @@ class WLEDDisplayBackend:
         self._device_id = device_id
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._last_brightness = -1
+        self._next_brightness_check = 0.0
         self._redundancy = max(1, redundancy)  # send each packet N times (lossy-link insurance)
         self._protocol = protocol  # "ddp" (atomic frames, no tearing) or "dnrgb"
         self._seq = 0
@@ -155,16 +159,30 @@ class WLEDDisplayBackend:
     # -- FrameSink protocol --
 
     def set_brightness(self, level: int) -> None:
-        """Set WLED master brightness over HTTP, only when it changes."""
-        if level == self._last_brightness or not self._ip:
+        """Apply the desired brightness and recover from resets on managed panels."""
+        if not self._ip:
             return
-        self._last_brightness = level
+        level = max(0, min(255, level))
+        now = time.monotonic()
+        url = f"http://{self._ip}/json/state"
         try:
-            httpx.post(
-                f"http://{self._ip}/json/state",
-                json={"on": level > 0, "bri": max(0, min(255, level))},
-                timeout=2.0,
-            )
+            if level == self._last_brightness:
+                if not self._device_id or now < self._next_brightness_check:
+                    return
+                self._next_brightness_check = now + BRIGHTNESS_CHECK_INTERVAL
+                device = DeviceDatabase().get(self._device_id)
+                schedule = brightness_schedule_for(device) if device is not None else None
+                if device is None or (device["enabled"] and (schedule is None or not schedule.enabled)):
+                    return
+                response = httpx.get(url, timeout=2.0)
+                response.raise_for_status()
+                state = response.json()
+                if state["on"] == (level > 0) and (level == 0 or state["bri"] == level):
+                    return
+            response = httpx.post(url, json={"on": level > 0, "bri": level}, timeout=2.0)
+            response.raise_for_status()
+            self._last_brightness = level
+            self._next_brightness_check = now + BRIGHTNESS_CHECK_INTERVAL
         except Exception as e:  # noqa: BLE001 — best-effort control
             logger.debug("WLED brightness set failed: %s", e)
 

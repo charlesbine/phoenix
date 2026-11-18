@@ -41,6 +41,8 @@ def _fetch_entity(entity_id: str, settings: Settings) -> dict:
 
 
 def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
+    if not settings.ha_url or not settings.ha_token:
+        raise ValueError("Home climate needs a configured Home Assistant connection")
     ensure_dirs()
 
     # Fetch all sensors

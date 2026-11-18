@@ -74,6 +74,8 @@ def _format_time(seconds: float) -> str:
 
 
 def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
+    if not settings.ha_url or not settings.ha_token:
+        raise ValueError("Spotify needs a configured Home Assistant connection")
     ensure_dirs()
 
     player = _find_playing(settings)

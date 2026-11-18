@@ -1,5 +1,6 @@
 """Central path definitions for all Phoenix directories and file locations."""
 
+import os
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).parent
@@ -13,7 +14,7 @@ TEMPLATES_DIR = PACKAGE_DIR / "templates"
 FRONTEND_DIR = REPO_DIR / "frontend"
 FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 
-DB_PATH = PACKAGE_DIR / "phoenix.db"
+DB_PATH = Path(os.environ.get("PHOENIX_DB_PATH") or PACKAGE_DIR / "phoenix.db")
 
 COMMUNITY_DIR = REPO_DIR / "community"
 

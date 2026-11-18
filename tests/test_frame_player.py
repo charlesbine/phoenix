@@ -103,3 +103,39 @@ def test_animation_decodes_and_streams_every_frame(tmp_path):
         _animation(tmp_path / "a.webp", frames=3), 60, lambda: 100, lambda: next(seq, True)
     )
     assert len(sink.frames) == 3
+
+
+def test_repeated_animation_frames_share_rgb_storage_and_keep_delays(tmp_path):
+    path = tmp_path / "repeat.webp"
+    red = Image.new("RGB", (64, 64), "red")
+    blue = Image.new("RGB", (64, 64), "blue")
+    red.save(path, "WEBP", save_all=True, append_images=[blue, red],
+             duration=[125, 250, 375], lossless=True)
+
+    with Image.open(path) as animation:
+        frames, durations = FramePlayer._extract(animation)
+
+    assert durations == [0.125, 0.250, 0.375]
+    assert frames[0] is frames[2]
+    assert frames[0] != frames[1]
+
+
+def test_brightness_change_and_off_interrupt_a_held_animation_frame(monkeypatch):
+    now = 0.0
+
+    def sleep(seconds):
+        nonlocal now
+        now += seconds
+
+    monkeypatch.setattr(sink_mod.time, "perf_counter", lambda: now)
+    monkeypatch.setattr(sink_mod.time, "sleep", sleep)
+    sink = RecSink()
+
+    def brightness():
+        return 128 if now < 1 else 32 if now < 2 else 0
+
+    FramePlayer(sink)._play_animation([b"first", b"second"], [5.0, 5.0], 600, brightness, lambda: False)
+
+    assert sink.brightness == [128, 128, 32, 32]
+    assert sink.frames == [b"first", b"first"]
+    assert now == 2.0

@@ -95,8 +95,11 @@ class FramePlayer:
 
         frames: list[bytes] = []
         durations: list[float] = []
+        # Repeated pictures share one RGB buffer while retaining their own timing.
+        unique_frames: dict[bytes, bytes] = {}
         for frame in ImageSequence.Iterator(image):
-            frames.append(image_to_rgb(frame))
+            rgb = image_to_rgb(frame)
+            frames.append(unique_frames.setdefault(rgb, rgb))
             durations.append(frame.info.get("duration", 100) / 1000)
         return frames, durations
 
@@ -107,7 +110,10 @@ class FramePlayer:
         get_brightness: Callable[[], int],
         should_interrupt: Callable[[], bool],
     ) -> None:
-        self.sink.set_brightness(get_brightness())
+        brightness = get_brightness()
+        if brightness == 0:
+            return
+        self.sink.set_brightness(brightness)
         if not self.sink.send_frame(rgb):
             time.sleep(RECONNECT_DELAY)
             return
@@ -117,9 +123,13 @@ class FramePlayer:
                 return
             time.sleep(min(0.5, duration - elapsed))
             elapsed += 0.5
-            if self.still_refresh:
-                self.sink.set_brightness(get_brightness())
+            level = get_brightness()
+            if level == 0:
+                return
+            if self.still_refresh or level != brightness:
+                self.sink.set_brightness(level)
                 self.sink.send_frame(rgb)  # idempotent refresh — self-heals UDP loss
+                brightness = level
 
     def _play_animation(
         self,
@@ -131,18 +141,42 @@ class FramePlayer:
     ) -> None:
         start = time.perf_counter()
         next_t = start  # drift-free schedule: sleep until each frame's due time
+        next_brightness_check = start
+        last_brightness: int | None = None
+
+        def keep_playing(held_frame: bytes | None = None) -> bool:
+            nonlocal next_brightness_check, last_brightness
+            now = time.perf_counter()
+            if now - start >= duration or should_interrupt():
+                return False
+            if now >= next_brightness_check:
+                brightness = get_brightness()
+                if brightness == 0:
+                    return False
+                self.sink.set_brightness(brightness)
+                if held_frame is not None and brightness != last_brightness:
+                    if not self.sink.send_frame(held_frame):
+                        time.sleep(RECONNECT_DELAY)
+                        return False
+                last_brightness = brightness
+                next_brightness_check = now + 0.5
+            return True
+
         while time.perf_counter() - start < duration:
-            self.sink.set_brightness(get_brightness())
             for rgb, delay in zip(frames, durations):
-                if time.perf_counter() - start >= duration:
-                    return
-                if should_interrupt():
+                if not keep_playing():
                     return
                 if not self.sink.send_frame(rgb):
                     time.sleep(RECONNECT_DELAY)
                     return
                 next_t += delay
-                slack = next_t - time.perf_counter()
+                deadline = min(next_t, start + duration)
+                slack = deadline - time.perf_counter()
+                while slack > 0.5:
+                    time.sleep(0.5)
+                    if not keep_playing(rgb):
+                        return
+                    slack = deadline - time.perf_counter()
                 if slack > 0:
                     time.sleep(slack)
                 else:

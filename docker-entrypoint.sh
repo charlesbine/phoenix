@@ -1,33 +1,45 @@
 #!/bin/bash
 set -e
 
-echo "Starting Phoenix..."
+read -ra services <<< "${PHOENIX_SERVICES:-dashboard render display}"
+if (( ${#services[@]} == 0 )); then
+    echo "No Phoenix services selected" >&2
+    exit 2
+fi
+for service in "${services[@]}"; do
+    case "$service" in
+        dashboard|render|display) ;;
+        *) echo "Unknown Phoenix service: $service" >&2; exit 2 ;;
+    esac
+done
 
-# Trap signals for clean shutdown
-cleanup() {
-    echo "Shutting down..."
-    kill $RENDERER_PID $DASHBOARD_PID $DISPLAY_PID 2>/dev/null
-    wait
-    exit 0
+pids=()
+shutdown() {
+    if (( ${#pids[@]} )); then
+        kill "${pids[@]}" 2>/dev/null || true
+        wait 2>/dev/null || true
+    fi
+    exit "$1"
 }
-trap cleanup SIGTERM SIGINT
+trap 'shutdown 0' SIGTERM SIGINT
 
-# Start dashboard first (applets need /proxy and /data)
-uv run phoenix dashboard &
-DASHBOARD_PID=$!
-sleep 1
+runs() { [[ " ${services[*]} " == *" $1 "* ]]; }
 
-# Start renderer
-uv run phoenix render &
-RENDERER_PID=$!
+# Applets can fetch /proxy and /data from the dashboard during render.
+if runs dashboard; then
+    uv run phoenix dashboard &
+    pids+=("$!")
+    sleep 1
+fi
+if runs render; then
+    uv run phoenix render &
+    pids+=("$!")
+fi
+if runs display; then
+    uv run phoenix display &
+    pids+=("$!")
+fi
 
-# Start display
-uv run phoenix display &
-DISPLAY_PID=$!
-
-echo "Phoenix running: renderer=$RENDERER_PID dashboard=$DASHBOARD_PID display=$DISPLAY_PID"
-
-# Wait for any process to exit
-wait -n 2>/dev/null || wait
-echo "A process exited, shutting down..."
-cleanup
+status=0
+wait -n || status=$?
+shutdown "$status"

@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { api } from '@/api/client'
-import type { Device } from '@/api/types'
+import type { Device, DisplaySettings } from '@/api/types'
+import DeviceBrightnessSchedule from '@/components/DeviceBrightnessSchedule.vue'
 import { useMatrixStore } from '@/stores/matrix'
 
 const store = useMatrixStore()
 const devices = ref<Device[]>([])
 const error = ref<string | null>(null)
+const displaySettings = ref<DisplaySettings | null>(null)
+const timezones = ref<string[]>([])
+const settingsMessage = ref('')
+const savingSettings = ref(false)
 
 const BACKENDS: Device['backend'][] = ['web', 'serial', 'wled', 'matrix']
 const LAYOUTS: Device['layout_mode'][] = ['cycle', 'random', 'single']
@@ -19,12 +24,35 @@ const draft = ref<{ id: string; name: string; backend: Device['backend'] }>({
 
 async function load(): Promise<void> {
   try {
-    devices.value = await api.listDevices()
+    const [panels, global] = await Promise.all([api.listDevices(), api.getDisplaySettings()])
+    devices.value = panels
+    displaySettings.value = global.settings
+    timezones.value = global.timezones
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   }
 }
 onMounted(load)
+
+async function saveDisplaySettings(): Promise<void> {
+  if (!displaySettings.value) return
+  savingSettings.value = true
+  settingsMessage.value = ''
+  error.value = null
+  const { timezone, latitude, longitude } = displaySettings.value
+  try {
+    displaySettings.value = await api.setDisplaySettings({
+      timezone,
+      latitude: latitude === null || String(latitude) === '' ? null : latitude,
+      longitude: longitude === null || String(longitude) === '' ? null : longitude,
+    })
+    settingsMessage.value = 'Display settings saved.'
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    savingSettings.value = false
+  }
+}
 
 function mirrorOptions(id: string): Device[] {
   // A panel can mirror any *other* non-mirror panel (no chains/cycles).
@@ -77,7 +105,43 @@ async function remove(d: Device): Promise<void> {
     <h2 class="mb-5 text-xl font-bold text-core">Panels</h2>
     <p v-if="error" class="mb-3 text-[11px] text-[#ff6a4a]">{{ error }}</p>
 
-    <div class="grid gap-4">
+    <section v-if="displaySettings" class="mb-4 rounded border border-[#3a2016] bg-panel p-4">
+      <h3 class="text-sm font-semibold text-core">Global display settings</h3>
+      <form class="mt-3 grid max-w-xl gap-3" @submit.prevent="saveDisplaySettings" @input="settingsMessage = ''">
+        <label class="grid gap-1 text-xs text-core">
+          Time zone
+          <select v-model="displaySettings.timezone"
+            class="min-h-9 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 text-gold focus:border-flame">
+            <option v-for="zone in timezones" :key="zone" :value="zone">{{ zone.replaceAll('_', ' ') }}</option>
+          </select>
+        </label>
+        <details>
+          <summary class="cursor-pointer text-xs text-gold">Sunrise and sunset location</summary>
+          <div class="mt-2 grid grid-cols-2 gap-3">
+            <label class="grid min-w-0 gap-1 text-xs text-core">
+              Latitude
+              <input v-model.number="displaySettings.latitude" type="number" min="-90" max="90" step="any"
+                class="min-h-9 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 text-gold focus:border-flame" />
+            </label>
+            <label class="grid min-w-0 gap-1 text-xs text-core">
+              Longitude
+              <input v-model.number="displaySettings.longitude" type="number" min="-180" max="180" step="any"
+                class="min-h-9 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 text-gold focus:border-flame" />
+            </label>
+          </div>
+          <p class="mt-2 text-xs text-muted">City coordinates are enough. With no location set, dimming follows 7 p.m.–7 a.m.</p>
+        </details>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="submit" :disabled="savingSettings"
+            class="min-h-9 rounded border border-[#8f4b29] px-3 text-xs text-gold hover:bg-[#251009] disabled:opacity-50">
+            {{ savingSettings ? 'Saving…' : 'Save settings' }}
+          </button>
+          <p v-if="settingsMessage" role="status" class="text-xs text-gold">{{ settingsMessage }}</p>
+        </div>
+      </form>
+    </section>
+
+    <div class="grid grid-cols-1 gap-4">
       <section
         v-for="d in devices"
         :key="d.id"
@@ -164,7 +228,7 @@ async function remove(d: Device): Promise<void> {
             </label>
 
             <label class="flex items-center justify-between gap-2 sm:col-span-2">
-              <span class="text-dim">brightness · {{ d.brightness }}</span>
+              <span class="text-dim">{{ d.brightness_schedule?.enabled && d.brightness_schedule.mode === 'custom' ? 'manual fallback' : 'brightness' }} · {{ d.brightness }}</span>
               <input
                 type="range"
                 min="0"
@@ -180,6 +244,11 @@ async function remove(d: Device): Promise<void> {
             shows the same content; layout &amp; rotation come from the target.
           </p>
         </div>
+        <DeviceBrightnessSchedule
+          v-if="d.backend === 'wled' || d.backend === 'serial'"
+          :device="d"
+          @saved="d.brightness_schedule = $event; store.loadDevices()"
+        />
       </section>
     </div>
 
