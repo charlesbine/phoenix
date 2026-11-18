@@ -7,6 +7,7 @@ import type { Config, Health } from '@/api/types'
 import MatrixPreview from '@/components/MatrixPreview.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
+import AppQuickSettings from '@/components/AppQuickSettings.vue'
 
 const store = useMatrixStore()
 const { rotation, config, nowPlaying, nowPlayingLive, nodeSync, online, tick, note, previewApp, selectedApp, following } =
@@ -90,6 +91,12 @@ onUnmounted(() => {
             {{ selectedApp.enabled ? 'enabled' : 'disabled' }}
           </button>
         </div>
+        <AppQuickSettings
+          v-if="selectedApp && !following"
+          :key="`${store.activeDevice}:${selectedApp.name}`"
+          :app="selectedApp"
+          @rendered="tick++"
+        />
       </section>
 
       <!-- rotation -->
@@ -100,13 +107,23 @@ onUnmounted(() => {
             <button class="text-gold hover:text-core" @click="refreshHealth">Refresh</button>
           </div>
 
-          <div class="grid grid-cols-3 gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
-            <div class="rounded border border-[#24121c] px-2 py-1.5">
+          <div class="grid gap-2 font-mono text-[10px] uppercase tracking-[0.16em]"
+            :class="health?.player || health?.m4 ? 'grid-cols-3' : 'grid-cols-2'">
+            <div v-if="health?.player" class="min-w-0 rounded border border-[#24121c] px-2 py-1.5">
+              <div class="flex items-center gap-1.5 text-dim">
+                <span class="h-2 w-2 rounded-full" :class="health.player.status === 'synced' ? 'bg-flame' : 'bg-[#7a4a34]'"></span>
+                Player
+              </div>
+              <div class="mt-1 truncate text-gold" :title="`${health.player.name} · ${health.player.status}`">
+                {{ health.player.name }} · {{ health.player.status }}
+              </div>
+            </div>
+            <div v-else-if="health?.m4" class="rounded border border-[#24121c] px-2 py-1.5">
               <div class="flex items-center gap-1.5 text-dim">
                 <span class="h-2 w-2 rounded-full" :class="m4Connected ? 'bg-flame' : 'bg-[#7a4a34]'"></span>
                 M4
               </div>
-              <div class="mt-1 truncate text-gold">{{ health?.m4?.port ?? '—' }}</div>
+              <div class="mt-1 truncate text-gold">{{ health.m4.port ?? '—' }}</div>
             </div>
             <div class="rounded border border-[#24121c] px-2 py-1.5">
               <div class="flex items-center gap-1.5 text-dim">

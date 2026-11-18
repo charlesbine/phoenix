@@ -92,7 +92,7 @@ async function sync(): Promise<void> {
   error.value = ''
   try {
     await api.syncStore()
-    await loadList()
+    await Promise.all([loadList(), loadCategories()])
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Failed to sync catalog'
   } finally {
@@ -228,14 +228,14 @@ onMounted(() => {
         <!-- status row -->
         <div class="mt-3 flex flex-wrap items-center gap-3 font-mono text-[11px] uppercase tracking-wider">
           <span v-if="loading" class="text-dim"><span class="blink">▮</span> Loading catalog…</span>
-          <span v-else class="text-dim">
+          <span v-else-if="!error || visibleApps.length" class="text-dim">
             {{ visibleApps.length }} app{{ visibleApps.length === 1 ? '' : 's' }}
             <span v-if="tag"> · #{{ tag }}</span>
             <span v-if="visibleApps.length"> · page {{ page }}/{{ pageCount }}</span>
           </span>
           <button v-if="tag" class="text-gold hover:text-core" @click="setTag('')">Clear tag</button>
         </div>
-        <p v-if="error" class="mt-1 text-[11px] text-[#ff6a4a]">{{ error }}</p>
+        <p v-if="error" role="alert" class="mt-1 text-[11px] text-[#ff6a4a]">{{ error }}</p>
       </header>
 
       <!-- results -->
@@ -328,7 +328,7 @@ onMounted(() => {
         </button>
       </div>
 
-      <p v-if="!loading && !visibleApps.length" class="font-mono text-[11px] text-dim">
+      <p v-if="!loading && !error && !visibleApps.length" class="font-mono text-[11px] text-dim">
         No apps found. Try a different search or sync the catalog.
       </p>
     </div>

@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { api } from '@/api/client'
 import type { AppItem, Playlist, SchemaField } from '@/api/types'
 import MatrixPreview from '@/components/MatrixPreview.vue'
+import AppSettingsFields from '@/components/AppSettingsFields.vue'
 import { useMatrixStore } from '@/stores/matrix'
 
 const store = useMatrixStore()
@@ -666,25 +667,7 @@ function removeConfigValue(key: string): void {
         <!-- schema-driven config -->
         <div v-if="schema.length" class="rounded border border-[#3a2016] bg-panel p-3">
           <div class="mb-3 text-[10px] uppercase tracking-[0.18em] text-dim">Settings</div>
-          <div class="flex flex-col gap-3">
-            <div v-for="f in schema" :key="f.id">
-              <label class="mb-1 block text-[10px] uppercase tracking-[0.14em] text-dim">{{ f.name ?? f.id }}</label>
-              <p v-if="f.desc" class="mb-1 text-[10px] normal-case text-muted">{{ f.desc }}</p>
-
-              <select v-if="f.type === 'dropdown'" :value="values[f.id]" class="w-full rounded border border-[#3a2016] bg-[#120a10] px-2 py-1.5 text-xs text-gold focus:border-flame focus:outline-none" @change="onValue(f.id, $event)">
-                <option v-for="o in f.options ?? []" :key="o.value" :value="o.value">{{ o.display }}</option>
-              </select>
-
-              <label v-else-if="f.type === 'toggle'" class="flex items-center gap-2 text-xs text-gold">
-                <input type="checkbox" :checked="values[f.id] === 'true'" @change="onValue(f.id, $event)" />
-                {{ values[f.id] === 'true' ? 'on' : 'off' }}
-              </label>
-
-              <input v-else-if="f.type === 'color'" type="color" :value="values[f.id] || '#000000'" class="h-8 w-16 rounded border border-[#3a2016] bg-[#120a10]" @input="onValue(f.id, $event)" />
-
-              <input v-else :value="values[f.id]" type="text" class="w-full rounded border border-[#3a2016] bg-[#120a10] px-2 py-1.5 text-xs text-gold focus:border-flame focus:outline-none" @input="onValue(f.id, $event)" />
-            </div>
-          </div>
+          <AppSettingsFields :schema="schema" :values="values" @change="(id, value) => values[id] = value" />
         </div>
         <p v-else class="text-[11px] text-dim">This app has no configurable settings.</p>
 

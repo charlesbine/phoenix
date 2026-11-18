@@ -25,6 +25,7 @@ The dashboard reports whether the player has accepted the update.
 - **Python apps** — for anything that doesn't fit Starlark. Direct Pillow rendering, no limitations.
 - **Playlist scheduling** — time-based playlists with day-of-week rules. Clock at night, stats during work hours.
 - **Brightness scheduling** — daily brightness and power changes per WLED or serial panel, configured in Devices.
+- **Quick app settings** — select an app on Home and open Settings under its preview. Save & render updates the shared app configuration and renders the preview. Apps has the custom key editor and app management.
 - **Priority cycling** — important apps show more often (2x, 3x, 4x weighting).
 - **HTTP cache proxy** — transparent caching with stale-on-failure fallback. External APIs going down won't break your display.
 

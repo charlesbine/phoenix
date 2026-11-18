@@ -5,12 +5,15 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Lock
 
 import yaml  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
 COMMUNITY_REPO = "https://github.com/metaember/phoenix-apps.git"
+_repo_lock = Lock()
 
 
 @dataclass
@@ -26,24 +29,34 @@ class CommunityApp:
     supports_2x: bool = False
 
 
-def ensure_repo(repo_path: Path) -> None:
-    """Clone or pull the community apps repo."""
-    if (repo_path / ".git").exists():
-        logger.info("Pulling community repo at %s", repo_path)
-        subprocess.run(
-            ["git", "pull", "--ff-only"],
-            cwd=repo_path,
-            capture_output=True,
-            check=False,
-        )
-    else:
+def ensure_repo(repo_path: Path, *, refresh: bool = True) -> None:
+    """Initialize the catalog on demand, and refresh it when requested."""
+    with _repo_lock:
+        git_dir = repo_path / ".git"
+        if git_dir.exists():
+            if refresh:
+                logger.info("Pulling community repo at %s", repo_path)
+                subprocess.run(
+                    ["git", "pull", "--ff-only"],
+                    cwd=repo_path, capture_output=True, check=True, timeout=60,
+                )
+            return
+
         logger.info("Cloning community repo to %s", repo_path)
         repo_path.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "clone", "--depth=1", COMMUNITY_REPO, str(repo_path)],
-            capture_output=True,
-            check=True,
-        )
+        # The list and category requests can arrive together. Publish only
+        # a completed clone, so a failed or interrupted one can be retried.
+        with TemporaryDirectory(dir=repo_path.parent, prefix=".community-") as staging:
+            checkout = Path(staging) / "catalog"
+            subprocess.run(
+                ["git", "clone", "--depth=1", COMMUNITY_REPO, str(checkout)],
+                capture_output=True, check=True, timeout=60,
+            )
+            try:
+                checkout.rename(repo_path)
+            except OSError:
+                if not git_dir.exists():
+                    raise
 
 
 def _parse_app(app_dir: Path) -> CommunityApp | None:
