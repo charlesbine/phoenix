@@ -63,6 +63,7 @@ export interface Device {
 export interface Health {
   status: string
   issues?: string[]
+  player?: { name: string; status: NodeSyncStatus }
   m4?: {
     connected?: boolean
     port?: string
@@ -129,6 +130,7 @@ export interface SchemaField {
   name?: string
   desc?: string
   default?: string
+  step?: string
   icon?: string
   options?: { display: string; value: string }[]
 }

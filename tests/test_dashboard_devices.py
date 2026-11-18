@@ -292,3 +292,67 @@ def test_health_check_does_not_run_privileged_commands(client, monkeypatch):
     status = client.get("/api/status")
     assert status.status_code == 200
     assert "status" in status.json()
+
+
+def test_controller_health_reports_paired_player_instead_of_local_m4(client, monkeypatch):
+    from phoenix.db import DeviceDatabase
+    from phoenix.node import NodePublisher, NodeStatus
+    from phoenix.server import dashboard
+    from phoenix.settings import Settings
+
+    settings = Settings(platform="web", node_device="aurora", node_url="https://aurora.local")
+    publisher = NodePublisher(settings)
+    publisher.report = NodeStatus(revision="test")
+    publisher.pending = False
+    DeviceDatabase().create("aurora", "Aurora", "serial")
+    monkeypatch.setattr(dashboard, "get_settings", lambda: settings)
+    monkeypatch.setattr(dashboard, "NodePublisher", lambda _: publisher)
+    dashboard_client = TestClient(dashboard.create_app())
+
+    health = dashboard_client.get("/api/status").json()
+    assert health["player"] == {"name": "Aurora", "status": "synced"}
+    assert "m4" not in health
+    assert not any("M4" in issue for issue in health["issues"])
+
+    publisher.pending = True
+    health = dashboard_client.get("/api/status").json()
+    assert health["player"]["status"] == "pending"
+    assert "Aurora player offline" not in health["issues"]
+
+    publisher.report = None
+    health = dashboard_client.get("/api/status").json()
+    assert health["player"]["status"] == "offline"
+    assert health["status"] == "degraded"
+    assert "Aurora player offline" in health["issues"]
+
+
+def test_store_catalog_failure_returns_actionable_error(client, monkeypatch):
+    from phoenix import shop
+
+    def missing_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(shop, "ensure_repo", missing_git)
+    for path in ("/api/store", "/api/store/categories"):
+        response = client.get(path)
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Community catalog is unavailable."
+    response = client.post("/api/store/sync")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Community catalog sync failed."
+
+
+def test_preview_uses_the_saved_app_config(client, monkeypatch):
+    from phoenix import render
+
+    seen = []
+    monkeypatch.setattr(render, "_render_dispatch", lambda app, settings: seen.append(app.pixlet_config))
+    client.post("/api/apps/procedural_planet/add")
+    config = {"planet_type": "lava", "time_speed": "0.2", "n_frames": "1"}
+    assert client.put("/api/apps/procedural_planet/config", json=config).json()["pixlet_config"] == config
+    schema = client.get("/api/apps/procedural_planet/schema").json()
+    planet_type = next(field for field in schema if field["id"] == "planet_type")
+    assert "lava" in {option["value"] for option in planet_type["options"]}
+    assert client.get("/api/apps/pixel_planet/schema").json() == []
+    assert client.post("/api/apps/procedural_planet/preview").status_code == 200
+    assert seen == [config]

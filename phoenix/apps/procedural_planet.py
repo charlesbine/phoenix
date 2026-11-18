@@ -11,6 +11,18 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+SETTINGS_SCHEMA = [
+    {
+        "type": "dropdown", "id": "planet_type", "name": "Planet type", "default": "",
+        "options": [
+            {"value": "", "display": "Random"},
+            *({"value": name, "display": name.replace("_", " ").title()} for name in PLANET_TYPES),
+        ],
+    },
+    {"type": "number", "id": "time_speed", "name": "Animation speed", "default": "0.1", "step": "any"},
+    {"type": "number", "id": "seed", "name": "Seed", "desc": "Leave empty for a random planet."},
+]
+
 
 def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
     # Parse hyperparams from config

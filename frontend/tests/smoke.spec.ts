@@ -36,7 +36,7 @@ test.describe('Phoenix control UI — smoke', () => {
     await page.locator('ul li button').first().click()
 
     // detail panel appears with real controls
-    await expect(page.getByRole('button', { name: 'remove' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'remove', exact: true })).toBeVisible()
     await expect(page.getByText('weight')).toBeVisible()
     await expect(page.locator('img[src*="/static/outputs/"]').first()).toBeVisible({ timeout: 20_000 })
   })

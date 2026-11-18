@@ -101,7 +101,7 @@ def render_preview(name: str, settings: Settings) -> None:
         except Exception:
             logger.warning("[%s] Preprocessor failed during preview, continuing anyway", name)
 
-    app = AppConfig(name=name)
+    app = existing or AppConfig(name=name)
     _render_dispatch(app, settings)
 
 

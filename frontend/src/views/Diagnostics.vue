@@ -153,13 +153,17 @@ onUnmounted(() => {
           </div>
 
           <div class="grid gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
-            <div class="flex items-center justify-between rounded border border-[#24121c] px-2 py-1.5">
+            <div v-if="health?.player" class="flex items-center justify-between gap-2 rounded border border-[#24121c] px-2 py-1.5">
+              <span class="text-dim">{{ health.player.name }}</span>
+              <span class="truncate text-gold">{{ health.player.status }}</span>
+            </div>
+            <div v-else-if="health?.m4" class="flex items-center justify-between rounded border border-[#24121c] px-2 py-1.5">
               <span class="text-dim">M4</span>
               <span class="truncate text-gold">{{ health?.m4?.connected ? 'connected' : health?.m4?.port ?? 'missing' }}</span>
             </div>
             <div class="flex items-center justify-between rounded border border-[#24121c] px-2 py-1.5">
               <span class="text-dim">MQTT</span>
-              <span class="truncate text-gold">{{ health?.mqtt?.connected ? health?.mqtt?.broker ?? 'connected' : 'disconnected' }}</span>
+              <span class="truncate text-gold">{{ health?.mqtt?.broker ? (health.mqtt.connected ? health.mqtt.broker : 'disconnected') : 'not configured' }}</span>
             </div>
             <div class="flex items-center justify-between rounded border border-[#24121c] px-2 py-1.5">
               <span class="text-dim">Load</span>

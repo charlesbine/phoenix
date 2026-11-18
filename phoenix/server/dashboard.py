@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import logging
+import subprocess
 import humanize
 from datetime import datetime
 from urllib.parse import unquote
@@ -34,6 +36,8 @@ from phoenix.paths import (
 from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
 from phoenix.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -354,6 +358,10 @@ def create_app() -> FastAPI:
         app_obj = get_svc().app_db.get(name)
         if app_obj and app_obj.runtime:
             return _runtime_schema(app_obj)
+        if name == "procedural_planet":
+            from phoenix.apps.procedural_planet import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
         from phoenix.paths import star_path
         path = star_path(name)
         if not path.exists():
@@ -698,19 +706,20 @@ def create_app() -> FastAPI:
 
         result: dict = {"status": "ok", "issues": []}
 
-        # M4 serial connection
-        m4_connected = False
-        try:
-            import serial as _serial
-            port = _serial.Serial(settings.serial_port, baudrate=2000000, timeout=0.1)
-            m4_connected = port.is_open
-            port.close()
-        except Exception:
-            pass
-        result["m4"] = {"connected": m4_connected, "port": settings.serial_port}
-        if not m4_connected:
-            result["issues"].append(f"M4 not available on {settings.serial_port}")
-            result["status"] = "degraded"
+        if publisher is not None:
+            player = get_device_db().get(settings.node_device)
+            player_name = player["name"] if player else settings.node_device
+            player_status = publisher.sync_status
+            result["player"] = {"name": player_name, "status": player_status}
+            if player_status == "offline":
+                result["issues"].append(f"{player_name} player offline")
+                result["status"] = "degraded"
+        elif settings.platform == "serial":
+            m4_connected = os.path.exists(settings.serial_port)
+            result["m4"] = {"connected": m4_connected, "port": settings.serial_port}
+            if not m4_connected:
+                result["issues"].append(f"M4 not available on {settings.serial_port}")
+                result["status"] = "degraded"
 
         # MQTT
         result["mqtt"] = {"connected": mqtt_client.connected, "broker": settings.mqtt_broker or None}
@@ -904,6 +913,18 @@ def create_app() -> FastAPI:
 
     # -- Community Store --
 
+    async def community_catalog(*, refresh: bool = False):
+        from phoenix.paths import COMMUNITY_DIR
+        from phoenix.shop import ensure_repo
+
+        try:
+            await asyncio.to_thread(ensure_repo, COMMUNITY_DIR, refresh=refresh)
+        except (OSError, subprocess.SubprocessError):
+            logger.exception("Community catalog %s failed", "sync" if refresh else "load")
+            message = "Community catalog sync failed." if refresh else "Community catalog is unavailable."
+            raise HTTPException(status_code=503, detail=message) from None
+        return COMMUNITY_DIR
+
     @app.get("/api/store")
     async def store_list(
         q: str = Query("", description="Search query"),
@@ -911,11 +932,10 @@ def create_app() -> FastAPI:
         tag: str = Query("", description="Filter by tag"),
     ):
         """List community apps with search, category, and tag filtering."""
-        from phoenix.shop import ensure_repo, search_apps
-        from phoenix.paths import COMMUNITY_DIR
+        from phoenix.shop import search_apps
 
-        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
-        apps = await asyncio.to_thread(search_apps, COMMUNITY_DIR, q, category, tag)
+        catalog = await community_catalog()
+        apps = await asyncio.to_thread(search_apps, catalog, q, category, tag)
 
         # Check which are already installed
         installed = {a.name for a in get_svc().list_apps()}
@@ -937,17 +957,14 @@ def create_app() -> FastAPI:
     @app.get("/api/store/categories")
     async def store_categories():
         """List all available categories."""
-        from phoenix.shop import ensure_repo, list_categories
-        from phoenix.paths import COMMUNITY_DIR
+        from phoenix.shop import list_categories
 
-        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
-        return await asyncio.to_thread(list_categories, COMMUNITY_DIR)
+        return await asyncio.to_thread(list_categories, await community_catalog())
 
     @app.post("/api/store/{name}/install")
     async def store_install(name: str):
         """Import a community app and register it."""
-        from phoenix.shop import ensure_repo, import_app
-        from phoenix.paths import COMMUNITY_DIR
+        from phoenix.shop import import_app
         from phoenix.models import REFRESH_PRESETS
 
         svc = get_svc()
@@ -957,9 +974,9 @@ def create_app() -> FastAPI:
         if svc.app_db.get(safe_name) is not None:
             return {"error": f"'{name}' is already installed"}
 
-        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        catalog = await community_catalog()
         try:
-            await asyncio.to_thread(import_app, COMMUNITY_DIR, name, APPS_DIR)
+            await asyncio.to_thread(import_app, catalog, name, APPS_DIR)
         except ValueError as e:
             return {"error": str(e)}
 
@@ -981,14 +998,13 @@ def create_app() -> FastAPI:
     @app.post("/api/store/{name}/preview")
     async def store_preview(name: str):
         """Render a preview of a community app without installing it."""
-        from phoenix.shop import ensure_repo, _resolve_app_dir
-        from phoenix.paths import COMMUNITY_DIR, output_path as _output_path
+        from phoenix.shop import _resolve_app_dir
+        from phoenix.paths import output_path as _output_path
         import shutil
 
-        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
-
+        catalog = await community_catalog()
         try:
-            app_dir = _resolve_app_dir(COMMUNITY_DIR, name)
+            app_dir = _resolve_app_dir(catalog, name)
         except ValueError as e:
             return {"error": str(e)}
 
@@ -1019,10 +1035,7 @@ def create_app() -> FastAPI:
     @app.post("/api/store/sync")
     async def store_sync():
         """Pull latest community apps."""
-        from phoenix.shop import ensure_repo
-        from phoenix.paths import COMMUNITY_DIR
-
-        await asyncio.to_thread(ensure_repo, COMMUNITY_DIR)
+        await community_catalog(refresh=True)
         return {"ok": True}
 
     # -- Config --
