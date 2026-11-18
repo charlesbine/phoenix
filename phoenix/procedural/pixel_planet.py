@@ -68,17 +68,13 @@ def _circle_noise(x: float, y: float, seed: float, size: float = 10.0) -> float:
     return _smoothstep(0.0, r, m * 0.75)
 
 
-def _spherify(ux: float, uy: float) -> tuple[float, float]:
-    """Map flat UV to sphere projection."""
-    cx = ux * 2.0 - 1.0
-    cy = uy * 2.0 - 1.0
-    dot = cx * cx + cy * cy
-    if dot >= 1.0:
-        return ux, uy
-    z = math.sqrt(1.0 - dot)
-    sx = cx / (z + 1.0)
-    sy = cy / (z + 1.0)
-    return sx * 0.5 + 0.5, sy * 0.5 + 0.5
+def _planet_uv(ux: float, uy: float, phase: float) -> tuple[float, float]:
+    """Project the visible hemisphere onto a texture that repeats in longitude."""
+    x, y = ux * 2.0 - 1.0, uy * 2.0 - 1.0
+    z = math.sqrt(max(0.0, 1.0 - x * x - y * y))
+    longitude = math.atan2(x, z) / math.tau
+    latitude = math.asin(_clamp(y, -1.0, 1.0)) / math.pi
+    return (0.5 + longitude + phase) % 1.0, 0.5 + latitude
 
 
 def _rotate(ux: float, uy: float, angle: float) -> tuple[float, float]:
@@ -188,9 +184,8 @@ def _render_base_planet(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     light_intensity: float,
     colors: Sequence[Color],
@@ -215,10 +210,11 @@ def _render_base_planet(
             dith = ((ux + (py / size - 0.5)) % (2.0 / pixels)) <= (1.0 / pixels)
 
             ux, uy = _rotate(ux, uy, rotation)
+            ux, uy = _planet_uv(ux, uy, phase)
 
             fbm1 = _fbm(ux * 10.0, uy * 10.0, seed, octaves)
             d_light_mod = d_light + _fbm(
-                ux * 10.0 + fbm1 + time * 0.1 + time_speed,
+                ux * 10.0 + fbm1,
                 uy * 10.0,
                 seed, octaves,
             ) * light_intensity
@@ -245,9 +241,8 @@ def _render_land_mass(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     land_cutoff: float = 0.6,
@@ -267,9 +262,9 @@ def _render_land_mass(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
+            ux, uy = _planet_uv(ux, uy, phase)
 
-            bx = ux * 10.0 + time * time_speed
+            bx = ux * 10.0
             by = uy * 10.0
 
             fbm1 = _fbm(bx, by, seed, octaves)
@@ -308,9 +303,8 @@ def _render_crater_layer(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
 ) -> LayerResult:
@@ -323,7 +317,7 @@ def _render_crater_layer(
         c = 1.0
         for i in range(2):
             cn = _circle_noise(
-                ux * crater_size + float(i + 1) + 10.0 + (time * 0.1) + time_speed,
+                ux * crater_size + float(i + 1) + 10.0,
                 uy * crater_size + float(i + 1) + 10.0,
                 seed, crater_size,
             )
@@ -340,7 +334,7 @@ def _render_crater_layer(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
+            ux, uy = _planet_uv(ux, uy, phase)
 
             c1 = _crater(ux, uy)
             c2 = _crater(ux + (lx - 0.5) * 0.04, uy + (ly - 0.5) * 0.04)
@@ -365,14 +359,12 @@ def _render_cloud_layer(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     cloud_cover: float = 0.546,
     stretch: float = 2.5,
-    cloud_curve: float = 1.3,
     noise_size: float = 4.0,
     octaves: int = 4,
 ) -> LayerResult:
@@ -384,12 +376,12 @@ def _render_cloud_layer(
         c_noise = 0.0
         for i in range(9):
             c_noise += _circle_noise(
-                ux * noise_size * 0.3 + float(i + 1) + 10.0 + time * time_speed,
+                ux * noise_size + float(i + 1) + 10.0,
                 uy * noise_size * 0.3 + float(i + 1) + 10.0,
                 seed, noise_size,
             )
         return _fbm(
-            ux * noise_size + c_noise + time * time_speed,
+            ux * noise_size + c_noise,
             uy * noise_size + c_noise,
             seed, octaves, noise_size,
         )
@@ -406,8 +398,7 @@ def _render_cloud_layer(
             d_to_center = d_circle
 
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
-            uy += _smoothstep(0.0, cloud_curve, abs(ux - 0.4))
+            ux, uy = _planet_uv(ux, uy, phase)
 
             c = _cloud_alpha(ux, uy * stretch)
 
@@ -457,9 +448,8 @@ def _render_lake_layer(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     lake_cutoff: float = 0.6,
@@ -479,9 +469,9 @@ def _render_lake_layer(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
+            ux, uy = _planet_uv(ux, uy, phase)
 
-            lake = _fbm(ux * 10.0 + time * time_speed, uy * 10.0, seed, octaves)
+            lake = _fbm(ux * 10.0, uy * 10.0, seed, octaves)
 
             col = colors[0]
             if d_light > 0.4:
@@ -502,9 +492,8 @@ def _render_river_layer(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     river_cutoff: float = 0.6,
@@ -524,10 +513,10 @@ def _render_river_layer(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
+            ux, uy = _planet_uv(ux, uy, phase)
 
-            fbm1 = _fbm(ux * 10.0 + time * time_speed, uy * 10.0, seed, octaves)
-            river_fbm = _fbm(ux + fbm1 * 2.5, uy + fbm1 * 2.5, seed, octaves)
+            fbm1 = _fbm(ux * 10.0, uy * 10.0, seed, octaves)
+            river_fbm = _fbm(ux * 10.0 + fbm1 * 2.5, uy + fbm1 * 2.5, seed, octaves)
 
             col = colors[0]
             if d_light > 0.4:
@@ -545,14 +534,12 @@ def _render_gas_base(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     cloud_cover: float = 0.0,
     stretch: float = 1.0,
-    cloud_curve: float = 1.3,
     octaves: int = 5,
 ) -> LayerResult:
     """Render gas giant base (cloud bands)."""
@@ -564,12 +551,12 @@ def _render_gas_base(
         c_noise = 0.0
         for i in range(9):
             c_noise += _circle_noise(
-                ux * noise_size * 0.3 + float(i + 1) + 10.0 + time * time_speed,
+                ux * noise_size + float(i + 1) + 10.0,
                 uy * noise_size * 0.3 + float(i + 1) + 10.0,
                 seed, noise_size,
             )
         return _fbm(
-            ux * noise_size + c_noise + time * time_speed,
+            ux * noise_size + c_noise,
             uy * noise_size + c_noise,
             seed, octaves, noise_size,
         )
@@ -584,8 +571,7 @@ def _render_gas_base(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
-            uy += _smoothstep(0.0, cloud_curve, abs(ux - 0.4))
+            ux, uy = _planet_uv(ux, uy, phase)
 
             c = _cloud_alpha(ux, uy * stretch)
 
@@ -605,14 +591,12 @@ def _render_gas_layer(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     light_origin: tuple[float, float],
     colors: Sequence[Color],
     cloud_cover: float = 0.538,
     stretch: float = 1.0,
-    cloud_curve: float = 1.3,
     octaves: int = 5,
 ) -> LayerResult:
     """Render gas giant overlay bands."""
@@ -624,12 +608,12 @@ def _render_gas_layer(
         c_noise = 0.0
         for i in range(9):
             c_noise += _circle_noise(
-                ux * noise_size * 0.3 + float(i + 1) + 10.0 + time * time_speed,
+                ux * noise_size + float(i + 1) + 10.0,
                 uy * noise_size * 0.3 + float(i + 1) + 10.0,
                 seed, noise_size,
             )
         return _fbm(
-            ux * noise_size + c_noise + time * time_speed,
+            ux * noise_size + c_noise,
             uy * noise_size + c_noise,
             seed, octaves, noise_size,
         )
@@ -644,8 +628,7 @@ def _render_gas_layer(
 
             d_light = math.sqrt((ux - lx) ** 2 + (uy - ly) ** 2)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
-            uy += _smoothstep(0.0, cloud_curve, abs(ux - 0.4))
+            ux, uy = _planet_uv(ux, uy, phase)
 
             c = _cloud_alpha(ux, uy * stretch)
 
@@ -667,15 +650,13 @@ def _render_star_body(
     size: int,
     pixels: float,
     seed: float,
-    time: float,
+    phase: float,
     rotation: float,
-    time_speed: float,
     colors: Sequence[Color],
     octaves: int = 5,
 ) -> LayerResult:
     """Render star body using cellular noise."""
     result = LayerResult(pixels=[[TRANSPARENT] * size for _ in range(size)], size=size)
-    star_size = 15.0
     tiles = 2.0
 
     def _hash2(px: float, py: float) -> tuple[float, float]:
@@ -706,10 +687,10 @@ def _render_star_body(
 
             dith = ((px_i / size - 0.5 + py / size - 0.5) % (2.0 / pixels)) <= (1.0 / pixels)
             ux, uy = _rotate(ux, uy, rotation)
-            ux, uy = _spherify(ux, uy)
+            ux, uy = _planet_uv(ux, uy, phase)
 
-            n = _cells(ux - time * time_speed * 2.0, uy, 10.0)
-            n *= _cells(ux - time * time_speed * 1.0, uy, 20.0)
+            n = _cells(ux, uy, 10.0)
+            n *= _cells(ux, uy, 20.0)
             n *= 2.0
             n = _clamp(n)
             if dith:
@@ -732,7 +713,6 @@ class PlanetConfig:
     size: int = 50  # virtual pixel resolution
     image_size: int = 64
     rotation: float = 0.0
-    time_speed: float = 0.1
     light_origin: tuple[float, float] = (0.39, 0.7)
     light_intensity: float = 0.1
     n_frames: int = 50
@@ -753,7 +733,7 @@ def _layer_to_image(layer: LayerResult, image_size: int) -> Image.Image:
     return img
 
 
-def generate_terran_wet(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_terran_wet(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Earth-like planet with oceans, land, and clouds."""
     palettes = cfg.colors or [
         [_color(0.4, 0.69, 0.78), _color(0.4, 0.69, 0.78), _color(0.2, 0.25, 0.62)],
@@ -773,11 +753,11 @@ def generate_terran_wet(cfg: PlanetConfig, time: float) -> Image.Image:
     land_cut = cfg.land_cutoff if cfg.land_cutoff is not None else 0.5
     cloud_cov = cfg.cloud_cover if cfg.cloud_cover is not None else 0.546
 
-    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                                 cfg.light_origin, cfg.light_intensity, base_colors)
-    land = _render_land_mass(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    land = _render_land_mass(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                               cfg.light_origin, land_colors, land_cutoff=land_cut)
-    clouds = _render_cloud_layer(cfg.size, cfg.size, seed3, time, cfg.rotation, cfg.time_speed * 1.2,
+    clouds = _render_cloud_layer(cfg.size, cfg.size, seed3, phase, cfg.rotation,
                                   cfg.light_origin, cloud_colors, cloud_cover=cloud_cov)
     atmo = _render_atmosphere(cfg.size, cfg.size, atmo_colors)
 
@@ -787,7 +767,7 @@ def generate_terran_wet(cfg: PlanetConfig, time: float) -> Image.Image:
     return _layer_to_image(comp, cfg.image_size)
 
 
-def generate_no_atmosphere(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_no_atmosphere(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Barren moon/planet with craters."""
     palettes = cfg.colors or [
         [_color(0.61, 0.62, 0.72), _color(0.28, 0.38, 0.49), _color(0.21, 0.22, 0.33)],
@@ -796,16 +776,16 @@ def generate_no_atmosphere(cfg: PlanetConfig, time: float) -> Image.Image:
 
     seed2 = cfg.seed + 10
 
-    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                                 cfg.light_origin, cfg.light_intensity, palettes[0])
-    craters = _render_crater_layer(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    craters = _render_crater_layer(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                                     cfg.light_origin, palettes[1] if len(palettes) > 1 else palettes[0][:2])
 
     comp = _composite(base, craters)
     return _layer_to_image(comp, cfg.image_size)
 
 
-def generate_lava(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_lava(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Lava planet with rivers of molten rock."""
     palettes = cfg.colors or [
         [_color(0.56, 0.30, 0.34), _color(0.32, 0.20, 0.25), _color(0.24, 0.16, 0.21)],
@@ -816,11 +796,11 @@ def generate_lava(cfg: PlanetConfig, time: float) -> Image.Image:
     seed2 = cfg.seed + 10
     seed3 = cfg.seed + 20
 
-    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                                 cfg.light_origin, cfg.light_intensity, palettes[0])
-    craters = _render_crater_layer(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    craters = _render_crater_layer(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                                     cfg.light_origin, palettes[1] if len(palettes) > 1 else palettes[0][:2])
-    rivers = _render_river_layer(cfg.size, cfg.size, seed3, time, cfg.rotation, cfg.time_speed,
+    rivers = _render_river_layer(cfg.size, cfg.size, seed3, phase, cfg.rotation,
                                   cfg.light_origin, palettes[2] if len(palettes) > 2 else palettes[0], river_cutoff=0.55)
 
     comp = _composite(base, craters)
@@ -828,7 +808,7 @@ def generate_lava(cfg: PlanetConfig, time: float) -> Image.Image:
     return _layer_to_image(comp, cfg.image_size)
 
 
-def generate_ice(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_ice(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Ice world with frozen lakes and clouds."""
     palettes = cfg.colors or [
         [_color(0.98, 1.0, 1.0), _color(0.78, 0.83, 1.0), _color(0.57, 0.56, 0.72)],
@@ -841,11 +821,11 @@ def generate_ice(cfg: PlanetConfig, time: float) -> Image.Image:
     seed3 = cfg.seed + 20
     cloud_cov = cfg.cloud_cover if cfg.cloud_cover is not None else 0.546
 
-    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                                 cfg.light_origin, cfg.light_intensity, palettes[0])
-    lakes = _render_lake_layer(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    lakes = _render_lake_layer(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                                 cfg.light_origin, palettes[1] if len(palettes) > 1 else palettes[0])
-    clouds = _render_cloud_layer(cfg.size, cfg.size, seed3, time, cfg.rotation, cfg.time_speed * 1.2,
+    clouds = _render_cloud_layer(cfg.size, cfg.size, seed3, phase, cfg.rotation,
                                   cfg.light_origin, palettes[2] if len(palettes) > 2 else palettes[0],
                                   cloud_cover=cloud_cov)
 
@@ -854,7 +834,7 @@ def generate_ice(cfg: PlanetConfig, time: float) -> Image.Image:
     return _layer_to_image(comp, cfg.image_size)
 
 
-def generate_gas_giant(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_gas_giant(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Gas giant with cloud bands."""
     palettes = cfg.colors or [
         [_color(0.94, 0.71, 0.25), _color(0.81, 0.46, 0.17),
@@ -866,9 +846,9 @@ def generate_gas_giant(cfg: PlanetConfig, time: float) -> Image.Image:
 
     seed2 = cfg.seed + 10
 
-    base = _render_gas_base(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_gas_base(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                              cfg.light_origin, palettes[0])
-    gas = _render_gas_layer(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    gas = _render_gas_layer(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                              cfg.light_origin, palettes[1] if len(palettes) > 1 else palettes[0],
                              cloud_cover=cloud_cov)
 
@@ -876,18 +856,17 @@ def generate_gas_giant(cfg: PlanetConfig, time: float) -> Image.Image:
     return _layer_to_image(comp, cfg.image_size)
 
 
-def generate_star(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_star(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Blazing star with cellular pattern."""
     palettes = cfg.colors or [
         [_color(1.0, 0.95, 0.8), _color(1.0, 0.65, 0.0),
          _color(0.9, 0.27, 0.0), _color(0.5, 0.1, 0.0)],
     ]
-    body = _render_star_body(cfg.size, cfg.size, cfg.seed, time, cfg.rotation,
-                              cfg.time_speed * 0.5, palettes[0])
+    body = _render_star_body(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation, palettes[0])
     return _layer_to_image(body, cfg.image_size)
 
 
-def generate_dry(cfg: PlanetConfig, time: float) -> Image.Image:
+def generate_dry(cfg: PlanetConfig, phase: float) -> Image.Image:
     """Dry/desert planet."""
     palettes = cfg.colors or [
         [_color(0.78, 0.69, 0.42), _color(0.63, 0.48, 0.32), _color(0.43, 0.33, 0.27)],
@@ -896,9 +875,9 @@ def generate_dry(cfg: PlanetConfig, time: float) -> Image.Image:
 
     seed2 = cfg.seed + 10
 
-    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, time, cfg.rotation, cfg.time_speed,
+    base = _render_base_planet(cfg.size, cfg.size, cfg.seed, phase, cfg.rotation,
                                 cfg.light_origin, cfg.light_intensity, palettes[0], octaves=4)
-    craters = _render_crater_layer(cfg.size, cfg.size, seed2, time, cfg.rotation, cfg.time_speed,
+    craters = _render_crater_layer(cfg.size, cfg.size, seed2, phase, cfg.rotation,
                                     cfg.light_origin, palettes[1] if len(palettes) > 1 else palettes[0][:2])
 
     comp = _composite(base, craters)
@@ -937,6 +916,17 @@ def _parse_colors(raw: list[list[str]] | None) -> list[list[Color]] | None:
     return [[_parse_hex_color(c) for c in palette] for palette in raw]
 
 
+DEFAULT_ANIMATION_SPEED = 0.1
+MIN_ANIMATION_SPEED = 0.08
+MAX_ANIMATION_SPEED = 0.16
+MIN_FRAMES_PER_TURN = 100
+# GIF durations are stored in centiseconds.
+MIN_FRAME_DELAY_CS = 4
+MAX_FRAME_DELAY_CS = 7
+MIN_TURN_DURATION_CS = 500
+MAX_TURN_DURATION_CS = 1500
+
+
 def generate_planet_gif(
     planet_type: str | None = None,
     seed: int | None = None,
@@ -945,22 +935,23 @@ def generate_planet_gif(
     frame_delay_ms: int = 200,
     light_origin: tuple[float, float] | None = None,
     rotation: float | None = None,
-    time_speed: float = 0.1,
+    time_speed: float = DEFAULT_ANIMATION_SPEED,
     cloud_cover: float | None = None,
     land_cutoff: float | None = None,
     colors: list[list[str]] | None = None,
 ) -> bytes:
-    """Generate an animated GIF of a procedural pixel planet.
+    """Generate a seamless animated GIF of a procedural pixel planet.
 
     Args:
         planet_type: One of PLANET_TYPES keys, or None for random.
         seed: Random seed for reproducibility. None for random.
         size: Output image size in pixels.
-        n_frames: Number of animation frames.
-        frame_delay_ms: Delay between frames in milliseconds.
+        n_frames: Preferred frame count. One frame renders a still planet.
+        frame_delay_ms: Reference frame delay used with n_frames to set the turn duration.
         light_origin: (x, y) position of light source, 0-1. None for default (0.39, 0.7).
         rotation: Planet tilt in radians. None for random.
-        time_speed: Rotation animation speed.
+        time_speed: Playback speed relative to 0.1. Nonzero magnitudes are
+                    clamped to 0.08–0.16. Negative values reverse rotation.
         cloud_cover: Cloud density 0-1. None for type default.
         land_cutoff: Land vs water threshold 0-1. None for type default.
         colors: Per-layer color palettes as nested hex strings, e.g.
@@ -974,6 +965,31 @@ def generate_planet_gif(
     if seed is None:
         seed = random.randint(1, 99999)
 
+    if not math.isfinite(time_speed):
+        raise ValueError("Animation speed must be finite.")
+    if n_frames < 1 or frame_delay_ms < 1:
+        raise ValueError("Frame count and delay must be positive.")
+
+    direction = -1.0 if time_speed < 0 else 1.0
+    if time_speed == 0 or n_frames == 1:
+        n_frames = 1
+        durations = [0]
+    else:
+        speed = _clamp(abs(time_speed), MIN_ANIMATION_SPEED, MAX_ANIMATION_SPEED)
+        reference_duration_cs = n_frames * frame_delay_ms / 10
+        turn_duration_cs = round(_clamp(
+            reference_duration_cs * DEFAULT_ANIMATION_SPEED / speed,
+            MIN_TURN_DURATION_CS,
+            MAX_TURN_DURATION_CS,
+        ))
+        # Slow rotation needs more samples across the turn. Fast rotation still
+        # needs enough samples to keep each longitude step small.
+        min_frames = max(MIN_FRAMES_PER_TURN, math.ceil(turn_duration_cs / MAX_FRAME_DELAY_CS))
+        max_frames = turn_duration_cs // MIN_FRAME_DELAY_CS
+        n_frames = min(max(n_frames, min_frames), max_frames)
+        boundaries = [i * turn_duration_cs // n_frames for i in range(n_frames + 1)]
+        durations = [(end - start) * 10 for start, end in zip(boundaries, boundaries[1:])]
+
     generator = PLANET_TYPES[planet_type]
     rng = random.Random(seed)
     cfg = PlanetConfig(
@@ -982,7 +998,6 @@ def generate_planet_gif(
         size=size,
         image_size=size,
         rotation=rotation if rotation is not None else rng.uniform(0, 6.28),
-        time_speed=time_speed,
         light_origin=light_origin or (0.39, 0.7),
         n_frames=n_frames,
         frame_delay_ms=frame_delay_ms,
@@ -992,9 +1007,13 @@ def generate_planet_gif(
     )
 
     frames: list[Image.Image] = []
-    for i in range(n_frames):
-        t = i * (frame_delay_ms / 1000.0)  # simulate real-time seconds
-        frame = generator(cfg, t)
+    # Sample at each frame's actual start time after GIF timing is rounded.
+    turn_duration_ms = sum(durations) or 1
+    elapsed_ms = 0
+    for delay_ms in durations:
+        phase = direction * elapsed_ms / turn_duration_ms
+        frame = generator(cfg, phase)
+        elapsed_ms += delay_ms
         # Convert to RGB with black background for GIF
         bg = Image.new("RGBA", (size, size), (0, 0, 0, 255))
         bg.paste(frame, (0, 0), frame)
@@ -1006,7 +1025,7 @@ def generate_planet_gif(
         format="GIF",
         save_all=True,
         append_images=frames[1:],
-        duration=frame_delay_ms,
+        duration=durations,
         loop=0,
     )
     return buf.getvalue()
