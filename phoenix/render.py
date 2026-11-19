@@ -72,20 +72,55 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
     logger.info("[%s] Render complete (%.2fs, %dKB)", app.name, elapsed, output_size // 1024)
 
 
+def _clean_health_reason(reason: str) -> str:
+    """Keep health reasons single-line and compact for DB/UI display."""
+    text = " ".join(str(reason or "").split())
+    return text[:200]
+
+
+def _record_health(
+    app_db: AppDatabase,
+    name: str,
+    *,
+    healthy: bool,
+    reason: str = "",
+    mark_updated: bool = False,
+) -> None:
+    now = datetime.now()
+    fields: dict[str, object] = {
+        "health_status": "healthy" if healthy else "unhealthy",
+        "health_reason": "" if healthy else _clean_health_reason(reason),
+        "health_checked_at": now,
+    }
+    if healthy:
+        fields["last_healthy"] = now
+    if mark_updated:
+        fields["last_updated"] = now
+    app_db.upsert(name, **fields)
+
+
 def render_preview(name: str, settings: Settings) -> None:
     """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
     app_db = AppDatabase()
     existing = app_db.get(name)
     if existing and existing.runtime.startswith("live_"):
-        app_db.upsert(name, last_updated=datetime.now())
+        _record_health(app_db, name, healthy=True, mark_updated=True)
         return
 
     if _is_panel(name):
         from phoenix.preprocessors.dashboard_panel import run_panel
         panel_id = name.removeprefix("panel_")
-        run_panel(panel_id, settings)
-        app = AppConfig(name=name)
-        _render_dispatch(app, settings)
+        result = run_panel(panel_id, settings, db_path=app_db.path)
+        if result.data is not None:
+            app = AppConfig(name=name)
+            try:
+                _render_dispatch(app, settings)
+            except Exception as exc:
+                if existing is not None:
+                    _record_health(app_db, name, healthy=False, reason=str(exc))
+                raise
+        if existing is not None:
+            _record_health(app_db, name, healthy=result.healthy, reason=result.health_reason)
         return
 
     kind = app_type(name)
@@ -94,15 +129,27 @@ def render_preview(name: str, settings: Settings) -> None:
 
     # Run preprocessor if one exists (needed for apps that depend on data files)
     preprocessor = get_preprocessor(name)
+    pre_result: PreprocessorResult | None = None
     if preprocessor is not None:
         logger.info("[%s] Running preprocessor for preview", name)
         try:
-            preprocessor(settings)
-        except Exception:
+            pre_result = preprocessor(settings)
+        except Exception as exc:
             logger.warning("[%s] Preprocessor failed during preview, continuing anyway", name)
+            pre_result = PreprocessorResult(None, AppStatus.ERROR, healthy=False, health_reason=str(exc))
 
     app = existing or AppConfig(name=name)
-    _render_dispatch(app, settings)
+    try:
+        _render_dispatch(app, settings)
+    except Exception as exc:
+        if existing is not None:
+            _record_health(app_db, name, healthy=False, reason=str(exc))
+        raise
+    if existing is not None:
+        if pre_result is not None and not pre_result.healthy:
+            _record_health(app_db, name, healthy=False, reason=pre_result.health_reason)
+        else:
+            _record_health(app_db, name, healthy=True)
 
 
 def _device_enabled_names(app_db: AppDatabase) -> set[str]:
@@ -127,7 +174,7 @@ def run_app(
         raise ValueError(f"App '{name}' not found in database")
 
     if app.runtime.startswith("live_"):
-        app_db.upsert(name, last_updated=datetime.now())
+        _record_health(app_db, name, healthy=True, mark_updated=True)
         return
 
     # An app is worth rendering if it's on globally OR enabled on any panel.
@@ -148,35 +195,73 @@ def run_app(
         panel_id = name.removeprefix("panel_")
         logger.info("[%s] Running panel preprocessor", name)
         try:
-            result = run_panel(panel_id, settings)
-        except Exception:
+            result = run_panel(panel_id, settings, db_path=app_db.path)
+        except Exception as exc:
             logger.exception("[%s] Panel preprocessor failed", name)
-            result = PreprocessorResult(None, AppStatus.ERROR)
+            result = PreprocessorResult(
+                None,
+                AppStatus.ERROR,
+                healthy=False,
+                health_reason=f"Panel preprocessor failed: {exc}",
+            )
         _handle_preprocessor_result(name, result, app_db)
         if result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
             return
-        _render_dispatch(app, settings)
-        app_db.upsert(name, last_updated=datetime.now())
+        if result.data is None and not result.healthy:
+            _record_health(app_db, name, healthy=False, reason=result.health_reason, mark_updated=True)
+            return
+        try:
+            _render_dispatch(app, settings)
+        except Exception as exc:
+            _record_health(app_db, name, healthy=False, reason=str(exc), mark_updated=True)
+            raise
+        _record_health(
+            app_db,
+            name,
+            healthy=result.healthy,
+            reason=result.health_reason,
+            mark_updated=True,
+        )
         return
 
     # Python apps handle their own data fetching — skip preprocessor
     preprocessor = get_preprocessor(name) if app_type(name) != "python" else None
+    pre_result: PreprocessorResult | None = None
     if preprocessor is not None:
         logger.info("[%s] Running preprocessor", name)
         try:
-            result = preprocessor(settings)
-            assert isinstance(result, PreprocessorResult)
-            logger.debug("[%s] Preprocessor: status=%s, priority=%s", name, result.status, result.priority)
-        except Exception:
+            pre_result = preprocessor(settings)
+            assert isinstance(pre_result, PreprocessorResult)
+            logger.debug("[%s] Preprocessor: status=%s, priority=%s", name, pre_result.status, pre_result.priority)
+        except Exception as exc:
             logger.exception("[%s] Preprocessor failed", name)
-            result = PreprocessorResult(None, AppStatus.ERROR)
+            pre_result = PreprocessorResult(
+                None,
+                AppStatus.ERROR,
+                healthy=False,
+                health_reason=f"Preprocessor failed: {exc}",
+            )
 
-        _handle_preprocessor_result(name, result, app_db)
-        if result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
+        _handle_preprocessor_result(name, pre_result, app_db)
+        if pre_result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
             return
 
-    _render_dispatch(app, settings)
-    app_db.upsert(name, last_updated=datetime.now())
+    try:
+        _render_dispatch(app, settings)
+    except Exception as exc:
+        _record_health(app_db, name, healthy=False, reason=str(exc), mark_updated=True)
+        raise
+
+    if pre_result is not None:
+        _record_health(
+            app_db,
+            name,
+            healthy=pre_result.healthy,
+            reason=pre_result.health_reason,
+            mark_updated=True,
+        )
+    else:
+        _record_health(app_db, name, healthy=True, mark_updated=True)
 
 
 def _check_pixlet() -> None:
@@ -204,9 +289,9 @@ def _render_one(
     """Render a single app with error handling."""
     try:
         run_app(name, settings, app_db, device_enabled)
-    except Exception:
+    except Exception as exc:
         logger.exception("[%s] Render failed", name)
-        app_db.upsert(name, last_updated=datetime.now())
+        _record_health(app_db, name, healthy=False, reason=str(exc), mark_updated=True)
 
 
 def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
@@ -271,11 +356,29 @@ def run_all_apps(settings: Settings, app_db: AppDatabase) -> None:
 
 def _handle_preprocessor_result(name: str, result: PreprocessorResult, app_db: AppDatabase) -> None:
     """Update app state based on preprocessor result."""
-    if result.status in (AppStatus.DISABLE, AppStatus.ERROR):
+    if result.status == AppStatus.DISABLE:
         logger.warning("[%s] Preprocessor returned %s, disabling", name, result.status)
         app_db.upsert(name, enabled=False, priority=0)
+    elif result.status == AppStatus.ERROR:
+        logger.warning("[%s] Preprocessor returned error, marking unhealthy", name)
+        app_db.upsert(name, priority=0)
+        _record_health(
+            app_db,
+            name,
+            healthy=False,
+            reason=result.health_reason or "Preprocessor error",
+            mark_updated=True,
+        )
 
     if result.status in (AppStatus.DISABLE, AppStatus.SKIP, AppStatus.ERROR):
+        if result.status == AppStatus.SKIP:
+            _record_health(
+                app_db,
+                name,
+                healthy=result.healthy,
+                reason=result.health_reason,
+                mark_updated=True,
+            )
         # Clean up old output files
         for path in (output_path(name), output_path_large(name)):
             if path.exists():

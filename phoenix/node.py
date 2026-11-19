@@ -112,6 +112,9 @@ def build_state(device_id: str) -> NodeState:
             "priority": member["priority"],
             "sort_order": member["sort_order"],
             "last_updated": None,
+            "last_healthy": None,
+            "health_checked_at": None,
+            "health_reason": "",
             "pixlet_config": app.pixlet_config if app.runtime.startswith("live_") else {},
         }))
         if member["enabled"] or name == requested_name:

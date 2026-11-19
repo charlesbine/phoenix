@@ -19,11 +19,20 @@ class AppStatus(str, Enum):
     ERROR = "error"
 
 
+HealthStatus = Literal["unknown", "healthy", "unhealthy"]
+
+
+class DataIngressError(RuntimeError):
+    """Raised by apps or preprocessors when external data ingress is down, stale, or empty."""
+
+
 @dataclass
 class PreprocessorResult:
     data: Any
     status: AppStatus = AppStatus.NORMAL
     priority: int = 0
+    healthy: bool = True
+    health_reason: str = ""
 
 
 # Refresh presets: how often an app should re-render
@@ -62,6 +71,15 @@ class AppConfig(BaseModel):
     sort_order: int = 0
     source: str = ""  # e.g. "community" for tronbyt/apps imports
     runtime: str = ""  # empty = file-backed; otherwise a built-in executor name
+    skip_when_unhealthy: bool = False
+    health_status: HealthStatus = "unknown"
+    health_reason: str = ""
+    last_healthy: datetime | None = None
+    health_checked_at: datetime | None = None
+
+    @property
+    def is_skipped_unhealthy(self) -> bool:
+        return self.skip_when_unhealthy and self.health_status == "unhealthy"
 
     @property
     def refresh_preset(self) -> str:

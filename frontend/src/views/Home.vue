@@ -29,6 +29,9 @@ const scheduleLabels = {
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
 )
+const unhealthyRotationCount = computed(() =>
+  rotation.value.filter((a) => a.enabled && a.health_status === 'unhealthy').length,
+)
 const singleAppOptions = computed(() => rotation.value.filter((app) => app.enabled && app.active))
 const singleAppValue = computed(() =>
   singleAppOptions.value.some((app) => app.name === config.value?.single_app) ? config.value?.single_app : '',
@@ -113,9 +116,44 @@ onUnmounted(() => {
             <span class="text-gold">×{{ selectedApp.priority + 1 }}</span>
             <button class="px-1 text-gold hover:text-core" @click="store.setPriority(selectedApp.name, selectedApp.priority + 1)">+</button>
           </div>
+          <button
+            class="rounded border px-2 py-1 text-[10px]"
+            :class="selectedApp.skip_when_unhealthy
+              ? 'border-flame/70 bg-[#251009] text-flame'
+              : 'border-[#3a2016] text-dim hover:text-gold'"
+            title="Skip this app in panel rotation while its data ingress is unhealthy"
+            @click="store.setSkipWhenUnhealthy(selectedApp.name, !selectedApp.skip_when_unhealthy)"
+          >
+            skip if down: {{ selectedApp.skip_when_unhealthy ? 'on' : 'off' }}
+          </button>
           <button class="ml-auto rounded px-2.5 py-1" :class="selectedApp.enabled ? 'text-flame' : 'text-[#7a4a34]'" @click="store.toggle(selectedApp)">
             {{ selectedApp.enabled ? 'enabled' : 'disabled' }}
           </button>
+        </div>
+
+        <div
+          v-if="selectedApp && selectedApp.health_status === 'unhealthy'"
+          role="status"
+          class="mt-3 rounded border border-[#b3241a] bg-[#1e0a0e] p-3 font-mono text-xs"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em]">
+            <span class="text-[#ff6a4a]">▲ Data ingress unhealthy</span>
+            <span
+              v-if="selectedApp.skipped_unhealthy"
+              class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] text-[#ff6a4a]"
+            >
+              skipped in cycle
+            </span>
+          </div>
+          <p class="mt-1.5 text-[11px] text-core">
+            {{ selectedApp.health_reason || 'Data source unavailable or empty.' }}
+          </p>
+          <p
+            class="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted"
+            :title="selectedApp.last_healthy ?? undefined"
+          >
+            Last healthy: {{ selectedApp.last_healthy_human || 'never' }}
+          </p>
         </div>
         <AppQuickSettings
           v-if="selectedApp && !following"
@@ -234,7 +272,15 @@ onUnmounted(() => {
         </div>
         <div>
           <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            <span>Rotation · {{ rotation.length }}</span>
+            <div class="flex items-center gap-2">
+              <span>Rotation · {{ rotation.length }}</span>
+              <span
+                v-if="unhealthyRotationCount > 0"
+                class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] text-[#ff6a4a]"
+              >
+                {{ unhealthyRotationCount }} down
+              </span>
+            </div>
             <div class="flex items-center gap-3">
               <button class="hover:text-gold" :class="showDisabled ? 'text-gold' : ''" @click="showDisabled = !showDisabled">
                 {{ showDisabled ? '− hide disabled' : '+ show disabled' }}

@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from phoenix.cache import cache_get
+from phoenix.models import DataIngressError
 from phoenix.paths import DATA_DIR, star_path, ensure_dirs
 from phoenix.settings import Settings
 
@@ -87,12 +88,14 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     humidity_sensors = _parse_sensor_map(config.get("humidity_sensors"), DEFAULT_HUMIDITY_SENSORS)
 
     # Fetch all sensors
+    valid_readings = 0
     temps = {}
     for name, entity in temp_sensors.items():
         data = _fetch_entity(entity, settings)
         state = data.get("state", "—")
         try:
             temps[name] = int(round(float(state)))
+            valid_readings += 1
         except (ValueError, TypeError):
             temps[name] = state
 
@@ -102,8 +105,12 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         state = data.get("state", "—")
         try:
             humidities[name] = int(round(float(state)))
+            valid_readings += 1
         except (ValueError, TypeError):
             humidities[name] = state
+
+    if valid_readings == 0:
+        raise DataIngressError("All Home Assistant climate sensors unavailable")
 
     template = star_path("dashboard_panel")
 

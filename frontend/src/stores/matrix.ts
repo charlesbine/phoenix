@@ -180,6 +180,10 @@ export const useMatrixStore = defineStore('matrix', () => {
     replace(await api.setPriority(name, Math.max(0, priority), activeDevice.value)) // 0 = normal weight (×1)
   }
 
+  async function setSkipWhenUnhealthy(name: string, skip: boolean): Promise<void> {
+    replace(await api.setSkipWhenUnhealthy(name, skip, activeDevice.value))
+  }
+
   /** Push an app to the physical display right now. */
   async function showNow(name: string): Promise<void> {
     await api.showNow(name, activeDevice.value)
@@ -198,6 +202,6 @@ export const useMatrixStore = defineStore('matrix', () => {
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
     loadDevices, setActiveDevice,
-    setBrightness, setLayoutMode, setSingleApp, setCycleInterval, toggle, setPriority, showNow,
+    setBrightness, setLayoutMode, setSingleApp, setCycleInterval, toggle, setPriority, setSkipWhenUnhealthy, showNow,
   }
 })
