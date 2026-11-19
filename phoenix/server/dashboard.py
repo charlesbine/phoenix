@@ -177,6 +177,7 @@ def create_app() -> FastAPI:
             row["enabled"] = bool(m["enabled"])
             row["priority"] = m["priority"]
             row["sort_order"] = m["sort_order"]
+            row["skipped_unhealthy"] = bool(m["enabled"]) and app.is_skipped_unhealthy
             out.append(row)
         out.sort(key=lambda r: r["sort_order"])
         return out
@@ -219,6 +220,7 @@ def create_app() -> FastAPI:
             row["enabled"] = bool(m["enabled"])
             row["priority"] = m["priority"]
             row["sort_order"] = m["sort_order"]
+            row["skipped_unhealthy"] = bool(m["enabled"]) and (app.is_skipped_unhealthy if app else False)
             return row
         return {"error": f"{name} not in device {device_id}"}
 
@@ -937,10 +939,6 @@ def create_app() -> FastAPI:
         result["unhealthy_apps"] = unhealthy_apps
         if unhealthy_apps:
             result["status"] = "degraded"
-            for entry in unhealthy_apps:
-                suffix = f": {entry['reason']}" if entry["reason"] else ""
-                tag = " [skipped]" if entry["skipped_unhealthy"] else ""
-                result["issues"].append(f"Data down · {entry['name']}{tag}{suffix}")
 
         return result
 

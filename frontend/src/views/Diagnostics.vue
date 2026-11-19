@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/api/client'
 import type { CacheEntry, Health, LogLines, NotificationItem, Stats } from '@/api/types'
+import { formatUnhealthySummary, groupUnhealthyApps, type UnhealthyGroup } from '@/utils/health'
 
 const health = ref<Health | null>(null)
 const stats = ref<Stats | null>(null)
@@ -24,6 +25,36 @@ const renderTimes = computed(() =>
 )
 const issues = computed(() => health.value?.issues ?? [])
 const unhealthyApps = computed(() => health.value?.unhealthy_apps ?? [])
+const unhealthyGroups = computed(() => groupUnhealthyApps(unhealthyApps.value))
+const unhealthySummary = computed(() => formatUnhealthySummary(unhealthyApps.value))
+const hasActiveUnhealthy = computed(() => unhealthyApps.value.some((a) => !a.skipped_unhealthy))
+const expandedGroups = ref<Record<string, boolean>>({})
+const defaultExpandGroups = computed(() => unhealthyApps.value.length <= 3)
+const hasExpandableGroups = computed(() => unhealthyGroups.value.some((g) => g.apps.length > 1))
+const allGroupsExpanded = computed(() =>
+  unhealthyGroups.value
+    .filter((g) => g.apps.length > 1)
+    .every((g) => isGroupExpanded(g)),
+)
+
+function isGroupExpanded(group: UnhealthyGroup): boolean {
+  if (group.apps.length <= 1) return false
+  return expandedGroups.value[group.key] ?? defaultExpandGroups.value
+}
+
+function toggleGroup(key: string): void {
+  const current = expandedGroups.value[key] ?? defaultExpandGroups.value
+  expandedGroups.value = { ...expandedGroups.value, [key]: !current }
+}
+
+function toggleAllGroups(): void {
+  const nextState = !allGroupsExpanded.value
+  const updated: Record<string, boolean> = {}
+  for (const g of unhealthyGroups.value) {
+    if (g.apps.length > 1) updated[g.key] = nextState
+  }
+  expandedGroups.value = updated
+}
 const cacheSummary = computed(() => {
   const entries = cacheEntries.value
   const fresh = entries.filter((entry) => entry.fresh).length
@@ -172,41 +203,144 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="issues.length" class="mt-3 space-y-1 border-t border-[#1c0e14] pt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#c78a5a]">
-            <div v-for="issue in issues" :key="issue">{{ issue }}</div>
+          <div
+            v-if="issues.length"
+            class="mt-3 space-y-1 border-t border-[#24121c] pt-2.5 font-mono text-[11px] text-[#e6a45c]"
+          >
+            <div v-for="issue in issues" :key="issue" class="flex items-center gap-2">
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff6a4a]"></span>
+              <span class="truncate" :title="issue">{{ issue }}</span>
+            </div>
           </div>
         </div>
 
         <div
           class="rounded border p-3"
-          :class="unhealthyApps.length ? 'border-[#b3241a] bg-[#1e0a0e]' : 'border-[#3a2016] bg-panel'"
+          :class="unhealthyApps.length ? 'border-[#5c1f1c] bg-[#16090e]' : 'border-[#3a2016] bg-panel'"
         >
-          <div class="mb-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            <span>Data ingress</span>
-            <span :class="unhealthyApps.length ? 'text-[#ff6a4a]' : 'text-flame'">
-              {{ unhealthyApps.length ? `${unhealthyApps.length} down` : 'healthy' }}
-            </span>
+          <div class="mb-3 flex items-center justify-between gap-2 font-mono text-[10px]">
+            <div class="flex min-w-0 items-center gap-2">
+              <span
+                class="h-1.5 w-1.5 shrink-0 rounded-full"
+                :class="!unhealthyApps.length ? 'bg-flame' : hasActiveUnhealthy ? 'bg-[#ff5a2a]' : 'bg-[#d98a3c]'"
+              ></span>
+              <span class="uppercase tracking-[0.18em] text-dim">Data ingress</span>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span :class="!unhealthyApps.length ? 'uppercase tracking-[0.16em] text-flame' : 'text-[#e6a45c]'">
+                {{ unhealthyApps.length ? unhealthySummary : 'healthy' }}
+              </span>
+              <button
+                v-if="hasExpandableGroups"
+                class="text-dim hover:text-gold"
+                @click="toggleAllGroups"
+              >
+                {{ allGroupsExpanded ? 'Collapse ▾' : 'Expand ▸' }}
+              </button>
+            </div>
           </div>
 
-          <div v-if="unhealthyApps.length" class="space-y-2 font-mono text-[10px]">
-            <div
-              v-for="item in unhealthyApps"
-              :key="item.name"
-              class="rounded border border-[#b3241a]/60 bg-[#14070b] px-2 py-1.5"
-            >
-              <div class="flex items-center justify-between gap-2 uppercase tracking-[0.14em]">
-                <span class="truncate text-[#ff8a6a]">{{ item.name }}</span>
-                <span class="shrink-0 text-[9px] text-[#ff6a4a]">
-                  {{ item.skipped_unhealthy ? 'skipped' : 'in cycle' }}
-                </span>
-              </div>
-              <p class="mt-1 text-core">{{ item.reason || 'Data source unavailable or empty.' }}</p>
-              <p
-                class="mt-0.5 uppercase tracking-[0.12em] text-muted"
-                :title="item.last_healthy ?? undefined"
+          <div
+            v-if="unhealthyApps.length"
+            class="divide-y divide-[#221118] rounded border border-[#3a1a1c] bg-[#11070c]"
+          >
+            <div v-for="group in unhealthyGroups" :key="group.key">
+              <!-- Single-app group -->
+              <div
+                v-if="group.apps.length === 1"
+                class="px-2.5 py-2 font-mono text-[11px]"
               >
-                Last healthy: {{ item.last_healthy_human || 'never' }}
-              </p>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-gold">{{ group.apps[0].app.name }}</span>
+                  <span
+                    class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tracking-wide"
+                    :class="
+                      group.apps[0].app.skipped_unhealthy
+                        ? 'border-[#6b3c1e] bg-[#21120a] text-[#e6a45c]'
+                        : 'border-[#8f241c] bg-[#260b0f] text-[#ff7b5c]'
+                    "
+                  >
+                    {{ group.apps[0].app.skipped_unhealthy ? 'skipped' : 'in cycle' }}
+                  </span>
+                </div>
+                <p class="mt-1 truncate text-[10px] text-core/85" :title="group.apps[0].app.reason || group.title">
+                  {{ group.apps[0].app.reason || group.title }}
+                </p>
+                <p
+                  class="mt-0.5 text-[10px] text-muted"
+                  :title="group.apps[0].app.last_healthy ?? undefined"
+                >
+                  Last healthy: {{ group.apps[0].app.last_healthy_human || 'never' }}
+                </p>
+              </div>
+
+              <!-- Multi-app group -->
+              <template v-else>
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 px-2.5 py-2 text-left font-mono text-[11px] transition-colors hover:bg-[#1b0b12]"
+                  :title="`${group.title} (${group.inlineNames})`"
+                  @click="toggleGroup(group.key)"
+                >
+                  <span class="w-2.5 shrink-0 text-[9px] text-dim">
+                    {{ isGroupExpanded(group) ? '▾' : '▸' }}
+                  </span>
+                  <span class="min-w-0 flex-1 truncate text-core/90">{{ group.title }}</span>
+                  <span
+                    class="max-w-[8.5rem] shrink-0 truncate text-[10px] text-muted"
+                    :title="group.inlineNames"
+                  >
+                    {{ group.apps.length <= 2 ? group.inlineNames : group.countLabel }}
+                  </span>
+                  <span
+                    class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tracking-wide"
+                    :class="
+                      group.statusKind === 'skipped'
+                        ? 'border-[#6b3c1e] bg-[#21120a] text-[#e6a45c]'
+                        : group.statusKind === 'active'
+                          ? 'border-[#8f241c] bg-[#260b0f] text-[#ff7b5c]'
+                          : 'border-[#6b3c1e] bg-[#21120a] text-[#ff9e6a]'
+                    "
+                  >
+                    {{
+                      group.statusKind === 'skipped'
+                        ? 'skipped'
+                        : group.statusKind === 'active'
+                          ? 'in cycle'
+                          : `${group.skippedCount}/${group.apps.length} skip`
+                    }}
+                  </span>
+                </button>
+
+                <div
+                  v-if="isGroupExpanded(group)"
+                  class="space-y-1 border-t border-[#1e0f15] bg-[#0d060a] py-1.5 pl-6 pr-2.5 font-mono text-[10px]"
+                >
+                  <div
+                    v-for="entry in group.apps"
+                    :key="entry.app.name"
+                    class="rounded px-1.5 py-1 hover:bg-[#190a11]"
+                    :title="`${entry.app.reason || group.title} · Last healthy: ${entry.app.last_healthy_human || 'never'}`"
+                  >
+                    <div class="flex items-center gap-2">
+                      <span class="shrink-0 text-gold">{{ entry.app.name }}</span>
+                      <span v-if="entry.detail" class="min-w-0 flex-1 truncate text-muted">
+                        {{ entry.detail }}
+                      </span>
+                      <span v-else class="flex-1"></span>
+                      <span
+                        class="shrink-0 text-[9px]"
+                        :class="entry.app.skipped_unhealthy ? 'text-[#c78a5a]' : 'text-[#ff7b5c]'"
+                      >
+                        {{ entry.app.skipped_unhealthy ? 'skipped' : 'in cycle' }}
+                      </span>
+                    </div>
+                    <div class="mt-0.5 text-[9px] text-dim">
+                      Last healthy: {{ entry.app.last_healthy_human || 'never' }}
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
           <div v-else class="text-[11px] uppercase tracking-widest text-dim">All active data sources healthy</div>
