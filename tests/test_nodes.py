@@ -33,6 +33,7 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     app_db.upsert("planet", pixlet_config={"server_private": "value"})
     app_db.upsert("christmas")
     central.set_app("aurora", "planet", sort_order=2)
+    central.update("aurora", layout_mode="single", single_app="planet")
     central.set_app("apollo", "christmas")
     Image.new("RGB", (64, 64), "green").save(central_outputs / "planet.webp")
     Image.new("RGB", (64, 64), "red").save(central_outputs / "christmas.webp")
@@ -72,6 +73,7 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     assert (node_outputs / "planet.webp").read_bytes() == (central_outputs / "planet.webp").read_bytes()
     assert not (node_outputs / "christmas.webp").exists()
     assert local.get("aurora")["brightness"] == 32
+    assert local.get("aurora")["single_app"] == "planet"
     assert BrightnessSchedule.model_validate_json(local.get("aurora")["brightness_schedule"]) == schedule
     assert local.get_display_settings() == display_settings
     assert [row["app_name"] for row in local.list_apps("aurora")] == ["planet"]
@@ -83,6 +85,13 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     write_text(paths.current_app_file("aurora"), "planet")
     publisher.sync_once(client)
     assert publisher.report.now_playing == "planet"
+
+    central.update("aurora", single_app=None)
+    assert "single_app" not in build_state("aurora").payload()
+    wake.clear()
+    publisher.sync_once(client)
+    assert wake.is_set()
+    assert local.get("aurora")["single_app"] is None
 
     # The player's authoritative state and files survive a controller outage.
     shutil.rmtree(central_outputs)

@@ -18,7 +18,7 @@ from phoenix.cache import cache_get
 from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
 from phoenix.models import (
     BRIGHTNESS_SCHEDULE_BACKENDS, SPECTROGRAM_PALETTE_OPTIONS, BrightnessSchedule,
-    DisplaySettings, brightness_schedule_for,
+    DisplaySettings, brightness_schedule_for, display_settings_from_json, night_mode_phase,
 )
 from phoenix.node import NodePublisher
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
@@ -129,11 +129,29 @@ def create_app() -> FastAPI:
         dev = get_device_db().get(device_id)
         if dev is None:
             return None
+        schedule = brightness_schedule_for(dev)
+        schedule_status = None
+        if schedule and schedule.enabled:
+            schedule_status = (
+                "custom" if schedule.mode == "custom"
+                else night_mode_phase(display_settings_from_json(dev.get("display_settings")))
+            )
         return {
             "layout_mode": dev["layout_mode"],
             "cycle_interval": dev["cycle_interval"],
             "brightness": dev["brightness"],
+            "brightness_schedule_status": schedule_status,
+            "single_app": dev["single_app"],
         }
+
+    def _validate_single_app(device_id: str, name: object) -> None:
+        if name is not None and (
+            not isinstance(name, str) or not any(
+                app["name"] == name and app["enabled"] and app["active"]
+                for app in _device_apps(device_id)
+            )
+        ):
+            raise HTTPException(status_code=422, detail="Choose an enabled, active app from this panel’s rotation")
 
     def _device_app_row(device_id: str, name: str):
         """One rotation row (global def + per-device overrides) after a mutation."""
@@ -358,6 +376,10 @@ def create_app() -> FastAPI:
         app_obj = get_svc().app_db.get(name)
         if app_obj and app_obj.runtime:
             return _runtime_schema(app_obj)
+        if name == "procedural_landscape":
+            from phoenix.apps.procedural_landscape import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
         if name == "procedural_planet":
             from phoenix.apps.procedural_planet import SETTINGS_SCHEMA
 
@@ -1052,7 +1074,9 @@ def create_app() -> FastAPI:
     async def update_config(request: Request, device: str | None = Query(None)):
         body = await request.json()
         if device:
-            fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness") if k in body}
+            fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness", "single_app") if k in body}
+            if "single_app" in fields:
+                _validate_single_app(device, fields["single_app"])
             get_device_db().update(device, **fields)
             cfg = _device_config(device)
             return cfg if cfg is not None else {"error": f"no device {device}"}
@@ -1069,6 +1093,7 @@ def create_app() -> FastAPI:
             "brightness": d["brightness"],
             "brightness_schedule": brightness_schedule_for(d),
             "layout_mode": d["layout_mode"],
+            "single_app": d["single_app"],
             "cycle_interval": d["cycle_interval"],
             "mirror_of": d["mirror_of"],
             "sort_order": d["sort_order"],
@@ -1120,6 +1145,8 @@ def create_app() -> FastAPI:
     @app.put("/api/devices/{device_id}")
     async def update_device(device_id: str, request: Request):
         body = await request.json()
+        if "single_app" in body:
+            _validate_single_app(device_id, body["single_app"])
         dev = get_device_db().update(device_id, **body)
         return _serialize_device(dev) if dev else {"error": f"no device {device_id}"}
 

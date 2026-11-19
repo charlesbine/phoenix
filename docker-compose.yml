@@ -4,13 +4,19 @@ services:
     ports:
       - "7002:7002"
     devices:
-      - "/dev/ttyACM0:/dev/ttyACM0"
+      - "/dev/ttyACM0:/dev/ttyACM0"   # Matrix Portal M4 serial
+      - "/dev/snd:/dev/snd"           # ALSA — USB mic for the audio visualizer
     volumes:
       - phoenix-data:/app/phoenix/data
       - phoenix-outputs:/app/phoenix/outputs
     environment:
       - PHOENIX_PLATFORM=serial
       - PHOENIX_SERIAL_PORT=/dev/ttyACM0
+      # USB mic: "" = ALSA default. Pin by name substring once you know it, e.g.
+      # PHOENIX_AUDIO_DEVICE=USB. Find it with:
+      #   docker compose exec phoenix uv run python -c \
+      #     "from phoenix.audio.source import list_input_devices as l; print(l())"
+      - PHOENIX_AUDIO_DEVICE=${PHOENIX_AUDIO_DEVICE:-}
     restart: unless-stopped
 
 volumes:

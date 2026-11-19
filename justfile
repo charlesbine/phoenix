@@ -38,9 +38,13 @@ ssh:
     ssh {{host}}
 
 # Flash M4 firmware (run locally, M4 must be connected to this machine)
-flash-m4:
-    arduino-cli compile --fqbn adafruit:samd:adafruit_matrixportal_m4 firmware/matrix_portal_m4
-    arduino-cli upload --fqbn adafruit:samd:adafruit_matrixportal_m4 -p /dev/cu.usbmodem101 firmware/matrix_portal_m4
+flash-m4 port="/dev/cu.usbmodem101":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    build_dir="$(mktemp -d "${TMPDIR:-/tmp}/phoenix-m4.XXXXXX")"
+    trap 'rm -rf "$build_dir"' EXIT
+    bash firmware/matrix_portal_m4/build.sh "$build_dir"
+    arduino-cli upload --fqbn adafruit:samd:adafruit_matrixportal_m4 --input-dir "$build_dir" -p "{{port}}" firmware/matrix_portal_m4
 
 # Run the local dashboard stack
 dev:

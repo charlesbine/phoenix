@@ -104,6 +104,7 @@ def create_receiver(settings: Settings, db: DeviceDatabase, wake: Event) -> Fast
             return report(previous)
         names = {app.name for app in state.apps}
         if (any(not valid_name(name) for name in names) or not state.frames.keys() <= names
+                or (state.single_app is not None and not valid_name(state.single_app))
                 or (state.show_now and state.show_now.name not in names)):
             raise HTTPException(status_code=400, detail="Invalid playback rotation")
         frames = cached_frames()
@@ -117,7 +118,7 @@ def create_receiver(settings: Settings, db: DeviceDatabase, wake: Event) -> Fast
         if state.show_now and (not previous or state.show_now != previous.show_now):
             write_text(show_now_file(device_id), state.show_now.name)
         write_text(stamp, state.model_dump_json())
-        fields = {"layout_mode", "cycle_interval", "enabled", "apps", "show_now"}
+        fields = {"layout_mode", "cycle_interval", "enabled", "apps", "show_now", "single_app"}
         if (not previous or previous.model_dump(include=fields) != state.model_dump(include=fields)
                 or previous.frames.keys() != state.frames.keys()):
             wake.set()

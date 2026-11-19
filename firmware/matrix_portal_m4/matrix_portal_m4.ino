@@ -1,5 +1,5 @@
 /**
- * Phoenix Frame Receiver v2.1 — Matrix Portal M4
+ * Phoenix Frame Receiver v2.2 — Matrix Portal M4
  *
  * Protocol v2:
  *   Frame:   [0xDE 0xAD 0xBE 0xEF] [brightness] [12288 bytes RGB888]
@@ -8,12 +8,13 @@
  *
  * Commands:
  *   0x01 — Update LUT (256 bytes follow)
- *   0x02 — Get Status (returns 36-byte struct)
+ *   0x02 — Get Status (returns 34-byte packet)
  *   0x03 — Reset LUT to default
- *   0x04 — Screen off (stop scanning, fill black)
- *   0x05 — Screen on (resume scanning)
+ *   0x04 — Screen off (disable LED output, fill black)
+ *   0x05 — Screen on (resume displaying frames)
  *   0x06 — Set SCD40 interval (2 bytes: seconds, big-endian)
  *   0x07 — Brightness fade (2 bytes: target brightness, duration in 100ms units)
+ *   0x08 — Update RGB LUTs (256 bytes each for R, G and B)
  *
  * Required libraries:
  *   - Adafruit Protomatter
@@ -27,10 +28,16 @@
 #include <Wire.h>
 #include <Adafruit_LIS3DH.h>
 #include "splash_logo.h"
+#include "panel_color.h"
+
+void beginPanelOE();
+void setPanelBrightness(uint8_t value);
+void sendAck();
+extern "C" void *_PM_protoPtr;
 
 // --- Firmware version ---
 #define FW_VERSION_MAJOR 2
-#define FW_VERSION_MINOR 1
+#define FW_VERSION_MINOR 2
 
 // --- Minimal SCD40 I2C driver ---
 #define SCD40_ADDR 0x62
@@ -72,16 +79,11 @@ public:
     }
 };
 
-// --- Panel ---
-#define MATRIX_WIDTH  64
-#define MATRIX_HEIGHT 64
-#define BIT_DEPTH     6
-
 // --- Protocol ---
 static const uint8_t MAGIC_FRAME[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 static const uint8_t MAGIC_CMD[4]   = {0xDE, 0xAD, 0xCA, 0xFE};
 static const uint8_t MAGIC_RESP[4]  = {0xFE, 0xED, 0xBA, 0xCE};
-#define FRAME_BYTES (MATRIX_WIDTH * MATRIX_HEIGHT * 3)
+constexpr uint32_t FRAME_BYTES = panel::Width * panel::Height * panel::Channels;
 
 // Commands
 #define CMD_UPDATE_LUT     0x01
@@ -91,6 +93,7 @@ static const uint8_t MAGIC_RESP[4]  = {0xFE, 0xED, 0xBA, 0xCE};
 #define CMD_SCREEN_ON      0x05
 #define CMD_SET_SCD_INTERVAL 0x06
 #define CMD_BRIGHTNESS_FADE  0x07
+#define CMD_UPDATE_RGB_LUT   0x08
 
 // --- Pins ---
 uint8_t rgbPins[]  = {7, 8, 9, 10, 11, 12};
@@ -105,41 +108,17 @@ uint8_t oePin      = 16;
 #define NEOPIXEL_PIN 4
 
 // --- Hardware ---
-Adafruit_Protomatter matrix(
-    MATRIX_WIDTH, BIT_DEPTH,
-    1, rgbPins, 5, addrPins,
-    clockPin, latchPin, oePin,
-    true
-);
+static Protomatter_core matrix;
 
 Adafruit_NeoPixel neopixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 SCD40 scd4x;
 Adafruit_LIS3DH lis3dh;
 
-// --- Default gamma LUT (gamma 1.6) ---
-static const uint8_t PROGMEM defaultLUT[256] = {
-      0,   0,   0,   0,   0,   0,   1,   1,   1,   1,   1,   2,   2,   2,   2,   3,
-      3,   3,   4,   4,   4,   5,   5,   5,   6,   6,   7,   7,   7,   8,   8,   9,
-      9,  10,  10,  11,  11,  12,  12,  13,  13,  14,  14,  15,  15,  16,  16,  17,
-     18,  18,  19,  19,  20,  21,  21,  22,  23,  23,  24,  25,  25,  26,  27,  27,
-     28,  29,  29,  30,  31,  31,  32,  33,  34,  34,  35,  36,  37,  38,  38,  39,
-     40,  41,  42,  42,  43,  44,  45,  46,  46,  47,  48,  49,  50,  51,  52,  53,
-     53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,  64,  65,  66,  67,
-     68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,  81,  83,  84,
-     85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,  97,  98,  99, 100, 101,
-    102, 103, 104, 106, 107, 108, 109, 110, 111, 113, 114, 115, 116, 117, 119, 120,
-    121, 122, 123, 125, 126, 127, 128, 130, 131, 132, 133, 135, 136, 137, 138, 140,
-    141, 142, 143, 145, 146, 147, 149, 150, 151, 153, 154, 155, 157, 158, 159, 161,
-    162, 163, 165, 166, 167, 169, 170, 171, 173, 174, 176, 177, 178, 180, 181, 183,
-    184, 185, 187, 188, 190, 191, 193, 194, 196, 197, 198, 200, 201, 203, 204, 206,
-    207, 209, 210, 212, 213, 215, 216, 218, 219, 221, 222, 224, 225, 227, 228, 230,
-    231, 233, 235, 236, 238, 239, 241, 242, 244, 245, 247, 249, 250, 252, 253, 255
-};
-
-// --- State ---
-static uint8_t activeLUT[256];
-static uint8_t gammaX10 = 16;
-static bool lutIsCustom = false;
+// Writable per-channel LUTs, pre-quantized so conversion needs no float math.
+static uint8_t activeLUT[panel::Channels][panel::LutSize];
+// Status byte keeps the original wire layout. Zero means the profile is not
+// described by a single gamma exponent (sRGB and user-supplied LUTs).
+static constexpr uint8_t gammaX10 = 0;
 
 static uint8_t frameBuf[FRAME_BYTES];
 
@@ -177,7 +156,7 @@ static unsigned long fadeDuration = 0;
 // Sync buffer
 static uint8_t syncBuf[4];
 
-// --- Status struct (36 bytes) ---
+// --- Status packet ---
 #pragma pack(push, 1)
 struct StatusResponse {
     uint8_t  magic[4];        // 0xFE 0xED 0xBA 0xCE
@@ -198,9 +177,10 @@ struct StatusResponse {
     uint8_t  buttonDown;      // 1 if pressed
     uint8_t  screenOn;        // 1 if screen is on
     uint8_t  lisOk;           // 1 if accelerometer detected
-    uint16_t reserved;        // padding to 36 bytes
+    uint16_t reserved;
 };
 #pragma pack(pop)
+static_assert(sizeof(StatusResponse) == 34, "Keep the existing status packet layout");
 
 
 // --- Functions ---
@@ -222,31 +202,49 @@ bool readExact(uint8_t *buf, uint32_t count) {
 }
 
 
-void copyFrameToMatrix(uint8_t brightness) {
-    uint8_t *p = frameBuf;
-    for (int y = 0; y < MATRIX_HEIGHT; y++) {
-        for (int x = 0; x < MATRIX_WIDTH; x++) {
-            uint8_t r = activeLUT[*p++];
-            uint8_t g = activeLUT[*p++];
-            uint8_t b = activeLUT[*p++];
-            if (brightness < 255) {
-                r = (uint8_t)((uint16_t)r * brightness / 255);
-                g = (uint8_t)((uint16_t)g * brightness / 255);
-                b = (uint8_t)((uint16_t)b * brightness / 255);
-            }
-            matrix.drawPixel(x, y, matrix.color565(r, g, b));
-        }
+void showRgb666() {
+    auto *dest = static_cast<uint8_t *>(matrix.screenData)
+        + matrix.bufferSize * (1 - matrix.activeBuffer);
+    constexpr uint16_t rowBytes = panel::Width * panel::Channels;
+    for (uint8_t row = 0; row < matrix.numRowPairs; ++row) {
+        const uint8_t *upper = frameBuf + row * rowBytes;
+        const uint8_t *lower = upper + matrix.numRowPairs * rowBytes;
+        panel::encodeRowPair(dest, upper, lower,
+                             static_cast<const uint8_t *>(matrix.rgbMask),
+                             matrix.clockMask);
+        dest += panel::Width * panel::BitDepth;
     }
-    matrix.show();
+    _PM_swapbuffer_maybe(&matrix);
+}
+
+
+void copyFrameToMatrix() {
+    for (uint32_t i = 0; i < FRAME_BYTES; i += panel::Channels) {
+        frameBuf[i]     = activeLUT[0][frameBuf[i]];
+        frameBuf[i + 1] = activeLUT[1][frameBuf[i + 1]];
+        frameBuf[i + 2] = activeLUT[2][frameBuf[i + 2]];
+    }
+    showRgb666();
 }
 
 
 void initLUT() {
-    for (int i = 0; i < 256; i++) {
-        activeLUT[i] = pgm_read_byte(&defaultLUT[i]);
+    for (auto &lut : activeLUT) {
+        memcpy(lut, panel::SrgbLut, panel::LutSize);
     }
-    lutIsCustom = false;
-    gammaX10 = 16;
+}
+
+
+void updateLUT(bool perChannel) {
+    uint8_t received[panel::Channels * panel::LutSize];
+    if (!readExact(received, perChannel ? sizeof(received) : panel::LutSize)) return;
+    for (uint8_t c = 0; c < panel::Channels; ++c) {
+        const uint8_t *lut = received + (perChannel ? c * panel::LutSize : 0);
+        for (uint16_t i = 0; i < panel::LutSize; ++i) {
+            activeLUT[c][i] = panel::quantizeLinear(lut[i]);
+        }
+    }
+    sendAck();
 }
 
 
@@ -258,14 +256,18 @@ void sendAck() {
 
 
 void showBootSplash() {
-    // Display the Phoenix logo from PROGMEM
-    for (int y = 0; y < MATRIX_HEIGHT; y++) {
-        for (int x = 0; x < MATRIX_WIDTH; x++) {
-            uint16_t color = pgm_read_word(&splashLogo[y * MATRIX_WIDTH + x]);
-            matrix.drawPixel(x, y, color);
-        }
+    // The existing splash is already authored in panel intensity space.
+    uint8_t *dest = frameBuf;
+    for (uint16_t i = 0; i < panel::Width * panel::Height; ++i) {
+        const uint16_t color = pgm_read_word(&splashLogo[i]);
+        uint8_t red = color >> 11;
+        uint8_t green = (color >> 5) & 63;
+        uint8_t blue = color & 31;
+        *dest++ = (red << 1) | (red >> 4);
+        *dest++ = green;
+        *dest++ = (blue << 1) | (blue >> 4);
     }
-    matrix.show();
+    showRgb666();
 }
 
 
@@ -274,16 +276,12 @@ void handleCommand() {
     if (!readExact(&cmd, 1)) return;
 
     switch (cmd) {
-        case CMD_UPDATE_LUT: {
-            uint8_t newLut[256];
-            if (readExact(newLut, 256)) {
-                memcpy(activeLUT, newLut, 256);
-                lutIsCustom = true;
-                gammaX10 = 0;
-                sendAck();
-            }
+        case CMD_UPDATE_LUT:
+            updateLUT(false);
             break;
-        }
+        case CMD_UPDATE_RGB_LUT:
+            updateLUT(true);
+            break;
         case CMD_GET_STATUS: {
             StatusResponse resp;
             memcpy(resp.magic, MAGIC_RESP, 4);
@@ -316,8 +314,9 @@ void handleCommand() {
         }
         case CMD_SCREEN_OFF: {
             screenOn = false;
-            matrix.fillScreen(0);
-            matrix.show();
+            setPanelBrightness(0);
+            memset(frameBuf, 0, sizeof(frameBuf));
+            showRgb666();
             neopixel.setPixelColor(0, neopixel.Color(1, 0, 1));  // dim purple = screen off
             neopixel.show();
             sendAck();
@@ -362,9 +361,10 @@ void updateBrightnessFade() {
         currentBrightness = fadeTarget;
         fading = false;
     } else {
-        float progress = (float)elapsed / fadeDuration;
-        currentBrightness = fadeStart + (int16_t)(fadeTarget - fadeStart) * progress;
+        const int32_t delta = int32_t(fadeTarget) - fadeStart;
+        currentBrightness = fadeStart + (delta * int32_t(elapsed)) / int32_t(fadeDuration);
     }
+    if (screenOn) setPanelBrightness(currentBrightness);
 }
 
 
@@ -402,7 +402,7 @@ void updateNeopixel() {
 
 void checkWatchdog() {
     // If no frames for 60s and we previously had frames, soft-reset display
-    if (framesTotal > 0 && lastFrameTime > 0) {
+    if (screenOn && framesTotal > 0 && lastFrameTime > 0) {
         if (millis() - lastFrameTime > WATCHDOG_TIMEOUT) {
             // Show boot splash to indicate we're alive but lost connection
             showBootSplash();
@@ -426,8 +426,15 @@ void setup() {
 
     initLUT();
 
-    ProtomatterStatus status = matrix.begin();
-    if (status != PROTOMATTER_OK) {
+    _PM_protoPtr = &matrix;
+    const auto status = _PM_init(&matrix, panel::Width, panel::BitDepth,
+                                 1, rgbPins, 5, addrPins, clockPin, latchPin,
+                                 oePin, true, 1, nullptr);
+    // The encoder targets one 64-pixel-wide chain using port-byte toggles.
+    // Reject an incompatible layout before writing into its scan buffers.
+    if (status != PROTOMATTER_OK || _PM_begin(&matrix) != PROTOMATTER_OK
+        || matrix.bytesPerElement != 1
+        || matrix.bufferSize != panel::Width * panel::BitDepth * (panel::Height / 2)) {
         pinMode(LED_BUILTIN, OUTPUT);
         while (true) {
             digitalWrite(LED_BUILTIN, HIGH); delay(100);
@@ -435,8 +442,9 @@ void setup() {
         }
     }
 
-    // Boot splash — warm amber gradient
+    beginPanelOE();
     showBootSplash();
+    setPanelBrightness(currentBrightness);
 
     // I2C sensors
     Wire.begin();
@@ -487,7 +495,8 @@ void loop() {
             }
 
             if (screenOn) {
-                copyFrameToMatrix(brightness);
+                copyFrameToMatrix();
+                setPanelBrightness(brightness);
             }
 
             framesTotal++;

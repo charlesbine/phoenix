@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS devices (
     layout_mode TEXT NOT NULL DEFAULT 'cycle',
     cycle_interval INTEGER NOT NULL DEFAULT 10,
     mirror_of TEXT,
+    single_app TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
     content_mode TEXT NOT NULL DEFAULT 'apps',   -- 'apps' rotation | 'audio' | 'nowplaying'
@@ -187,6 +188,9 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
             if "address" not in device_cols:
                 conn.execute("ALTER TABLE devices ADD COLUMN address TEXT NOT NULL DEFAULT ''")
             with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if "single_app" not in {r["name"] for r in conn.execute("PRAGMA table_info(devices)")}:
+                    conn.execute("ALTER TABLE devices ADD COLUMN single_app TEXT")
                 conn.execute("""
                     INSERT OR IGNORE INTO display_settings (id, config)
                     SELECT 1, json_object('timezone', json_extract(config, '$.timezone'))
@@ -372,7 +376,7 @@ class ConfigDatabase:
             if row is None:
                 config = DisplayConfig()
                 conn.execute(
-                    "INSERT INTO display_config (id, layout_mode, cycle_interval, brightness) VALUES (1, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO display_config (id, layout_mode, cycle_interval, brightness) VALUES (1, ?, ?, ?)",
                     (config.layout_mode, config.cycle_interval, config.brightness),
                 )
                 conn.commit()
@@ -402,7 +406,7 @@ class DeviceDatabase:
     """CRUD for panels (devices) and their per-device rotation membership."""
 
     _DEVICE_FIELDS = (
-        "name", "backend", "brightness", "layout_mode", "cycle_interval",
+        "name", "backend", "brightness", "layout_mode", "cycle_interval", "single_app",
         "mirror_of", "sort_order", "enabled", "content_mode", "audio_mode", "address",
     )
     _MEMBER_FIELDS = ("enabled", "priority", "sort_order")
@@ -505,8 +509,10 @@ class DeviceDatabase:
             if settings is not None:
                 self._write_display_settings(conn, settings)
             conn.execute(
-                "UPDATE devices SET layout_mode = ?, cycle_interval = ?, brightness = ?, enabled = ? WHERE id = ?",
-                (config["layout_mode"], config["cycle_interval"], config["brightness"], config["enabled"], device_id),
+                """UPDATE devices SET layout_mode = ?, cycle_interval = ?, brightness = ?,
+                   enabled = ?, single_app = ? WHERE id = ?""",
+                (config["layout_mode"], config["cycle_interval"], config["brightness"], config["enabled"],
+                 config.get("single_app"), device_id),
             )
             conn.execute("DELETE FROM device_brightness_schedules WHERE device_id = ?", (device_id,))
             if schedule is not None:

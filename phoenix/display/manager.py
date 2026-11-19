@@ -165,6 +165,7 @@ class DisplayManager:
         while True:
             if self.wake is not None:
                 self.wake.clear()
+            single_app = None
             # Resolve this iteration's brightness / layout / interval, either
             # from the device row or the global config.
             if self.device_id:
@@ -176,6 +177,7 @@ class DisplayManager:
                 brightness = device_brightness(dev) if dev["enabled"] else 0
                 layout_mode = dev["layout_mode"]
                 cycle_interval = dev["cycle_interval"]
+                single_app = dev["single_app"]
             else:
                 config = self.config_db.get()
                 brightness = config.brightness
@@ -200,11 +202,13 @@ class DisplayManager:
                 continue
 
             active = self._collect_active()
+            pinned = next((app for app in active if app.name == single_app), None) if (
+                layout_mode == "single" and single_app
+            ) else None
 
-            # Apply schedule: if a playlist is active, filter to its apps
+            # An explicit Single selection takes precedence over playlist rotation.
             try:
-                playlist_db = PlaylistDatabase()
-                active_playlist = playlist_db.get_active_playlist()
+                active_playlist = PlaylistDatabase().get_active_playlist() if pinned is None else None
                 if active_playlist:
                     allowed = set(active_playlist["app_names"])
                     scheduled = [a for a in active if a.name in allowed]
@@ -234,7 +238,7 @@ class DisplayManager:
                 random.shuffle(weighted)
                 self._display_cycle(weighted, cycle_interval)
             elif layout_mode == "single":
-                self._display_app(self._check_show_now() or active[0], cycle_interval)
+                self._display_app(self._check_show_now() or pinned or active[0], cycle_interval)
             else:
                 logger.error("Unknown layout mode: %s", layout_mode)
 
