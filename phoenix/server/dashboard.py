@@ -1,12 +1,14 @@
 """FastAPI dashboard — JSON API + static SPA frontend."""
 
 import asyncio
+import ipaddress
 import json
 import logging
+import socket
 import subprocess
 import humanize
 from datetime import datetime
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -18,7 +20,7 @@ from phoenix.cache import cache_get
 from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
 from phoenix.models import (
     BRIGHTNESS_SCHEDULE_BACKENDS, SPECTROGRAM_PALETTE_OPTIONS, BrightnessSchedule,
-    DisplaySettings, brightness_schedule_for,
+    DisplaySettings, brightness_schedule_for, display_settings_from_json, night_mode_phase,
 )
 from phoenix.node import NodePublisher
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
@@ -38,6 +40,53 @@ from phoenix.service import PhoenixService
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_HOST_SUFFIXES = (".local", ".localhost", ".internal", ".home.arpa")
+_MAX_PROXY_TTL = 86400
+
+
+def _is_public_ip(addr: str) -> bool:
+    ip = ipaddress.ip_address(addr)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def validate_proxy_url(url: str, allowed_hosts: str = "") -> None:
+    """Reject non-HTTP(S) URLs, private/link-local/loopback targets, and non-allowlisted hosts."""
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Proxy only allows http and https URLs")
+    if parsed.username or parsed.password:
+        raise ValueError("Proxy URLs must not include credentials")
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        raise ValueError("Proxy URL requires a hostname")
+    if hostname == "localhost" or hostname.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise ValueError("Proxy target host is not allowed")
+
+    allowlist = {h.strip().lower().rstrip(".") for h in allowed_hosts.split(",") if h.strip()}
+    if allowlist and hostname not in allowlist:
+        raise ValueError("Proxy target host is not in proxy_allowed_hosts")
+
+    try:
+        if not _is_public_ip(hostname):
+            raise ValueError("Proxy target IP must be publicly routable")
+        return
+    except ValueError as exc:
+        if "publicly routable" in str(exc):
+            raise
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Unable to resolve proxy target host") from exc
+    if not infos:
+        raise ValueError("Unable to resolve proxy target host")
+    for info in infos:
+        if not _is_public_ip(info[4][0]):
+            raise ValueError("Proxy target resolves to a non-public IP address")
 
 
 def create_app() -> FastAPI:
@@ -129,11 +178,29 @@ def create_app() -> FastAPI:
         dev = get_device_db().get(device_id)
         if dev is None:
             return None
+        schedule = brightness_schedule_for(dev)
+        schedule_status = None
+        if schedule and schedule.enabled:
+            schedule_status = (
+                "custom" if schedule.mode == "custom"
+                else night_mode_phase(display_settings_from_json(dev.get("display_settings")))
+            )
         return {
             "layout_mode": dev["layout_mode"],
             "cycle_interval": dev["cycle_interval"],
             "brightness": dev["brightness"],
+            "brightness_schedule_status": schedule_status,
+            "single_app": dev["single_app"],
         }
+
+    def _validate_single_app(device_id: str, name: object) -> None:
+        if name is not None and (
+            not isinstance(name, str) or not any(
+                app["name"] == name and app["enabled"] and app["active"]
+                for app in _device_apps(device_id)
+            )
+        ):
+            raise HTTPException(status_code=422, detail="Choose an enabled, active app from this panel’s rotation")
 
     def _device_app_row(device_id: str, name: str):
         """One rotation row (global def + per-device overrides) after a mutation."""
@@ -358,8 +425,24 @@ def create_app() -> FastAPI:
         app_obj = get_svc().app_db.get(name)
         if app_obj and app_obj.runtime:
             return _runtime_schema(app_obj)
+        if name == "procedural_landscape":
+            from phoenix.apps.procedural_landscape import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
         if name == "procedural_planet":
             from phoenix.apps.procedural_planet import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "home_climate":
+            from phoenix.apps.home_climate import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "packages":
+            from phoenix.apps.packages import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "spotify":
+            from phoenix.apps.spotify import SETTINGS_SCHEMA
 
             return SETTINGS_SCHEMA
         from phoenix.paths import star_path
@@ -882,14 +965,23 @@ def create_app() -> FastAPI:
     @app.get("/proxy")
     async def proxy(
         url: str = Query(..., description="URL to fetch"),
-        ttl: int = Query(300, description="Cache TTL in seconds"),
+        ttl: int = Query(300, ge=0, le=_MAX_PROXY_TTL, description="Cache TTL in seconds"),
     ):
-        url = unquote(url)
+        target = unquote(url)
+        allowed_hosts = settings.proxy_allowed_hosts
+        validate = lambda candidate: validate_proxy_url(candidate, allowed_hosts)
         try:
-            status_code, body, content_type = cache_get(url, ttl)
+            validate(target)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            status_code, body, content_type = cache_get(target, ttl, validate_url=validate)
             return Response(content=body, status_code=status_code, media_type=content_type)
-        except Exception as e:
-            return Response(content=str(e).encode(), status_code=502)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception:
+            logger.warning("[proxy] Upstream fetch failed for %s", target)
+            return Response(content=b"Upstream fetch failed", status_code=502)
 
     @app.get("/api/cache/stats")
     async def cache_stats():
@@ -1052,7 +1144,9 @@ def create_app() -> FastAPI:
     async def update_config(request: Request, device: str | None = Query(None)):
         body = await request.json()
         if device:
-            fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness") if k in body}
+            fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness", "single_app") if k in body}
+            if "single_app" in fields:
+                _validate_single_app(device, fields["single_app"])
             get_device_db().update(device, **fields)
             cfg = _device_config(device)
             return cfg if cfg is not None else {"error": f"no device {device}"}
@@ -1069,6 +1163,7 @@ def create_app() -> FastAPI:
             "brightness": d["brightness"],
             "brightness_schedule": brightness_schedule_for(d),
             "layout_mode": d["layout_mode"],
+            "single_app": d["single_app"],
             "cycle_interval": d["cycle_interval"],
             "mirror_of": d["mirror_of"],
             "sort_order": d["sort_order"],
@@ -1120,6 +1215,8 @@ def create_app() -> FastAPI:
     @app.put("/api/devices/{device_id}")
     async def update_device(device_id: str, request: Request):
         body = await request.json()
+        if "single_app" in body:
+            _validate_single_app(device_id, body["single_app"])
         dev = get_device_db().update(device_id, **body)
         return _serialize_device(dev) if dev else {"error": f"no device {device_id}"}
 

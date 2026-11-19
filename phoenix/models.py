@@ -36,7 +36,7 @@ REFRESH_PRESETS: dict[str, timedelta] = {
 # Default preset assignments based on app name patterns
 _DEFAULT_PRESET_PATTERNS: dict[str, list[str]] = {
     "realtime": ["clock", "fuzzy_clock"],
-    "ambient": ["procedural_planet", "pixel_planet", "aquarium", "nyan_cat",
+    "ambient": ["procedural_landscape", "procedural_planet", "pixel_planet", "aquarium", "nyan_cat",
                 "programming_excuses", "life", "maps", "hello_world",
                 "schema_hello_world", "font-preview", "quadrants"],
     # Everything else defaults to "frequent"
@@ -150,6 +150,19 @@ def _sun_above_horizon(utc_minute: datetime, latitude: float, longitude: float) 
     return altitude_sine >= sin(radians(-0.833))
 
 
+def night_mode_phase(settings: DisplaySettings, now: datetime | None = None) -> Literal["daytime", "dimmed", "off"]:
+    local = settings.local_time(now)
+    off_start, off_end = (2, 9) if local.weekday() >= 5 else (0, 8)
+    if off_start <= local.hour < off_end:
+        return "off"
+    if settings.latitude is not None and settings.longitude is not None:
+        utc_minute = local.astimezone(timezone.utc).replace(second=0, microsecond=0)
+        daylight = _sun_above_horizon(utc_minute, settings.latitude, settings.longitude)
+    else:
+        daylight = 7 <= local.hour < 19
+    return "daytime" if daylight else "dimmed"
+
+
 class BrightnessSchedule(BaseModel):
     enabled: bool = False
     mode: Literal["night", "custom"] = "custom"
@@ -167,23 +180,17 @@ class BrightnessSchedule(BaseModel):
     def level_at(self, settings: DisplaySettings, brightness: int, now: datetime | None = None) -> int:
         if not self.enabled:
             return brightness
-        local = settings.local_time(now)
         if self.mode == "custom":
-            hhmm = local.strftime("%H:%M")
+            hhmm = settings.local_time(now).strftime("%H:%M")
             return next((step.brightness for step in reversed(self.steps) if step.time <= hhmm),
                         self.steps[-1].brightness)
 
         if brightness == 0:
             return 0
-        off_start, off_end = (2, 9) if local.weekday() >= 5 else (0, 8)
-        if off_start <= local.hour < off_end:
+        phase = night_mode_phase(settings, now)
+        if phase == "off":
             return 0
-        if settings.latitude is not None and settings.longitude is not None:
-            utc_minute = local.astimezone(timezone.utc).replace(second=0, microsecond=0)
-            daylight = _sun_above_horizon(utc_minute, settings.latitude, settings.longitude)
-        else:
-            daylight = 7 <= local.hour < 19
-        return brightness if daylight else max(1, round(brightness / 4))
+        return brightness if phase == "daytime" else max(1, round(brightness / 4))
 
 
 def brightness_schedule_for(device: dict) -> BrightnessSchedule | None:

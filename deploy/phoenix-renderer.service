@@ -1,13 +1,13 @@
 [Unit]
-Description=Phoenix Renderer (pixlet rendering loop)
+Description=Phoenix Renderer (pixlet and Python applet render loop)
 After=phoenix-dashboard.service
 Requires=phoenix-dashboard.service
 
 [Service]
 Type=simple
-User=charles
-WorkingDirectory=/home/charles/phoenix
-ExecStart=/home/charles/.local/bin/uv run phoenix render
+User=__PHOENIX_USER__
+WorkingDirectory=__PHOENIX_DIR__
+ExecStart=__PHOENIX_UV__ run phoenix render
 Nice=10
 Restart=always
 RestartSec=5

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Dashboard (also serves preprocessor data, cache proxy at /proxy)
     dashboard_port: int = 7002
+    proxy_allowed_hosts: str = ""  # optional comma-separated host allowlist for /proxy (blank = any public host)
 
     # A paired serial display receives playback state and rendered files.
     node_device: str = ""
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     node_tls_key: str = ""
 
     # MQTT
-    mqtt_broker: str = ""  # e.g. europa.local — leave empty to disable
+    mqtt_broker: str = ""  # e.g. mqtt.local — leave empty to disable
     mqtt_port: int = 8883
     mqtt_tls: bool = True
     mqtt_username: str = ""

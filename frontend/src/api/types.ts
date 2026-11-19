@@ -20,6 +20,8 @@ export interface Config {
   layout_mode: 'cycle' | 'random' | 'single'
   cycle_interval: number
   brightness: number
+  single_app?: string | null
+  brightness_schedule_status?: 'daytime' | 'dimmed' | 'off' | 'custom' | null
 }
 
 export type NodeSyncStatus = 'pending' | 'offline' | 'synced'

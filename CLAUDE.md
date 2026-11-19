@@ -8,7 +8,7 @@ Phoenix will be open-sourced. The goal is to build on the good ideas from Pixlet
 
 ## Community Apps
 
-Community apps come from **metaember/phoenix-apps** (https://github.com/metaember/phoenix-apps), our fork of tronbyt/apps (itself a fork of the now-dead tidbyt/community). Periodically merge upstream from tronbyt/apps for new apps and fixes. Community apps are Starlark (.star) targeting 64x32 — the renderer renders them at half height and centers on 64x64.
+Community apps come from **charlesbine/phoenix-apps** (https://github.com/charlesbine/phoenix-apps), our fork of tronbyt/apps (itself a fork of the now-dead tidbyt/community). Periodically merge upstream from tronbyt/apps for new apps and fixes. Community apps are Starlark (.star) targeting 64x32 — the renderer renders them at half height and centers on 64x64.
 
 ## Architecture
 

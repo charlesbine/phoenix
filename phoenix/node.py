@@ -1,4 +1,4 @@
-"""Push Aurora's playback state from the dashboard to its local USB player."""
+"""Push a paired serial display's playback state from the dashboard to its local USB player."""
 
 import hashlib
 import logging
@@ -39,9 +39,14 @@ class NodeState(BaseModel):
     apps: list[AppConfig]
     frames: dict[str, str]
     show_now: NodeCommand | None = None
+    single_app: str | None = None
+
+    def payload(self) -> str:
+        # Keep the unpinned revision compatible with older peers.
+        return self.model_dump_json(exclude={"single_app"} if self.single_app is None else None)
 
     def revision(self) -> str:
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        return hashlib.sha256(self.payload().encode()).hexdigest()
 
 
 class NodeStatus(BaseModel):
@@ -121,6 +126,7 @@ def build_state(device_id: str) -> NodeState:
         brightness_schedule=brightness_schedule_for(device),
         display_settings=display_settings_from_json(device.get("display_settings")),
         apps=apps, frames=frames, show_now=command,
+        single_app=device["single_app"],
     )
 
 
@@ -169,7 +175,7 @@ class NodePublisher:
                                       content=artifact)
             response.raise_for_status()
 
-        response = client.put(f"{NODE_PATH}/state", content=state.model_dump_json(),
+        response = client.put(f"{NODE_PATH}/state", content=state.payload(),
                               headers={"Content-Type": "application/json"})
         response.raise_for_status()
         self.report = NodeStatus.model_validate(response.json())

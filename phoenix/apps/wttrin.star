@@ -1,12 +1,18 @@
 load("render.star", "render")
 load("http.star", "http")
+load("schema.star", "schema")
 
 CACHE_PROXY = "http://127.0.0.1:7002/proxy"
-API_ENDPOINT = "https://wttr.in/nyc?m0qFAT"
+DEFAULT_LOCATION = "San Francisco"
 CACHE_TTL = 900  # 15 minutes — weather doesn't change that fast
 
-def main():
-    rep = http.get(CACHE_PROXY, params={"url": API_ENDPOINT, "ttl": str(CACHE_TTL)})
+def main(config):
+    location = (config.get("location") or DEFAULT_LOCATION).strip().replace(" ", "+")
+    units = config.get("units") or "m"
+    unit_flag = "u" if units == "u" else "m"
+    api_endpoint = "https://wttr.in/{}?{}0qFAT".format(location, unit_flag)
+
+    rep = http.get(CACHE_PROXY, params={"url": api_endpoint, "ttl": str(CACHE_TTL)})
     if rep.status_code != 200:
         fail("wttr.in request failed with status %d", rep.status_code)
     weather_text = rep.body()
@@ -105,3 +111,29 @@ def remove_trailing_spaces(lines):
             trimmed_lines.append(line)
 
     return trimmed_lines
+
+
+def get_schema():
+    return schema.Schema(
+        version = "1",
+        fields = [
+            schema.Text(
+                id = "location",
+                name = "Location",
+                desc = "City name, airport code, or postal code for wttr.in",
+                icon = "locationDot",
+                default = DEFAULT_LOCATION,
+            ),
+            schema.Dropdown(
+                id = "units",
+                name = "Units",
+                desc = "Metric (°C, km/h) or USCS (°F, mph)",
+                icon = "temperatureHalf",
+                default = "m",
+                options = [
+                    schema.Option(display = "Metric (°C)", value = "m"),
+                    schema.Option(display = "Imperial (°F)", value = "u"),
+                ],
+            ),
+        ],
+    )

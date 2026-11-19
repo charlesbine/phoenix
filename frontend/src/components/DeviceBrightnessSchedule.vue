@@ -7,11 +7,11 @@ const props = defineProps<{ device: Device }>()
 const emit = defineEmits<{ saved: [BrightnessSchedule] }>()
 
 const schedule = ref<BrightnessSchedule>({ enabled: false, mode: 'custom', steps: [] })
-const nightActive = computed(() =>
+const nightEnabled = computed(() =>
   props.device.brightness_schedule?.mode === 'night' && props.device.brightness_schedule.enabled,
 )
 const scheduleLabel = computed(() => {
-  if (nightActive.value) return 'Night Mode active'
+  if (nightEnabled.value) return 'Night Mode enabled'
   return props.device.brightness_schedule?.enabled ? 'Custom schedule active' : 'Manual control'
 })
 const saving = ref(false)
@@ -35,7 +35,7 @@ function addTime(): void {
 }
 
 function toggleNight(): void {
-  void save({ enabled: !nightActive.value, mode: 'night', steps: props.device.brightness_schedule?.steps ?? [] })
+  void save({ enabled: !nightEnabled.value, mode: 'night', steps: props.device.brightness_schedule?.steps ?? [] })
 }
 
 async function save(config: BrightnessSchedule): Promise<void> {
@@ -62,7 +62,7 @@ async function save(config: BrightnessSchedule): Promise<void> {
         <p class="mt-1 text-xs text-muted">{{ scheduleLabel }}</p>
       </div>
       <button type="button" class="schedule-button border-[#8f4b29]" :disabled="saving" @click="toggleNight">
-        {{ nightActive ? 'Turn off Night Mode' : 'Use Night Mode' }}
+        {{ nightEnabled ? 'Turn off Night Mode' : 'Use Night Mode' }}
       </button>
     </div>
     <p class="mt-2 text-xs leading-relaxed text-muted">

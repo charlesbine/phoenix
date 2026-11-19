@@ -1,157 +1,185 @@
-# Phoenix
+<p align="center">
+  <img src="phoenix/static/phoenix-180.png" alt="Phoenix logo" width="96" />
+</p>
 
-A smart LED matrix display manager that drives a 64x64 HUB75 panel via an Adafruit Matrix Portal M4, powered by a Raspberry Pi.
+<h1 align="center">Phoenix</h1>
 
-<img src="phoenix/static/phoenix-logo.png" width="128" alt="Phoenix">
+<p align="center">
+  <strong>Self-hosted 64×64 LED matrix display manager — an open-source Tidbyt successor for WLED &amp; HUB75 panels.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/charlesbine/phoenix/actions/workflows/ci.yml"><img src="https://github.com/charlesbine/phoenix/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange.svg" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+" />
+  <img src="https://img.shields.io/badge/panel-64%C3%9764%20HUB75%20%2F%20WLED-ff7a2f.svg" alt="64x64 HUB75 / WLED" />
+</p>
+
+---
+
+<!-- MEDIA_PLACEHOLDER: Replace the block below with a 10–15s physical desk matrix demo video/GIF once recorded -->
+> **Demo Reel (Coming Soon):** _Drop a 10–15s physical desk matrix clip or GIF here (`docs/media/desk-demo.gif` or embedded MP4) showing Phoenix cycling procedural landscapes, rotating pixel planets, live audio spectrum, and Starlark applets on hardware._
+
+<p align="center">
+  <img src="docs/media/dashboard-home.png" alt="Phoenix Ember-CRT Dashboard — Home view with live 64x64 preview and panel controls" width="100%" />
+</p>
+
+---
+
+## Why Phoenix?
+
+Tidbyt proved how delightful a glanceable pixel-art desk display can be, and [Pixlet](https://github.com/tidbyt/pixlet) built an incredible ecosystem of Starlark applets. **Phoenix** keeps that ecosystem alive and pushes it further — fully local, zero cloud lock-in, native **64×64** resolution, multi-panel control, and support for both plug-and-play **WLED** displays and DIY **HUB75** builds.
+
+- **Tidbyt / Pixlet Compatible** — Run hundreds of Starlark community apps from [`charlesbine/phoenix-apps`](https://github.com/charlesbine/phoenix-apps) (installed right from the built-in Store) alongside native Python/Pillow apps with zero limitations.
+- **Ember-CRT Web Dashboard** — Manage every panel from a live WebSocket-powered Vue 3 dashboard: real-time preview, quick per-app settings, weighted priority cycling (`1×–4×`), Single-App pinning, Show Now interrupts, playlists, and diagnostics.
+- **Multi-Panel Fleet** — Drive WLED panels over LAN DDP and Matrix Portal M4 panels over USB serial from one controller. Each panel keeps its own rotation, layout mode (`cycle`, `random`, `single`), brightness schedule, or mirrors another panel.
+- **Live 60 FPS Audio Visualizer** — Real-time FFT spectrum (`bars`, `vu`, `spectrogram`) with selectable palettes (`Hue heat`, `Fire`, `Ice`, `Aurora`, `Mono`) driven by a USB mic or audio loopback.
+- **Solar-Aware Night Mode** — Automatically dims panels to 25% between sunset and sunrise and powers them off overnight (or follows your custom schedule), persisted locally on paired display nodes so schedules keep working even during server outages.
+- **Procedural Pixel Art Built In** — Seamless looping **Procedural Landscape** (Dusk, Alpine, Alien palettes), continuously rotating **Procedural Planet**, animated **Christmas Countdown**, **Home Climate**, **Spotify Now Playing**, and **MQTT Package Alerts**.
+- **Home Assistant & MQTT Native** — Auto-discovers as a dimmable light in Home Assistant with effect/app switching, pulls live media now-playing, and supports instant MQTT interrupt notifications.
+- **6-Bit sRGB Color & Hardware OE Dimming (M4)** — Custom Matrix Portal M4 firmware with sRGB-to-linear LUTs and hardware `TCC0` OE pulse brightness modulation so low-brightness night frames stay smooth and color-accurate.
+
+---
+
+## Hardware Options
+
+Pick the path that fits your desk — no hardware is required to try Phoenix in browser preview mode first.
+
+| Path | Hardware | Setup Effort | Connection | Best For | Guide |
+|---|---|---|---|---|---|
+| **Recommended Easy Path** | **Apollo M-1** (or any 64×64 ESP32 WLED matrix) | ~10 min — zero soldering or flashing | Wi-Fi / LAN (DDP UDP `4048`) | Plug-and-play desk display managed from any Mac, Linux box, or home server | [Apollo M-1 & WLED Guide](docs/hardware/apollo-m1-wled.md) |
+| **DIY HUB75 Build** | **64×64 P2/P2.5 HUB75E panel** + **Adafruit Matrix Portal M4** + 5V 4A PSU | ~30 min — 1 solder jumper + `just flash-m4` | USB-C serial to Pi / mini-PC / Mac | Maximum color fidelity (6-bit sRGB + hardware OE dimming), custom enclosures, optional SCD40 CO₂ sensor | [Matrix Portal M4 Guide](docs/hardware/matrix-portal-m4.md) |
+| **No Hardware Yet** | Any laptop or server | 60 seconds | Browser (`PHOENIX_PLATFORM=web`) | Trying the dashboard, developing Starlark/Python applets | [60-Second Quick Start](#60-second-quick-start) |
+
+---
+
+## 60-Second Quick Start
+
+### Option 1: Docker Compose (Fastest)
+
+```bash
+git clone https://github.com/charlesbine/phoenix.git
+cd phoenix
+cp .env.example .env
+docker compose up -d --build
+```
+
+Open **`http://localhost:7002`** — the Ember-CRT dashboard is live. Add a WLED panel in **Devices** (or switch `.env` to `PHOENIX_PLATFORM=wled` / `serial`) to push frames to real hardware.
+
+### Option 2: Local Dev Preview (macOS / Linux)
+
+Requires Python 3.11+, [`uv`](https://docs.astral.sh/uv/), [`bun`](https://bun.sh/), and [`pixlet`](https://github.com/tidbyt/pixlet/releases):
+
+```bash
+git clone https://github.com/charlesbine/phoenix.git
+cd phoenix
+cp .env.example .env
+uv sync
+cd frontend && bun install --frozen-lockfile && bun run build && cd ..
+PHOENIX_PLATFORM=web uv run phoenix dashboard
+```
+
+In a second terminal, run `PHOENIX_PLATFORM=web uv run phoenix render` to continuously render enabled applets.
+
+---
+
+## Dashboard Tour
+
+<table>
+  <tr>
+    <td width="50%">
+      <strong>Apps &amp; Live Configurator</strong><br />
+      Manage your rotation, adjust per-app weights and refresh presets, and tweak app settings with instant re-render.<br /><br />
+      <img src="docs/media/dashboard-apps.png" alt="Phoenix Apps view with live preview and settings" />
+    </td>
+    <td width="50%">
+      <strong>Multi-Panel Fleet &amp; Night Mode</strong><br />
+      Register WLED and serial panels side by side, configure solar-aware Night Mode, or define custom brightness schedules.<br /><br />
+      <img src="docs/media/dashboard-devices.png" alt="Phoenix Devices view with Desk M4 and Apollo M-1 panels" />
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <strong>Community App Store</strong><br />
+      Browse, filter by category, and one-click import hundreds of Starlark applets from <code>charlesbine/phoenix-apps</code>.<br /><br />
+      <img src="docs/media/dashboard-store.png" alt="Phoenix Community App Store" />
+    </td>
+  </tr>
+</table>
+
+---
 
 ## Architecture
 
-In an all-in-one installation the dashboard, renderer, and display player run
-on the same machine. WLED panels receive DDP over the LAN. A Matrix Portal M4
-receives RGB frames over USB and drives its HUB75 panel.
+Phoenix runs in two topologies from the same codebase and container image (`PHOENIX_SERVICES` selects which processes run):
 
-In a split installation the dashboard and renderer run on a server. A paired
-serial player runs `phoenix node` on the machine connected to the M4. The
-dashboard pushes settings and changed WebPs over private HTTPS. The player
-caches the rotation and keeps playing on its own during a server outage.
-The dashboard reports whether the player has accepted the update.
+**All-in-One** — one machine renders applets, hosts the dashboard, and drives your panel(s):
 
-## Features
-
-- **Dashboard panel builder** — create no-code displays from the web UI. Pick a layout (big number, key/value, marquee, multi stat, sparkline), point at a data source (HTTP JSON, MQTT, Home Assistant), and it renders automatically.
-- **MQTT notifications** — publish to `phoenix/notify` and it interrupts the display within 100ms.
-- **Home Assistant integration** — auto-discovers as a dimmable light in HA. Brightness slider, app switching, layout mode — all from HA dashboards and automations.
-- **Starlark apps** — compatible with the Tidbyt/Pixlet ecosystem. Run community apps or write your own.
-- **Python apps** — for anything that doesn't fit Starlark. Direct Pillow rendering, no limitations.
-- **Procedural Planet** — continuously rotating, seamlessly looping planets. Speed is bounded to `0.08`–`0.16` in either direction, with `0` for a still image. Slower turns use more frames to keep frame holds between 40 and 70 ms.
-- **Playlist scheduling** — time-based playlists with day-of-week rules. Clock at night, stats during work hours.
-- **Brightness scheduling** — daily brightness and power changes per WLED or serial panel, configured in Devices.
-- **Quick app settings** — select an app on Home and open Settings under its preview. Save & render updates the shared app configuration and renders the preview. Apps has the custom key editor and app management.
-- **Programming Excuses** — rotates a bundled list and learns new excuses from [programmerexcuses.com](http://programmerexcuses.com/) as it renders, at most once every 15 minutes. The site serves one random excuse per request. The local pool in `phoenix/data/programming_excuses_pool.json` works offline and grows over time.
-- **Priority cycling** — important apps show more often (2x, 3x, 4x weighting).
-- **HTTP cache proxy** — transparent caching with stale-on-failure fallback. External APIs going down won't break your display.
-
-## Quick start
-
-### On the Pi
-
-```bash
-# Install deps
-curl -LsSf https://astral.sh/uv/install.sh | sh
-curl -fsSL https://bun.sh/install | bash
-curl -fsSL https://github.com/tidbyt/pixlet/releases/download/v0.34.0/pixlet_0.34.0_linux_arm64.tar.gz \
-  | sudo tar -xz -C /usr/local/bin pixlet
-
-# Clone and configure
-git clone https://github.com/metaember/phoenix.git
-cd phoenix
-cp .env.example .env  # edit with your settings
-
-# Install and start
-bash deploy/install.sh
+```text
+Host (dashboard + render + display) ──┬── LAN DDP UDP ───▶ Apollo M-1 / WLED panel
+                                      └── USB serial ────▶ Matrix Portal M4 ──▶ 64×64 HUB75
 ```
 
-Dashboard at `http://<pi-ip>:7002`
+**Split (Controller + Paired Serial Node)** — keep heavy Starlark/Python rendering on a home server while a 1 GB Raspberry Pi runs only the lightweight native `phoenix node` display player:
 
-### Development (Mac)
-
-```bash
-uv sync
-cd frontend && bun install
-just dev           # backend on :7002 + Vue dashboard on :5173
-just dev-backend   # FastAPI API + production bundle server on :7002
-just dev-frontend  # Vue dev server on :5173, proxies API to :7002
+```text
+Home Server (Docker)                             USB Display Host (native systemd)
+[dashboard + render] ── private HTTPS push ───▶  [phoenix node: display + local audio] ── USB ──▶ M4 ──▶ Panel
 ```
 
-### Deployment — all-in-one (Pi)
+The paired display node persists its accepted rotation, Night Mode settings, and rendered 64×64 WebPs to disk so playback continues seamlessly across restarts and server outages. See **[`docs/deployment.md`](docs/deployment.md)** for Docker Compose, systemd (`deploy/install.sh`), and split-node TLS pairing instructions.
 
-```bash
-just deploy       # git pull + sync deps + build Vue bundle + restart on Pi
-just status       # check services
-just logs         # live tail logs
-just render-times # see what's slow
-```
+---
 
-### Deployment — split server and serial player
+## Built-In Apps & Writing Your Own
 
-See [Split deployment](deploy/europa/README.md) for the loopback-only Compose
-example, private HTTPS pairing, and native serial player setup.
+Phoenix supports four applet types out of the box:
 
-## Hardware
+1. **Starlark (`.star`)** — Drop any Tidbyt/Pixlet-compatible `.star` file into `phoenix/apps/` (or import from the **Store** tab). Starlark `get_schema()` fields automatically appear in the dashboard settings UI.
+2. **Python (`.py`)** — Full Pillow/Python rendering with zero sandbox limits. Built-in Python apps include:
+   - `procedural_landscape` — Seamless 12-second looping pixel terrain flyover (`dusk`, `alpine`, `alien` palettes)
+   - `procedural_planet` — Continuously rotating procedural planets with bounded smooth animation timing
+   - `christmas_countdown` — Animated snowfall, sleigh, gift-pop, and shooting-star interludes
+   - `home_climate` — Multi-room temperature & humidity dashboard from configurable Home Assistant sensors
+   - `spotify` — Full-screen album art + song progress frame from Home Assistant `media_player` entities
+   - `packages` — Conditional MQTT package delivery alert (automatically skips rotation when count is `0`)
+3. **Live Real-Time Apps** — `audio_bars`, `audio_vu`, `audio_spectrogram` (60 FPS FFT audio visualizer) and live now-playing.
+4. **Static Media & Custom Panels** — Drop `.webp`, `.gif`, or `.png` files directly, or build custom multi-stat / sparkline / key-value panels in the **Panels** tab.
 
-- **Raspberry Pi 3** (or newer) — runs the software
-- **Adafruit Matrix Portal M4** — drives the panel via DMA
-- **64x64 P2 HUB75 LED panel** — the display
-- **5V PSU** — powers the panel directly (not through USB)
-- **USB-A to USB-C cable** — Pi to M4 (data + M4 power only)
+---
 
-## Configuration
+## Configuration & API
 
-All settings via environment variables (`.env` file):
-
-```env
-PHOENIX_PLATFORM=serial
-PHOENIX_SERIAL_PORT=/dev/ttyACM0
-
-# Which services a process runs (space-separated): dashboard render display.
-# All-in-one leaves this unset (runs all three); a brain sets "dashboard render".
-PHOENIX_SERVICES="dashboard render display"
-# Concurrent pixlet renders. 0 = auto (min(cores, 4)). Set 1 on a low-RAM Pi.
-PHOENIX_RENDER_WORKERS=0
-# Optional SQLite path. The parent directory must exist. Keep it out of /data.
-# PHOENIX_DB_PATH=/var/lib/phoenix/phoenix.db
-
-PHOENIX_MQTT_BROKER=mqtt.example.com
-PHOENIX_MQTT_PORT=8883
-PHOENIX_MQTT_TLS=true
-PHOENIX_MQTT_USERNAME=user
-PHOENIX_MQTT_PASSWORD=pass
-
-PHOENIX_HA_URL=http://homeassistant.local:8123
-PHOENIX_HA_TOKEN=your-long-lived-token
-```
-
-## Brightness and Night Mode
-
-In **Devices**, choose a time zone once under **Global display settings**. A city's
-latitude and longitude give Night Mode its local sunset and sunrise. Without a
-location, it dims between 7 p.m. and 7 a.m. local time.
-
-Night Mode is enabled by default for WLED and serial panels without a saved
-schedule. The panel uses its brightness slider in daylight and 25% of that
-level after dark. It powers off midnight–8 a.m. Monday through Friday and
-2–9 a.m. on Saturday and Sunday mornings. One button turns Night Mode on or
-off. Use **Custom schedule** for daily start times and brightness levels,
-including 0 for off. Switching to Night Mode keeps your saved custom times.
-Scheduled WLED panels periodically recover their configured brightness and
-power state after a controller restart.
-
-## API
+Copy [`.env.example`](.env.example) to `.env` to configure your display backend, optional Home Assistant / MQTT integrations, audio input device, or split-node pairing.
 
 | Endpoint | Description |
-|----------|-------------|
-| `GET /` | Dashboard UI |
-| `GET /display` | Fullscreen display mirror |
-| `GET /healthz` | Simple health check (200/503) |
-| `GET /api/health` | Detailed diagnostics |
-| `GET /api/apps` | List registered apps |
-| `POST /api/notify` | Send a notification |
-| `GET /api/panels` | List dashboard panels |
-| `GET /api/settings/display` | Read the global time zone, solar location, and supported time zones |
-| `PUT /api/settings/display` | Set the global `timezone`, `latitude`, and `longitude` |
-| `PUT /api/devices/{id}/brightness-schedule` | Set `enabled`, `mode` (`night` or `custom`), and saved custom `steps` with `time` and `brightness` |
-| `POST /api/panels` | Create a panel |
-| `GET /proxy?url=...&ttl=300` | HTTP cache proxy |
+|---|---|
+| `GET /` | Ember-CRT Web Dashboard (Vue 3 SPA) |
+| `WS /ws/state?device=...` | Live state push (now-playing, rotation, brightness, Night Mode phase) |
+| `GET /api/devices` | List / create / update panels and brightness schedules |
+| `GET /api/apps?device=...` | List per-panel rotation, weights, and app configs |
+| `POST /api/apps/{name}/preview` | Re-render an app with saved settings |
+| `POST /api/apps/{name}/show` | Interrupt current cycle and show an app immediately |
+| `POST /api/notify` | Push a temporary text/icon notification interrupt |
+| `GET /api/status` | System health, paired player sync status, and diagnostics |
+| `GET /proxy?url=...&ttl=300` | SSRF-hardened SQLite HTTP cache proxy for Starlark applets |
 
-## M4 Firmware
+---
+
+## Development
 
 ```bash
-just flash-m4    # compile + upload (M4 must be connected locally)
+# Run Python test suite
+uv run pytest
+
+# Typecheck & build Vue dashboard
+cd frontend && bun run build
+
+# Run host C++ checks for M4 color & OE timing math
+c++ -std=c++11 -Wall -Wextra -Werror firmware/tests/panel_color_test.cpp -o /tmp/panel-color-test
+/tmp/panel-color-test
 ```
 
-Or manually:
-```bash
-cd firmware/matrix_portal_m4
-arduino-cli compile --fqbn adafruit:samd:adafruit_matrixportal_m4 .
-arduino-cli upload --fqbn adafruit:samd:adafruit_matrixportal_m4 -p /dev/cu.usbmodem101 .
-```
+## License
+
+MIT — see [`LICENSE`](LICENSE).

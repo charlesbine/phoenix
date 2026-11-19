@@ -74,6 +74,39 @@ def test_collect_active_includes_db_backed_live_apps(tmp_path):
     assert active[0].pixlet_config["mode"] == "vu"
 
 
+@pytest.mark.parametrize(
+    ("pin", "show_now", "expected"),
+    [("weather", None, "weather"), ("news", None, "clock"), ("weather", "spotify", "spotify")],
+)
+def test_single_mode_uses_selected_app_with_fallback_and_show_now(
+    tmp_path, monkeypatch, pin, show_now, expected,
+):
+    db = str(tmp_path / "t.db")
+    adb = _seed_apps(db)
+    ddb = DeviceDatabase(db)
+    ddb.create("desk", "Desk", "web", layout_mode="single", single_app=pin)
+    for idx, name in enumerate(("clock", "weather", "spotify", "news")):
+        ddb.set_app("desk", name, enabled=True, sort_order=idx)
+
+    dm = DisplayManager(FakeBackend(), app_db=adb, device_id="desk", device_db=ddb)
+    monkeypatch.setattr(dm, "_check_show_now", lambda: adb.get(show_now) if show_now else None)
+    monkeypatch.setattr(dm, "_check_notifications", lambda: None)
+    monkeypatch.setattr(manager_mod, "PlaylistDatabase", lambda: type(
+        "Playlist", (), {"get_active_playlist": lambda self: {"name": "Scheduled", "app_names": ["clock"]}},
+    )())
+
+    class Played(Exception):
+        pass
+
+    def display(app, interval):
+        assert app.name == expected
+        raise Played
+
+    monkeypatch.setattr(dm, "_display_app", display)
+    with pytest.raises(Played):
+        dm.run()
+
+
 def test_spectrogram_bar_width_controls_live_band_count():
     assert manager_mod._audio_band_count("spectrogram", {"bar_width": "2"}) == 32
     assert manager_mod._audio_band_count("spectrogram", {"bar_width": "1"}) == 64

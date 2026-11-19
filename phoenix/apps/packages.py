@@ -1,4 +1,4 @@
-"""Package deliveries from BuildingLink via MQTT. Only renders when packages are pending."""
+"""Package deliveries via MQTT. Only renders when packages are pending."""
 
 import json
 import logging
@@ -14,23 +14,43 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-STATE_TOPIC = "buildinglink/deliveries/state"
-ATTRIBUTES_TOPIC = "buildinglink/deliveries/attributes"
+DEFAULT_STATE_TOPIC = "home/deliveries/state"
+DEFAULT_ATTRIBUTES_TOPIC = "home/deliveries/attributes"
+
+SETTINGS_SCHEMA = [
+    {
+        "id": "state_topic",
+        "name": "State MQTT Topic",
+        "desc": "MQTT topic publishing the pending package count (integer payload).",
+        "type": "text",
+        "default": DEFAULT_STATE_TOPIC,
+    },
+    {
+        "id": "attributes_topic",
+        "name": "Attributes MQTT Topic",
+        "desc": "MQTT topic publishing JSON delivery details with a 'deliveries' list.",
+        "type": "text",
+        "default": DEFAULT_ATTRIBUTES_TOPIC,
+    },
+]
 
 
 def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
     ensure_dirs()
 
+    state_topic = (config.get("state_topic") or "").strip() or DEFAULT_STATE_TOPIC
+    attributes_topic = (config.get("attributes_topic") or "").strip() or DEFAULT_ATTRIBUTES_TOPIC
+
     # Ensure we're subscribed to the topics
     try:
         client = get_mqtt_client(settings)
-        client.subscribe(STATE_TOPIC)
-        client.subscribe(ATTRIBUTES_TOPIC)
+        client.subscribe(state_topic)
+        client.subscribe(attributes_topic)
     except Exception:
         pass
 
     # Read last state
-    state_msg = get_message(STATE_TOPIC)
+    state_msg = get_message(state_topic)
     count = 0
     if state_msg:
         try:
@@ -47,7 +67,7 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         return
 
     # Read delivery details
-    attrs = get_message(ATTRIBUTES_TOPIC)
+    attrs = get_message(attributes_topic)
     deliveries = []
     if attrs and isinstance(attrs, dict):
         deliveries = attrs.get("deliveries", [])

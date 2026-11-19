@@ -158,6 +158,14 @@ export const useMatrixStore = defineStore('matrix', () => {
     config.value = await api.setConfig({ layout_mode: value }, activeDevice.value)
   }
 
+  async function setSingleApp(name: string | null): Promise<void> {
+    const device = activeDevice.value
+    const updated = await api.setConfig({ single_app: name }, device)
+    if (activeDevice.value !== device) return
+    config.value = updated
+    if (nodeSync.value === 'synced') nodeSync.value = 'pending'
+  }
+
   async function setCycleInterval(value: number): Promise<void> {
     config.value = await api.setConfig({ cycle_interval: Math.max(1, value) }, activeDevice.value)
   }
@@ -190,6 +198,6 @@ export const useMatrixStore = defineStore('matrix', () => {
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
     loadDevices, setActiveDevice,
-    setBrightness, setLayoutMode, setCycleInterval, toggle, setPriority, showNow,
+    setBrightness, setLayoutMode, setSingleApp, setCycleInterval, toggle, setPriority, showNow,
   }
 })

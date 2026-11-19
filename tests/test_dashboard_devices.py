@@ -12,15 +12,16 @@ from fastapi.testclient import TestClient
 def client(tmp_path, monkeypatch):
     import phoenix.db as db_mod
     import phoenix.paths as paths_mod
+    from phoenix.server import dashboard
+    from phoenix.settings import Settings
 
     monkeypatch.setattr(db_mod, "DB_PATH", tmp_path / "dash.db")
     data_dir = tmp_path / "data"
     (data_dir / "output").mkdir(parents=True)
     monkeypatch.setattr(paths_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(dashboard, "get_settings", lambda: Settings(_env_file=None, platform="web"))
 
-    from phoenix.server.dashboard import create_app
-
-    return TestClient(create_app())
+    return TestClient(dashboard.create_app())
 
 
 def test_seed_exposes_main_device(client):
@@ -75,6 +76,29 @@ def test_per_device_config_and_priority(client):
     assert row["name"] == "clock" and row["priority"] == 3
 
 
+def test_single_app_is_scoped_to_an_eligible_rotation_member(client):
+    for device in ("desk", "shelf"):
+        client.post("/api/devices", json={"id": device, "name": device})
+    for name in ("clock", "pixel_planet"):
+        client.post(f"/api/apps/{name}/add")
+        client.post(f"/api/apps/{name}/add", params={"device": "desk"})
+    desk = {"device": "desk"}
+
+    assert client.get("/api/config", params=desk).json()["single_app"] is None
+    assert client.put("/api/config", params=desk, json={
+        "layout_mode": "single", "single_app": "pixel_planet",
+    }).json()["single_app"] == "pixel_planet"
+    assert client.get("/api/config", params={"device": "shelf"}).json()["single_app"] is None
+    assert client.put("/api/devices/shelf", json={"single_app": "pixel_planet"}).status_code == 422
+
+    client.post("/api/apps/clock/disable", params=desk)
+    assert client.put("/api/config", params=desk, json={"single_app": "clock"}).status_code == 422
+    assert client.put("/api/config", params=desk, json={"layout_mode": "cycle"}).json()[
+        "single_app"
+    ] == "pixel_planet"
+    assert client.put("/api/devices/desk", json={"single_app": None}).json()["single_app"] is None
+
+
 def test_panel_brightness_schedule_persists_without_changing_fallback(client):
     from datetime import datetime, timezone
 
@@ -119,6 +143,33 @@ def test_panel_brightness_schedule_persists_without_changing_fallback(client):
     assert client.put(endpoint, json=schedule).status_code == 404
     client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
     assert client.get("/api/devices/apollo").json()["brightness_schedule"] == default
+
+
+def test_panel_controls_report_live_night_mode_phase(client, monkeypatch):
+    from datetime import datetime, timezone
+
+    from phoenix.models import DisplaySettings
+
+    local = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(DisplaySettings, "local_time", lambda self, now=None: local)
+    client.post("/api/devices", json={"id": "desk", "name": "Desk", "backend": "serial", "brightness": 200})
+    path = "/api/config?device=desk"
+    key = "brightness_schedule_status"
+    assert client.get(path).json()[key] == "daytime"
+    with client.websocket_connect("/ws/state?device=desk") as socket:
+        assert socket.receive_json()["config"][key] == "daytime"
+        local = local.replace(hour=20)
+        assert socket.receive_json()["config"][key] == "dimmed"
+        local = local.replace(hour=3)
+        off = socket.receive_json()["config"]
+        assert off[key] == "off"
+        assert off["brightness"] == 200
+
+    schedule = "/api/devices/desk/brightness-schedule"
+    client.put(schedule, json={"enabled": False, "mode": "night"})
+    assert client.get(path).json()[key] is None
+    client.put(schedule, json={"enabled": True, "mode": "custom", "steps": [{"time": "20:00", "brightness": 80}]})
+    assert client.get(path).json()[key] == "custom"
 
 
 def test_content_mode_toggle(client):
@@ -300,30 +351,30 @@ def test_controller_health_reports_paired_player_instead_of_local_m4(client, mon
     from phoenix.server import dashboard
     from phoenix.settings import Settings
 
-    settings = Settings(platform="web", node_device="aurora", node_url="https://aurora.local")
+    settings = Settings(_env_file=None, platform="web", node_device="desk", node_url="https://desk.local")
     publisher = NodePublisher(settings)
     publisher.report = NodeStatus(revision="test")
     publisher.pending = False
-    DeviceDatabase().create("aurora", "Aurora", "serial")
+    DeviceDatabase().create("desk", "Desk", "serial")
     monkeypatch.setattr(dashboard, "get_settings", lambda: settings)
     monkeypatch.setattr(dashboard, "NodePublisher", lambda _: publisher)
     dashboard_client = TestClient(dashboard.create_app())
 
     health = dashboard_client.get("/api/status").json()
-    assert health["player"] == {"name": "Aurora", "status": "synced"}
+    assert health["player"] == {"name": "Desk", "status": "synced"}
     assert "m4" not in health
     assert not any("M4" in issue for issue in health["issues"])
 
     publisher.pending = True
     health = dashboard_client.get("/api/status").json()
     assert health["player"]["status"] == "pending"
-    assert "Aurora player offline" not in health["issues"]
+    assert "Desk player offline" not in health["issues"]
 
     publisher.report = None
     health = dashboard_client.get("/api/status").json()
     assert health["player"]["status"] == "offline"
     assert health["status"] == "degraded"
-    assert "Aurora player offline" in health["issues"]
+    assert "Desk player offline" in health["issues"]
 
 
 def test_store_catalog_failure_returns_actionable_error(client, monkeypatch):
@@ -356,3 +407,11 @@ def test_preview_uses_the_saved_app_config(client, monkeypatch):
     assert client.get("/api/apps/pixel_planet/schema").json() == []
     assert client.post("/api/apps/procedural_planet/preview").status_code == 200
     assert seen == [config]
+
+
+def test_landscape_is_discovered_with_settings(client):
+    response = client.post("/api/apps/procedural_landscape/add")
+    assert response.status_code == 200
+    fields = client.get("/api/apps/procedural_landscape/schema").json()
+    assert {field["id"] for field in fields} == {"palette", "seed"}
+    assert {option["value"] for option in fields[0]["options"]} == {"dusk", "alpine", "alien"}

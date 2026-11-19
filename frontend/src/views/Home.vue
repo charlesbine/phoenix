@@ -14,12 +14,24 @@ const { rotation, config, nowPlaying, nowPlayingLive, nodeSync, online, tick, no
   storeToRefs(store)
 
 const showDisabled = ref(false)
+const singleAppSaving = ref(false)
+const singleAppError = ref<string | null>(null)
 const health = ref<Health | null>(null)
 const healthError = ref<string | null>(null)
 let healthTimer: number | null = null
 const layoutModes: Config['layout_mode'][] = ['cycle', 'random', 'single']
+const scheduleLabels = {
+  daytime: 'Night Mode enabled',
+  dimmed: 'Night Mode dimming',
+  off: 'Night Mode · panel off',
+  custom: 'Custom schedule',
+}
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
+)
+const singleAppOptions = computed(() => rotation.value.filter((app) => app.enabled && app.active))
+const singleAppValue = computed(() =>
+  singleAppOptions.value.some((app) => app.name === config.value?.single_app) ? config.value?.single_app : '',
 )
 const previewLive = computed(() => selectedApp.value?.is_live ?? (following.value && nowPlayingLive.value))
 const healthStatus = computed(() => health.value?.status ?? (healthError.value ? 'offline' : 'checking'))
@@ -35,6 +47,20 @@ async function refreshHealth(): Promise<void> {
     healthError.value = null
   } catch (e) {
     healthError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function changeSingleApp(event: Event): Promise<void> {
+  const select = event.target as HTMLSelectElement
+  singleAppSaving.value = true
+  singleAppError.value = null
+  try {
+    await store.setSingleApp(select.value || null)
+  } catch (error) {
+    select.value = singleAppValue.value ?? ''
+    singleAppError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    singleAppSaving.value = false
   }
 }
 
@@ -151,17 +177,17 @@ onUnmounted(() => {
             <span class="text-muted">{{ store.activeDeviceObj?.name ?? store.activeDevice }}</span>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_7rem]">
+          <div class="grid gap-3 sm:grid-cols-[minmax(9.5rem,1fr)_minmax(0,8rem)_minmax(0,7rem)]">
             <div>
               <BrightnessSlider :value="config.brightness" @commit="store.setBrightness" />
               <RouterLink
-                v-if="store.activeDeviceObj?.brightness_schedule?.enabled"
+                v-if="config.brightness_schedule_status"
                 to="/devices"
-                class="mt-1 inline-block text-[11px] text-gold underline"
+                class="mt-1 inline-block whitespace-nowrap text-[11px] text-gold underline"
+                :title="config.brightness_schedule_status === 'custom'
+                  ? 'Slider sets the fallback brightness' : 'Slider sets daytime brightness'"
               >
-                {{ store.activeDeviceObj?.brightness_schedule?.mode === 'night'
-                  ? 'Night Mode active · slider sets daytime brightness'
-                  : 'Custom schedule active · slider sets the fallback' }}
+                {{ scheduleLabels[config.brightness_schedule_status] }}
               </RouterLink>
             </div>
 
@@ -187,6 +213,23 @@ onUnmounted(() => {
                 @change="store.setCycleInterval(Number(($event.target as HTMLInputElement).value))"
               />
             </label>
+          </div>
+          <div v-if="config.layout_mode === 'single'" class="mt-3">
+            <label class="block font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+              Single app
+              <select
+                :value="singleAppValue"
+                :disabled="singleAppSaving || !singleAppOptions.length"
+                class="mt-2 w-full rounded border border-[#3a2016] bg-[#120a10] px-2 py-1.5 text-xs text-gold focus:border-flame focus:outline-none disabled:opacity-60"
+                @change="changeSingleApp"
+              >
+                <option value="">{{ singleAppOptions.length ? 'First available app' : 'No eligible apps' }}</option>
+                <option v-for="app in singleAppOptions" :key="app.name" :value="app.name">
+                  {{ app.name.replaceAll('_', ' ') }}
+                </option>
+              </select>
+            </label>
+            <p v-if="singleAppError" role="alert" class="mt-1 text-xs text-gold">{{ singleAppError }}</p>
           </div>
         </div>
         <div>

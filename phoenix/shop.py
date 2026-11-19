@@ -1,4 +1,4 @@
-"""Community app browsing and importing from metaember/phoenix-apps."""
+"""Community app browsing and importing from charlesbine/phoenix-apps."""
 
 import logging
 import shutil
@@ -12,7 +12,7 @@ import yaml  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
-COMMUNITY_REPO = "https://github.com/metaember/phoenix-apps.git"
+COMMUNITY_REPO = "https://github.com/charlesbine/phoenix-apps.git"
 _repo_lock = Lock()
 
 

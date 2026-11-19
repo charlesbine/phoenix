@@ -1,0 +1,38 @@
+# Split controller ("brain") — runs the dashboard and renderer without an
+# attached display. Pair with a native `phoenix node` serial player or WLED
+# panels on your LAN. See docs/deployment.md for full setup instructions.
+
+services:
+  phoenix:
+    build: ../..
+    image: phoenix:local
+    environment:
+      PHOENIX_SERVICES: "dashboard render"
+      PHOENIX_PLATFORM: web
+      PHOENIX_RENDER_WORKERS: "1"
+      PHOENIX_DB_PATH: /var/lib/phoenix/phoenix.db
+      # Optional: pair a remote serial display node over private HTTPS
+      # PHOENIX_NODE_DEVICE: desk
+      # PHOENIX_NODE_URL: https://192.168.1.50:7443
+      # PHOENIX_NODE_TOKEN_FILE: /run/secrets/phoenix_node_token
+      # PHOENIX_NODE_CA_FILE: /run/secrets/phoenix_node_ca.crt
+    volumes:
+      - phoenix-state:/var/lib/phoenix
+      - phoenix-data:/app/phoenix/data
+      - phoenix-outputs:/app/phoenix/outputs
+      # Mount read-only secrets if pairing a serial node:
+      # - ./secrets/node_token:/run/secrets/phoenix_node_token:ro
+      # - ./secrets/node_ca.crt:/run/secrets/phoenix_node_ca.crt:ro
+    ports:
+      - "127.0.0.1:7002:7002"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  phoenix-state:
+  phoenix-data:
+  phoenix-outputs:
