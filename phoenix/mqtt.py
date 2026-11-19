@@ -15,12 +15,12 @@ from typing import Iterator
 
 import paho.mqtt.client as mqtt
 
-from phoenix.paths import PACKAGE_DIR
+from phoenix.paths import DB_PATH
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-MQTT_DB = PACKAGE_DIR / "phoenix.db"  # share the main DB
+MQTT_DB = DB_PATH  # share the main DB
 
 _MQTT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS mqtt_messages (

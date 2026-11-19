@@ -21,11 +21,11 @@ from urllib.parse import urljoin
 
 import httpx
 
-from phoenix.paths import PACKAGE_DIR
+from phoenix.paths import DB_PATH
 
 logger = logging.getLogger(__name__)
 
-CACHE_DB = PACKAGE_DIR / "cache.db"
+CACHE_DB = DB_PATH.parent / "cache.db"
 DEFAULT_TTL = 300  # 5 minutes
 MAX_REDIRECTS = 5
 
