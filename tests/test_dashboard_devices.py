@@ -410,8 +410,20 @@ def test_preview_uses_the_saved_app_config(client, monkeypatch):
 
 
 def test_landscape_is_discovered_with_settings(client):
+    from phoenix.apps import procedural_landscape as landscape
+
     response = client.post("/api/apps/procedural_landscape/add")
     assert response.status_code == 200
     fields = client.get("/api/apps/procedural_landscape/schema").json()
-    assert {field["id"] for field in fields} == {"palette", "seed"}
-    assert {option["value"] for option in fields[0]["options"]} == {"dusk", "alpine", "alien"}
+    by_id = {field["id"]: field for field in fields}
+    assert set(by_id) == {"palette", "terrain", "seed"}
+    assert by_id["palette"]["default"] == "auto"
+    assert {option["value"] for option in by_id["palette"]["options"]} == {
+        "auto",
+        *landscape.PALETTES,
+    }
+    assert by_id["terrain"]["default"] == "auto"
+    assert {option["value"] for option in by_id["terrain"]["options"]} == {
+        "auto",
+        *landscape.TERRAINS,
+    }

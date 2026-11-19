@@ -35,7 +35,7 @@ Tidbyt proved how delightful a glanceable pixel-art desk display can be, and [Pi
 - **Multi-Panel Fleet** — Drive WLED panels over LAN DDP and Matrix Portal M4 panels over USB serial from one controller. Each panel keeps its own rotation, layout mode (`cycle`, `random`, `single`), brightness schedule, or mirrors another panel.
 - **Live 60 FPS Audio Visualizer** — Real-time FFT spectrum (`bars`, `vu`, `spectrogram`) with selectable palettes (`Hue heat`, `Fire`, `Ice`, `Aurora`, `Mono`) driven by a USB mic or audio loopback.
 - **Solar-Aware Night Mode** — Automatically dims panels to 25% between sunset and sunrise and powers them off overnight (or follows your custom schedule), persisted locally on paired display nodes so schedules keep working even during server outages.
-- **Procedural Pixel Art Built In** — Seamless looping **Procedural Landscape** (Dusk, Alpine, Alien palettes), continuously rotating **Procedural Planet**, animated **Christmas Countdown**, **Home Climate**, **Spotify Now Playing**, and **MQTT Package Alerts**.
+- **Procedural Pixel Art Built In** — Seamless looping **Procedural Landscape** (12 palettes × 5 terrain archetypes with aurora, synthwave sun, ringed planets, and molten lava worlds), continuously rotating **Procedural Planet**, animated **Christmas Countdown**, **Home Climate**, **Spotify Now Playing**, and **MQTT Package Alerts**.
 - **Home Assistant & MQTT Native** — Auto-discovers as a dimmable light in Home Assistant with effect/app switching, pulls live media now-playing, and supports instant MQTT interrupt notifications.
 - **6-Bit sRGB Color & Hardware OE Dimming (M4)** — Custom Matrix Portal M4 firmware with sRGB-to-linear LUTs and hardware `TCC0` OE pulse brightness modulation so low-brightness night frames stay smooth and color-accurate.
 
@@ -137,7 +137,7 @@ Phoenix supports four applet types out of the box:
 
 1. **Starlark (`.star`)** — Drop any Tidbyt/Pixlet-compatible `.star` file into `phoenix/apps/` (or import from the **Store** tab). Starlark `get_schema()` fields automatically appear in the dashboard settings UI.
 2. **Python (`.py`)** — Full Pillow/Python rendering with zero sandbox limits. Built-in Python apps include:
-   - `procedural_landscape` — Seamless 12-second looping pixel terrain flyover (`dusk`, `alpine`, `alien` palettes)
+   - `procedural_landscape` — Seamless 12-second looping anti-aliased generative terrain flyover (12 LED-tuned palettes × 5 terrain archetypes, `auto` random worlds)
    - `procedural_planet` — Continuously rotating procedural planets with bounded smooth animation timing
    - `christmas_countdown` — Animated snowfall, sleigh, gift-pop, and shooting-star interludes
    - `home_climate` — Multi-room temperature & humidity dashboard from configurable Home Assistant sensors
