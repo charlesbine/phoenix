@@ -1,12 +1,14 @@
 """FastAPI dashboard — JSON API + static SPA frontend."""
 
 import asyncio
+import ipaddress
 import json
 import logging
+import socket
 import subprocess
 import humanize
 from datetime import datetime
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -38,6 +40,53 @@ from phoenix.service import PhoenixService
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_HOST_SUFFIXES = (".local", ".localhost", ".internal", ".home.arpa")
+_MAX_PROXY_TTL = 86400
+
+
+def _is_public_ip(addr: str) -> bool:
+    ip = ipaddress.ip_address(addr)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def validate_proxy_url(url: str, allowed_hosts: str = "") -> None:
+    """Reject non-HTTP(S) URLs, private/link-local/loopback targets, and non-allowlisted hosts."""
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Proxy only allows http and https URLs")
+    if parsed.username or parsed.password:
+        raise ValueError("Proxy URLs must not include credentials")
+    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not hostname:
+        raise ValueError("Proxy URL requires a hostname")
+    if hostname == "localhost" or hostname.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise ValueError("Proxy target host is not allowed")
+
+    allowlist = {h.strip().lower().rstrip(".") for h in allowed_hosts.split(",") if h.strip()}
+    if allowlist and hostname not in allowlist:
+        raise ValueError("Proxy target host is not in proxy_allowed_hosts")
+
+    try:
+        if not _is_public_ip(hostname):
+            raise ValueError("Proxy target IP must be publicly routable")
+        return
+    except ValueError as exc:
+        if "publicly routable" in str(exc):
+            raise
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Unable to resolve proxy target host") from exc
+    if not infos:
+        raise ValueError("Unable to resolve proxy target host")
+    for info in infos:
+        if not _is_public_ip(info[4][0]):
+            raise ValueError("Proxy target resolves to a non-public IP address")
 
 
 def create_app() -> FastAPI:
@@ -382,6 +431,18 @@ def create_app() -> FastAPI:
             return SETTINGS_SCHEMA
         if name == "procedural_planet":
             from phoenix.apps.procedural_planet import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "home_climate":
+            from phoenix.apps.home_climate import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "packages":
+            from phoenix.apps.packages import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
+        if name == "spotify":
+            from phoenix.apps.spotify import SETTINGS_SCHEMA
 
             return SETTINGS_SCHEMA
         from phoenix.paths import star_path
@@ -904,14 +965,23 @@ def create_app() -> FastAPI:
     @app.get("/proxy")
     async def proxy(
         url: str = Query(..., description="URL to fetch"),
-        ttl: int = Query(300, description="Cache TTL in seconds"),
+        ttl: int = Query(300, ge=0, le=_MAX_PROXY_TTL, description="Cache TTL in seconds"),
     ):
-        url = unquote(url)
+        target = unquote(url)
+        allowed_hosts = settings.proxy_allowed_hosts
+        validate = lambda candidate: validate_proxy_url(candidate, allowed_hosts)
         try:
-            status_code, body, content_type = cache_get(url, ttl)
+            validate(target)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            status_code, body, content_type = cache_get(target, ttl, validate_url=validate)
             return Response(content=body, status_code=status_code, media_type=content_type)
-        except Exception as e:
-            return Response(content=str(e).encode(), status_code=502)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception:
+            logger.warning("[proxy] Upstream fetch failed for %s", target)
+            return Response(content=b"Upstream fetch failed", status_code=502)
 
     @app.get("/api/cache/stats")
     async def cache_stats():

@@ -13,19 +13,57 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-SENSORS = {
-    "Office": "sensor.office_env_temperature",
-    "Bedroom": "sensor.bedroom_env_temperature_2",
-    "Bathroom": "sensor.bathroom_env_temperature",
-    "Server": "sensor.server_closet_temp_temperature",
+DEFAULT_SENSORS = {
+    "Living": "sensor.living_room_temperature",
+    "Bedroom": "sensor.bedroom_temperature",
+    "Office": "sensor.office_temperature",
+    "Kitchen": "sensor.kitchen_temperature",
 }
 
-HUMIDITY_SENSORS = {
-    "Office": "sensor.office_env_humidity",
-    "Bedroom": "sensor.bedroom_env_humidity_2",
-    "Bathroom": "sensor.bathroom_env_humidity",
-    "Server": "sensor.server_closet_temp_humidity",
+DEFAULT_HUMIDITY_SENSORS = {
+    "Living": "sensor.living_room_humidity",
+    "Bedroom": "sensor.bedroom_humidity",
+    "Office": "sensor.office_humidity",
+    "Kitchen": "sensor.kitchen_humidity",
 }
+
+SETTINGS_SCHEMA = [
+    {
+        "id": "temperature_sensors",
+        "name": "Temperature Sensors",
+        "desc": "Comma-separated Label=entity_id pairs (e.g. Living=sensor.living_room_temperature, Office=sensor.office_temperature).",
+        "type": "text",
+        "default": ", ".join(f"{k}={v}" for k, v in DEFAULT_SENSORS.items()),
+    },
+    {
+        "id": "humidity_sensors",
+        "name": "Humidity Sensors",
+        "desc": "Comma-separated Label=entity_id pairs (e.g. Living=sensor.living_room_humidity, Office=sensor.office_humidity).",
+        "type": "text",
+        "default": ", ".join(f"{k}={v}" for k, v in DEFAULT_HUMIDITY_SENSORS.items()),
+    },
+]
+
+
+def _parse_sensor_map(raw: str | None, fallback: dict[str, str]) -> dict[str, str]:
+    text = (raw or "").strip()
+    if not text:
+        return dict(fallback)
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return {str(k).strip(): str(v).strip() for k, v in parsed.items() if str(k).strip() and str(v).strip()}
+        except json.JSONDecodeError:
+            pass
+    sensors: dict[str, str] = {}
+    for entry in text.split(","):
+        if "=" in entry:
+            label, entity_id = entry.split("=", 1)
+            label, entity_id = label.strip(), entity_id.strip()
+            if label and entity_id:
+                sensors[label] = entity_id
+    return sensors or dict(fallback)
 
 
 def _fetch_entity(entity_id: str, settings: Settings) -> dict:
@@ -45,9 +83,12 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         raise ValueError("Home climate needs a configured Home Assistant connection")
     ensure_dirs()
 
+    temp_sensors = _parse_sensor_map(config.get("temperature_sensors"), DEFAULT_SENSORS)
+    humidity_sensors = _parse_sensor_map(config.get("humidity_sensors"), DEFAULT_HUMIDITY_SENSORS)
+
     # Fetch all sensors
     temps = {}
-    for name, entity in SENSORS.items():
+    for name, entity in temp_sensors.items():
         data = _fetch_entity(entity, settings)
         state = data.get("state", "—")
         try:
@@ -56,7 +97,7 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
             temps[name] = state
 
     humidities = {}
-    for name, entity in HUMIDITY_SENSORS.items():
+    for name, entity in humidity_sensors.items():
         data = _fetch_entity(entity, settings)
         state = data.get("state", "—")
         try:

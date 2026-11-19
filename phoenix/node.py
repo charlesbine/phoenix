@@ -1,4 +1,4 @@
-"""Push Aurora's playback state from the dashboard to its local USB player."""
+"""Push a paired serial display's playback state from the dashboard to its local USB player."""
 
 import hashlib
 import logging

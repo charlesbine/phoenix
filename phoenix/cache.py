@@ -13,8 +13,10 @@ import hashlib
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Iterator
+from urllib.parse import urljoin
 
 import httpx
 
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_DB = PACKAGE_DIR / "cache.db"
 DEFAULT_TTL = 300  # 5 minutes
+MAX_REDIRECTS = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS http_cache (
@@ -60,8 +63,35 @@ def _url_hash(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:32]
 
 
-def cache_get(url: str, ttl: int = DEFAULT_TTL, headers: dict[str, str] | None = None) -> tuple[int, bytes, str]:
+def _fetch_with_validation(
+    url: str,
+    headers: dict[str, str],
+    validate_url: Callable[[str], None],
+) -> httpx.Response:
+    """Follow redirects manually so every hop is re-validated against SSRF rules."""
+    current = url
+    with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            validate_url(current)
+            resp = client.get(current, headers=headers)
+            if resp.is_redirect and resp.headers.get("location"):
+                current = urljoin(current, resp.headers["location"])
+                continue
+            return resp
+    raise ValueError("Too many redirects")
+
+
+def cache_get(
+    url: str,
+    ttl: int = DEFAULT_TTL,
+    headers: dict[str, str] | None = None,
+    *,
+    validate_url: Callable[[str], None] | None = None,
+) -> tuple[int, bytes, str]:
     """Fetch a URL through the cache. Returns (status_code, body, content_type)."""
+    if validate_url is not None:
+        validate_url(url)
+
     now = time.time()
     # Include headers in cache key so different auth tokens get separate cache entries
     h = _url_hash(url + (str(sorted(headers.items())) if headers else ""))
@@ -78,12 +108,17 @@ def cache_get(url: str, ttl: int = DEFAULT_TTL, headers: dict[str, str] | None =
 
     # Cache miss or stale — try to fetch fresh
     try:
-        with httpx.Client(timeout=15, follow_redirects=True) as client:
-            resp = client.get(url, headers=headers or {})
+        if validate_url is not None:
+            resp = _fetch_with_validation(url, headers or {}, validate_url)
+        else:
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                resp = client.get(url, headers=headers or {})
         content_type = resp.headers.get("content-type", "application/octet-stream")
         _store(h, url, resp.status_code, resp.content, content_type, ttl)
         logger.debug("[cache] MISS — fetched fresh %s (%d)", url, resp.status_code)
         return resp.status_code, resp.content, content_type
+    except ValueError:
+        raise
     except Exception:
         if row:
             logger.warning("[cache] Fetch failed, serving stale for %s", url)

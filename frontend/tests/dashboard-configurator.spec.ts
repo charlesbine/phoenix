@@ -13,7 +13,7 @@ test('Home settings save and render the selected app while preserving custom key
     .find((row: { name: string }) => row.name === app)
   await request.delete(`/api/devices/${id}`)
   expect((await request.post('/api/devices', {
-    data: { id, name: 'Aurora Test Panel', backend: 'web' },
+    data: { id, name: 'Desk Test Panel', backend: 'web' },
   })).ok()).toBe(true)
 
   try {
@@ -28,19 +28,19 @@ test('Home settings save and render the selected app while preserving custom key
     let playerStatus = 'synced'
     await page.route('**/api/status', (route) => route.fulfill({ json: {
       status: playerStatus === 'offline' ? 'degraded' : 'ok',
-      issues: playerStatus === 'offline' ? ['Aurora player offline'] : [],
-      player: { name: 'Aurora', status: playerStatus },
+      issues: playerStatus === 'offline' ? ['Desk player offline'] : [],
+      player: { name: 'Desk', status: playerStatus },
     } }))
     await page.addInitScript((device) => localStorage.setItem('phoenix.activeDevice', device), id)
     await page.goto('/')
     await expect(page).toHaveTitle(/Phoenix/)
-    await expect(page.getByText('Aurora · synced', { exact: true })).toBeVisible()
+    await expect(page.getByText('Desk · synced', { exact: true })).toBeVisible()
     playerStatus = 'offline'
     await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-    await expect(page.getByText('Aurora player offline', { exact: true })).toBeVisible()
+    await expect(page.getByText('Desk player offline', { exact: true })).toBeVisible()
     playerStatus = 'synced'
     await page.getByRole('button', { name: 'Refresh', exact: true }).click()
-    await expect(page.getByText('Aurora · synced', { exact: true })).toBeVisible()
+    await expect(page.getByText('Desk · synced', { exact: true })).toBeVisible()
 
     await page.getByRole('button', { name: app, exact: true }).click()
     await page.getByText('Settings', { exact: true }).click()

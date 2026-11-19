@@ -1,13 +1,13 @@
 [Unit]
-Description=Phoenix Display (serial frame streaming to M4)
+Description=Phoenix Display (frame streaming to LED panel)
 After=phoenix-dashboard.service
 Requires=phoenix-dashboard.service
 
 [Service]
 Type=simple
-User=charles
-WorkingDirectory=/home/charles/phoenix
-ExecStart=/home/charles/.local/bin/uv run phoenix display
+User=__PHOENIX_USER__
+WorkingDirectory=__PHOENIX_DIR__
+ExecStart=__PHOENIX_UV__ run phoenix display
 Nice=-5
 Restart=always
 RestartSec=3

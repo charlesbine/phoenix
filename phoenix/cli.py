@@ -395,7 +395,7 @@ def play(
 ):
     """Stream an image or animated GIF/WebP to the WLED panel (host-decoded, looped).
 
-        phoenix play cat.gif --ip 192.168.1.166
+        phoenix play cat.gif --ip 192.168.1.100
     """
     from pathlib import Path
 
@@ -432,7 +432,7 @@ def nowplaying(
 ):
     """Stream a live now-playing card (album art + scrolling title + progress) to the panel.
 
-        phoenix nowplaying --ip 192.168.1.166
+        phoenix nowplaying --ip 192.168.1.100
     """
     import time
 

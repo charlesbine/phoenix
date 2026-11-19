@@ -22,13 +22,21 @@ from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-MEDIA_PLAYER_ENTITIES = [
-    "media_player.spotify_charlesbine",
-    "media_player.unnamed_room",
+DEFAULT_MEDIA_PLAYERS = [
+    "media_player.spotify",
     "media_player.living_room",
     "media_player.bedroom",
-    "media_player.bathroom",
     "media_player.kitchen",
+]
+
+SETTINGS_SCHEMA = [
+    {
+        "id": "entities",
+        "name": "Media Player Entities",
+        "desc": "Comma-separated Home Assistant media_player entity IDs. Leave blank to auto-detect any playing media_player.",
+        "type": "text",
+        "default": "",
+    },
 ]
 
 
@@ -44,8 +52,40 @@ def _fetch_entity(entity_id: str, settings: Settings) -> dict:
     return {}
 
 
-def _find_playing(settings: Settings) -> dict | None:
-    for entity_id in MEDIA_PLAYER_ENTITIES:
+def _parse_entities(config: dict[str, str], settings: Settings) -> list[str]:
+    raw = config.get("entities", "").strip()
+    if raw:
+        return [e.strip() for e in raw.split(",") if e.strip()]
+    if settings.ha_media_player.strip():
+        return [e.strip() for e in settings.ha_media_player.split(",") if e.strip()]
+    return []
+
+
+def _find_playing(settings: Settings, config: dict[str, str]) -> dict | None:
+    entities = _parse_entities(config, settings)
+    for entity_id in entities:
+        data = _fetch_entity(entity_id, settings)
+        if data.get("state") == "playing":
+            return data
+    if entities:
+        return None
+
+    # Auto-detect any playing media_player entity from Home Assistant.
+    url = f"{settings.ha_url.rstrip('/')}/api/states"
+    headers = {"Authorization": f"Bearer {settings.ha_token}"}
+    try:
+        status, body, _ = cache_get(url, ttl=15, headers=headers)
+        if status == 200:
+            for item in json.loads(body):
+                eid = item.get("entity_id", "")
+                if eid.startswith("media_player.") and item.get("state") == "playing":
+                    attrs = item.get("attributes", {})
+                    if attrs.get("media_title"):
+                        return item
+    except Exception:
+        pass
+
+    for entity_id in DEFAULT_MEDIA_PLAYERS:
         data = _fetch_entity(entity_id, settings)
         if data.get("state") == "playing":
             return data
@@ -78,7 +118,7 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         raise ValueError("Spotify needs a configured Home Assistant connection")
     ensure_dirs()
 
-    player = _find_playing(settings)
+    player = _find_playing(settings, config)
     if player is None:
         for f in [output, output_large]:
             if f.exists():

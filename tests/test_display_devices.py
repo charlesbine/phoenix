@@ -84,11 +84,11 @@ def test_single_mode_uses_selected_app_with_fallback_and_show_now(
     db = str(tmp_path / "t.db")
     adb = _seed_apps(db)
     ddb = DeviceDatabase(db)
-    ddb.create("aurora", "Aurora", "web", layout_mode="single", single_app=pin)
+    ddb.create("desk", "Desk", "web", layout_mode="single", single_app=pin)
     for idx, name in enumerate(("clock", "weather", "spotify", "news")):
-        ddb.set_app("aurora", name, enabled=True, sort_order=idx)
+        ddb.set_app("desk", name, enabled=True, sort_order=idx)
 
-    dm = DisplayManager(FakeBackend(), app_db=adb, device_id="aurora", device_db=ddb)
+    dm = DisplayManager(FakeBackend(), app_db=adb, device_id="desk", device_db=ddb)
     monkeypatch.setattr(dm, "_check_show_now", lambda: adb.get(show_now) if show_now else None)
     monkeypatch.setattr(dm, "_check_notifications", lambda: None)
     monkeypatch.setattr(manager_mod, "PlaylistDatabase", lambda: type(

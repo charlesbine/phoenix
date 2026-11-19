@@ -1,6 +1,6 @@
 # Matrix Portal M4 Firmware
 
-Aurora’s Matrix Portal M4 receives sRGB RGB888 frames over USB serial and drives
+Phoenix’s Matrix Portal M4 firmware receives sRGB RGB888 frames over USB serial and drives
 a 64×64, 1/32-scan HUB75E panel with Protomatter.
 
 The default LUT decodes sRGB to linear intensity for each channel. The firmware
@@ -48,6 +48,6 @@ Other projects can continue using the stock Arduino library.
 Run the color and timing math checks from this directory with a host C++ compiler.
 
 ```bash
-c++ -std=c++11 -Wall -Wextra -Werror ../tests/aurora_color.cpp -o /tmp/aurora-color-test
-/tmp/aurora-color-test
+c++ -std=c++11 -Wall -Wextra -Werror ../tests/panel_color_test.cpp -o /tmp/panel-color-test
+/tmp/panel-color-test
 ```

@@ -1,15 +1,15 @@
-host := "lyra"
-remote_dir := "/home/charles/phoenix"
+host := env("PHOENIX_HOST", "phoenix.local")
+remote_dir := env("PHOENIX_REMOTE_DIR", "~/phoenix")
 
-# Deploy latest code to Lyra and restart services
+# Deploy latest code to remote host and restart services
 deploy:
     ssh {{host}} "export PATH=\"\$HOME/.bun/bin:\$PATH\" && cd {{remote_dir}} && git pull && uv sync && cd frontend && bun install --frozen-lockfile && bun run build && cd .. && sudo systemctl restart phoenix-dashboard phoenix-renderer phoenix-display"
 
-# Check service status on Lyra
+# Check service status on remote host
 status:
     ssh {{host}} "sudo systemctl status phoenix-dashboard phoenix-renderer phoenix-display --no-pager"
 
-# View live logs on Lyra
+# View live logs on remote host
 logs:
     ssh {{host}} "sudo journalctl -u phoenix-dashboard -u phoenix-renderer -u phoenix-display -f"
 
@@ -33,7 +33,7 @@ stop:
 start:
     ssh {{host}} "sudo systemctl start phoenix-dashboard phoenix-renderer phoenix-display"
 
-# SSH into Lyra
+# SSH into remote host
 ssh:
     ssh {{host}}
 

@@ -186,7 +186,7 @@ async function remove(d: Device): Promise<void> {
             <span class="text-dim">{{ d.backend === 'wled' ? 'IP' : 'port' }}</span>
             <input
               :value="d.address"
-              :placeholder="d.backend === 'wled' ? '192.168.1.166' : '/dev/tty…'"
+              :placeholder="d.backend === 'wled' ? '192.168.1.100' : '/dev/tty…'"
               class="w-40 rounded border border-[#3a2016] bg-[#120a10] px-2 py-1 text-right text-gold focus:border-flame focus:outline-none"
               @change="patch(d, { address: ($event.target as HTMLInputElement).value.trim() })"
             />

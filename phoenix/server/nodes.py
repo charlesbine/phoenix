@@ -1,4 +1,4 @@
-"""The paired Aurora player accepts playback state and 64×64 WebPs."""
+"""The paired serial display player accepts playback state and 64×64 WebPs."""
 
 import json
 import re

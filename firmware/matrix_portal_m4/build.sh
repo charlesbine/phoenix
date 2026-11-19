@@ -7,11 +7,11 @@ arduino_user_dir="$(arduino-cli config get directories.user)"
 protomatter="$arduino_user_dir/libraries/Adafruit_Protomatter"
 
 if ! grep -qx 'version=1.7.1' "$protomatter/library.properties" 2>/dev/null; then
-    echo 'Install Adafruit Protomatter@1.7.1 before building Aurora firmware.' >&2
+    echo 'Install Adafruit Protomatter@1.7.1 before building Phoenix M4 firmware.' >&2
     exit 1
 fi
 
-staged="$(mktemp -d "${TMPDIR:-/tmp}/aurora-protomatter.XXXXXX")"
+staged="$(mktemp -d "${TMPDIR:-/tmp}/phoenix-protomatter.XXXXXX")"
 trap 'rm -rf "$staged"' EXIT
 cp -R "$protomatter" "$staged/Adafruit_Protomatter"
 patch --batch --forward --fuzz=0 -d "$staged/Adafruit_Protomatter" -p1 \
