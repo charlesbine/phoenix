@@ -15,6 +15,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import Iterator
 from urllib.parse import urljoin
 
@@ -81,14 +82,29 @@ def _fetch_with_validation(
     raise ValueError("Too many redirects")
 
 
-def cache_get(
+@dataclass(frozen=True)
+class CacheResponse:
+    status_code: int
+    body: bytes
+    content_type: str
+    fetched_at: float
+    from_cache: bool = False
+    stale: bool = False
+    error: str | None = None
+
+    @property
+    def age_seconds(self) -> float:
+        return max(0.0, time.time() - self.fetched_at)
+
+
+def cache_get_meta(
     url: str,
     ttl: int = DEFAULT_TTL,
     headers: dict[str, str] | None = None,
     *,
     validate_url: Callable[[str], None] | None = None,
-) -> tuple[int, bytes, str]:
-    """Fetch a URL through the cache. Returns (status_code, body, content_type)."""
+) -> CacheResponse:
+    """Fetch a URL through the cache with freshness and fallback metadata."""
     if validate_url is not None:
         validate_url(url)
 
@@ -104,7 +120,14 @@ def cache_get(
 
     if row and (now - row["fetched_at"]) < row["ttl"]:
         logger.debug("[cache] HIT (fresh) %s", url)
-        return row["status_code"], row["body"], row["content_type"]
+        return CacheResponse(
+            status_code=row["status_code"],
+            body=row["body"],
+            content_type=row["content_type"],
+            fetched_at=row["fetched_at"],
+            from_cache=True,
+            stale=False,
+        )
 
     # Cache miss or stale — try to fetch fresh
     try:
@@ -114,25 +137,62 @@ def cache_get(
             with httpx.Client(timeout=15, follow_redirects=True) as client:
                 resp = client.get(url, headers=headers or {})
         content_type = resp.headers.get("content-type", "application/octet-stream")
-        _store(h, url, resp.status_code, resp.content, content_type, ttl)
+        fetched_at = time.time()
+        if 200 <= resp.status_code < 300:
+            _store(h, url, resp.status_code, resp.content, content_type, ttl, fetched_at)
         logger.debug("[cache] MISS — fetched fresh %s (%d)", url, resp.status_code)
-        return resp.status_code, resp.content, content_type
+        return CacheResponse(
+            status_code=resp.status_code,
+            body=resp.content,
+            content_type=content_type,
+            fetched_at=fetched_at,
+            from_cache=False,
+            stale=False,
+        )
     except ValueError:
         raise
-    except Exception:
+    except Exception as exc:
         if row:
             logger.warning("[cache] Fetch failed, serving stale for %s", url)
-            return row["status_code"], row["body"], row["content_type"]
+            return CacheResponse(
+                status_code=row["status_code"],
+                body=row["body"],
+                content_type=row["content_type"],
+                fetched_at=row["fetched_at"],
+                from_cache=True,
+                stale=True,
+                error=type(exc).__name__,
+            )
         logger.error("[cache] Fetch failed, no cache for %s", url)
         raise
 
 
-def _store(url_hash: str, url: str, status_code: int, body: bytes, content_type: str, ttl: int) -> None:
+def cache_get(
+    url: str,
+    ttl: int = DEFAULT_TTL,
+    headers: dict[str, str] | None = None,
+    *,
+    validate_url: Callable[[str], None] | None = None,
+) -> tuple[int, bytes, str]:
+    """Fetch a URL through the cache. Returns (status_code, body, content_type)."""
+    res = cache_get_meta(url, ttl, headers=headers, validate_url=validate_url)
+    return res.status_code, res.body, res.content_type
+
+
+def _store(
+    url_hash: str,
+    url: str,
+    status_code: int,
+    body: bytes,
+    content_type: str,
+    ttl: int,
+    fetched_at: float | None = None,
+) -> None:
     with _connect() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO http_cache
                (url_hash, url, status_code, body, content_type, fetched_at, ttl)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (url_hash, url, status_code, body, content_type, time.time(), ttl),
+            (url_hash, url, status_code, body, content_type, fetched_at or time.time(), ttl),
         )
         conn.commit()

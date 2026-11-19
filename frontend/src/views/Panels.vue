@@ -60,12 +60,14 @@ const draft = reactive<{
   layout: PanelLayout
   config: Record<string, unknown>
   data_source: DataSource
+  skip_when_unhealthy: boolean
 }>({
   id: '',
   title: '',
   layout: 'big_number',
   config: {},
   data_source: { type: 'static' },
+  skip_when_unhealthy: false,
 })
 
 const isEditing = computed(() => editingId.value !== null)
@@ -165,6 +167,20 @@ function setSourceValue(key: string, event: Event): void {
 function setSourceNumber(key: string, event: Event, fallback: number): void {
   const parsed = Number(inputValue(event))
   draft.data_source[key] = Number.isFinite(parsed) ? parsed : fallback
+}
+
+function setSourceOptionalNumber(key: string, event: Event): void {
+  const raw = inputValue(event).trim()
+  if (!raw) {
+    delete draft.data_source[key]
+    return
+  }
+  const parsed = Number(raw)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    draft.data_source[key] = parsed
+  } else {
+    delete draft.data_source[key]
+  }
 }
 
 function setConfigValue(key: string, event: Event): void {
@@ -285,6 +301,13 @@ function setSourceType(event: Event): void {
     next.ttl = sourceNumber('ttl', 60)
   }
 
+  if (value !== 'static') {
+    if (previous.stale_after !== undefined) next.stale_after = previous.stale_after
+    if (typeof previous.timestamp_path === 'string' && previous.timestamp_path) {
+      next.timestamp_path = previous.timestamp_path
+    }
+  }
+
   draft.data_source = next
   previewUrl.value = ''
   ensureLayoutDefaults()
@@ -376,6 +399,7 @@ function payload(): Partial<Panel> {
     layout: draft.layout,
     config: cleanConfig(),
     data_source: cleanSource(),
+    skip_when_unhealthy: draft.skip_when_unhealthy,
   }
 }
 
@@ -420,6 +444,7 @@ function resetForm() {
   draft.layout = 'big_number'
   draft.config = {}
   draft.data_source = { type: 'static' }
+  draft.skip_when_unhealthy = false
 }
 
 function editPanel(p: Panel) {
@@ -431,6 +456,7 @@ function editPanel(p: Panel) {
   draft.layout = p.layout
   draft.config = deepClone(p.config ?? {})
   draft.data_source = normalizeDataSource(p.data_source)
+  draft.skip_when_unhealthy = Boolean(p.skip_when_unhealthy)
   ensureLayoutDefaults()
 }
 
@@ -694,6 +720,36 @@ onMounted(load)
               Values are stored directly in this panel.
             </p>
           </template>
+
+          <div v-if="isMappedSource" class="mt-3 grid gap-3 border-t border-[#1c0e14] pt-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="mb-1 block text-[10px] uppercase tracking-[0.18em] text-dim">Stale After (sec)</label>
+                <input
+                  :value="sourceString('stale_after')"
+                  type="number"
+                  min="1"
+                  placeholder="optional (e.g. 900)"
+                  :class="inputClass"
+                  @input="setSourceOptionalNumber('stale_after', $event)"
+                />
+              </div>
+              <div>
+                <label class="mb-1 block text-[10px] uppercase tracking-[0.18em] text-dim">Timestamp Path</label>
+                <input
+                  :value="sourceString('timestamp_path')"
+                  type="text"
+                  placeholder="optional (e.g. updated_at)"
+                  :class="inputClass"
+                  @input="setSourceValue('timestamp_path', $event)"
+                />
+              </div>
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-gold">
+              <input v-model="draft.skip_when_unhealthy" type="checkbox" class="accent-flame" />
+              Skip in rotation when data is down or stale
+            </label>
+          </div>
         </div>
 
         <div class="mt-4 border-t border-[#1c0e14] pt-3">
@@ -1004,19 +1060,46 @@ onMounted(load)
           <div
             v-for="panel in panels"
             :key="panel.id"
-            class="rounded border border-[#3a2016] bg-panel p-3"
-            :class="{ 'border-flame': editingId === panel.id }"
+            class="rounded border bg-panel p-3"
+            :class="editingId === panel.id
+              ? 'border-flame'
+              : panel.health_status === 'unhealthy'
+                ? 'border-[#b3241a]'
+                : 'border-[#3a2016]'"
           >
             <div class="flex items-start justify-between gap-2">
-              <span class="break-all text-sm text-gold">{{ panel.id }}</span>
-              <span class="shrink-0 rounded border border-[#3a2016] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-dim">
-                {{ layoutLabel(panel.layout) }}
+              <span
+                class="break-all text-sm"
+                :class="panel.health_status === 'unhealthy' ? 'text-[#ff8a6a]' : 'text-gold'"
+              >
+                {{ panel.id }}
               </span>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <span
+                  v-if="panel.health_status === 'unhealthy'"
+                  class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#ff6a4a]"
+                >
+                  {{ panel.skipped_unhealthy ? 'down · skip' : 'data down' }}
+                </span>
+                <span class="rounded border border-[#3a2016] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-dim">
+                  {{ layoutLabel(panel.layout) }}
+                </span>
+              </div>
             </div>
             <p class="mt-1 truncate text-xs text-core">{{ panel.title || '-' }}</p>
             <p class="mt-0.5 text-[10px] uppercase tracking-wider text-muted">
               {{ panel.data_source.type ?? 'static' }}
+              <span v-if="panel.skip_when_unhealthy" class="text-dim"> · skip-if-down</span>
             </p>
+            <div
+              v-if="panel.health_status === 'unhealthy'"
+              class="mt-2 rounded border border-[#b3241a]/70 bg-[#1e0a0e] px-2 py-1.5 text-[10px]"
+            >
+              <p class="text-[#ff8a6a]">{{ panel.health_reason || 'Data source unavailable or empty.' }}</p>
+              <p class="mt-0.5 uppercase tracking-[0.12em] text-muted" :title="panel.last_healthy ?? undefined">
+                Last healthy: {{ panel.last_healthy_human || 'never' }}
+              </p>
+            </div>
             <div class="mt-3 flex items-center gap-2">
               <button :class="ghostButtonClass" @click="editPanel(panel)">Edit</button>
               <button

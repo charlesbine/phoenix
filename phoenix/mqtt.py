@@ -69,8 +69,8 @@ def store_message(topic: str, payload: str) -> None:
         conn.commit()
 
 
-def get_message(topic: str) -> dict | None:
-    """Get the last message for a topic. Returns parsed JSON or {"_raw": string}."""
+def get_message_with_meta(topic: str) -> tuple[dict, float] | None:
+    """Get the last message and received_at epoch timestamp for a topic."""
     with _connect() as conn:
         row = conn.execute(
             "SELECT payload, received_at FROM mqtt_messages WHERE topic = ?", (topic,)
@@ -78,9 +78,18 @@ def get_message(topic: str) -> dict | None:
     if row is None:
         return None
     try:
-        return json.loads(row["payload"])
+        parsed = json.loads(row["payload"])
+        if not isinstance(parsed, dict):
+            parsed = {"_raw": parsed}
     except (json.JSONDecodeError, TypeError):
-        return {"_raw": row["payload"]}
+        parsed = {"_raw": row["payload"]}
+    return parsed, float(row["received_at"])
+
+
+def get_message(topic: str) -> dict | None:
+    """Get the last message for a topic. Returns parsed JSON or {"_raw": string}."""
+    entry = get_message_with_meta(topic)
+    return entry[0] if entry is not None else None
 
 
 def push_notification(text: str, color: str = "#FFFFFF", duration: int = 20, layout: str = "marquee") -> None:
@@ -240,7 +249,7 @@ class MQTTClient:
 
         # Update app select entity with current app list
         apps = app_db.list_apps()
-        active_names = [a.name for a in apps if a.enabled and a.active]
+        active_names = [a.name for a in apps if a.enabled and a.active and not a.is_skipped_unhealthy]
         if active_names:
             device = {
                 "identifiers": ["phoenix_display"],

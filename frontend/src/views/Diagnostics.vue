@@ -23,6 +23,7 @@ const renderTimes = computed(() =>
     .slice(0, 12),
 )
 const issues = computed(() => health.value?.issues ?? [])
+const unhealthyApps = computed(() => health.value?.unhealthy_apps ?? [])
 const cacheSummary = computed(() => {
   const entries = cacheEntries.value
   const fresh = entries.filter((entry) => entry.fresh).length
@@ -174,6 +175,41 @@ onUnmounted(() => {
           <div v-if="issues.length" class="mt-3 space-y-1 border-t border-[#1c0e14] pt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#c78a5a]">
             <div v-for="issue in issues" :key="issue">{{ issue }}</div>
           </div>
+        </div>
+
+        <div
+          class="rounded border p-3"
+          :class="unhealthyApps.length ? 'border-[#b3241a] bg-[#1e0a0e]' : 'border-[#3a2016] bg-panel'"
+        >
+          <div class="mb-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+            <span>Data ingress</span>
+            <span :class="unhealthyApps.length ? 'text-[#ff6a4a]' : 'text-flame'">
+              {{ unhealthyApps.length ? `${unhealthyApps.length} down` : 'healthy' }}
+            </span>
+          </div>
+
+          <div v-if="unhealthyApps.length" class="space-y-2 font-mono text-[10px]">
+            <div
+              v-for="item in unhealthyApps"
+              :key="item.name"
+              class="rounded border border-[#b3241a]/60 bg-[#14070b] px-2 py-1.5"
+            >
+              <div class="flex items-center justify-between gap-2 uppercase tracking-[0.14em]">
+                <span class="truncate text-[#ff8a6a]">{{ item.name }}</span>
+                <span class="shrink-0 text-[9px] text-[#ff6a4a]">
+                  {{ item.skipped_unhealthy ? 'skipped' : 'in cycle' }}
+                </span>
+              </div>
+              <p class="mt-1 text-core">{{ item.reason || 'Data source unavailable or empty.' }}</p>
+              <p
+                class="mt-0.5 uppercase tracking-[0.12em] text-muted"
+                :title="item.last_healthy ?? undefined"
+              >
+                Last healthy: {{ item.last_healthy_human || 'never' }}
+              </p>
+            </div>
+          </div>
+          <div v-else class="text-[11px] uppercase tracking-widest text-dim">All active data sources healthy</div>
         </div>
 
         <div class="rounded border border-[#3a2016] bg-panel p-3">

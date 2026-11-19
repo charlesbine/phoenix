@@ -31,7 +31,12 @@ CREATE TABLE IF NOT EXISTS apps (
     priority INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT '',
-    runtime TEXT NOT NULL DEFAULT ''
+    runtime TEXT NOT NULL DEFAULT '',
+    skip_when_unhealthy INTEGER NOT NULL DEFAULT 0,
+    health_status TEXT NOT NULL DEFAULT 'unknown',
+    health_reason TEXT NOT NULL DEFAULT '',
+    last_healthy TEXT,
+    health_checked_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -177,6 +182,16 @@ def _connect(path: str) -> Iterator[sqlite3.Connection]:
                 conn.execute("ALTER TABLE apps ADD COLUMN source TEXT NOT NULL DEFAULT ''")
             if "runtime" not in cols:
                 conn.execute("ALTER TABLE apps ADD COLUMN runtime TEXT NOT NULL DEFAULT ''")
+            if "skip_when_unhealthy" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN skip_when_unhealthy INTEGER NOT NULL DEFAULT 0")
+            if "health_status" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'")
+            if "health_reason" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN health_reason TEXT NOT NULL DEFAULT ''")
+            if "last_healthy" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN last_healthy TEXT")
+            if "health_checked_at" not in cols:
+                conn.execute("ALTER TABLE apps ADD COLUMN health_checked_at TEXT")
             config_cols = [r[1] for r in conn.execute("PRAGMA table_info(display_config)").fetchall()]
             if "brightness" not in config_cols:
                 conn.execute("ALTER TABLE display_config ADD COLUMN brightness INTEGER NOT NULL DEFAULT 255")
@@ -222,6 +237,15 @@ def _row_to_app(row: sqlite3.Row) -> AppConfig:
         sort_order=row["sort_order"] if "sort_order" in keys else 0,
         source=row["source"] if "source" in keys else "",
         runtime=row["runtime"] if "runtime" in keys else "",
+        skip_when_unhealthy=bool(row["skip_when_unhealthy"]) if "skip_when_unhealthy" in keys else False,
+        health_status=row["health_status"] if "health_status" in keys and row["health_status"] else "unknown",
+        health_reason=row["health_reason"] if "health_reason" in keys and row["health_reason"] else "",
+        last_healthy=datetime.fromisoformat(row["last_healthy"]) if "last_healthy" in keys and row["last_healthy"] else None,
+        health_checked_at=(
+            datetime.fromisoformat(row["health_checked_at"])
+            if "health_checked_at" in keys and row["health_checked_at"]
+            else None
+        ),
     )
 
 
@@ -333,8 +357,12 @@ class AppDatabase:
     def _insert(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source, runtime)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO apps (
+                       name, enabled, active, refresh_interval, last_updated, pixlet_config,
+                       priority, sort_order, source, runtime,
+                       skip_when_unhealthy, health_status, health_reason, last_healthy, health_checked_at
+                   )
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -342,8 +370,12 @@ class AppDatabase:
     def _replace(self, config: AppConfig) -> None:
         with _connect(self._path) as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated, pixlet_config, priority, sort_order, source, runtime)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO apps (
+                       name, enabled, active, refresh_interval, last_updated, pixlet_config,
+                       priority, sort_order, source, runtime,
+                       skip_when_unhealthy, health_status, health_reason, last_healthy, health_checked_at
+                   )
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 self._config_to_row(config),
             )
             conn.commit()
@@ -361,6 +393,11 @@ class AppDatabase:
             config.sort_order,
             config.source,
             config.runtime,
+            int(config.skip_when_unhealthy),
+            config.health_status,
+            config.health_reason,
+            config.last_healthy.isoformat() if config.last_healthy else None,
+            config.health_checked_at.isoformat() if config.health_checked_at else None,
         )
 
 
@@ -520,8 +557,11 @@ class DeviceDatabase:
                              (device_id, schedule.model_dump_json()))
             conn.execute("DELETE FROM device_apps WHERE device_id = ?", (device_id,))
             conn.executemany(
-                """INSERT OR REPLACE INTO apps (name, enabled, active, refresh_interval, last_updated,
-                   pixlet_config, priority, sort_order, source, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR REPLACE INTO apps (
+                       name, enabled, active, refresh_interval, last_updated,
+                       pixlet_config, priority, sort_order, source, runtime,
+                       skip_when_unhealthy, health_status, health_reason, last_healthy, health_checked_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [AppDatabase._config_to_row(app) for app in apps],
             )
             conn.executemany("INSERT INTO device_apps (device_id, app_name, enabled, priority, sort_order) VALUES (?, ?, ?, ?, ?)",

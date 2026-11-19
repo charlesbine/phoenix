@@ -151,6 +151,13 @@ def create_app() -> FastAPI:
             "app_type": kind,
             "is_live": a.runtime.startswith("live_"),
             "source": a.source,
+            "skip_when_unhealthy": a.skip_when_unhealthy,
+            "health_status": a.health_status,
+            "health_reason": a.health_reason,
+            "last_healthy": a.last_healthy.isoformat() if a.last_healthy else None,
+            "last_healthy_human": humanize.naturaltime(datetime.now() - a.last_healthy) if a.last_healthy else "never",
+            "health_checked_at": a.health_checked_at.isoformat() if a.health_checked_at else None,
+            "skipped_unhealthy": a.is_skipped_unhealthy,
         }
 
     def get_device_db() -> DeviceDatabase:
@@ -535,6 +542,19 @@ def create_app() -> FastAPI:
             return _serialize_app(get_svc().app_db.upsert(name, refresh_interval=timedelta(seconds=float(seconds))))
         return {"error": "missing refresh_interval"}
 
+    @app.put("/api/apps/{name}/skip-when-unhealthy")
+    async def update_skip_when_unhealthy(name: str, request: Request, device: str | None = Query(None)):
+        body = await request.json()
+        raw = body.get("skip_when_unhealthy")
+        if not isinstance(raw, bool):
+            raise HTTPException(status_code=422, detail="skip_when_unhealthy must be a boolean")
+        updated = get_svc().app_db.upsert(name, skip_when_unhealthy=raw)
+        if device:
+            row = _device_app_row(device, name)
+            if "error" not in row:
+                return row
+        return _serialize_app(updated)
+
     @app.put("/api/apps/{name}/config")
     async def update_app_config(name: str, request: Request):
         body = await request.json()
@@ -570,9 +590,14 @@ def create_app() -> FastAPI:
             if app_obj and app_obj.runtime.startswith("live_"):
                 return {"info": f"{name}: live app preview uses the panel's latest frame"}
             await asyncio.to_thread(svc.render_preview, name)
+            fresh = svc.app_db.get(name)
             if not _output_path(name).exists():
                 return {"info": f"{name}: no output (conditional skip — no data to display)"}
-            return {"name": name, "preview": True}
+            res: dict = {"name": name, "preview": True}
+            if fresh is not None:
+                res["health_status"] = fresh.health_status
+                res["health_reason"] = fresh.health_reason
+            return res
         except Exception as e:
             return {"error": str(e)}
 
@@ -581,9 +606,32 @@ def create_app() -> FastAPI:
     def get_panel_db() -> PanelDatabase:
         return PanelDatabase()
 
+    def _serialize_panel(panel: dict) -> dict:
+        row = dict(panel)
+        app_obj = get_svc().app_db.get(f"panel_{panel['id']}")
+        if app_obj is not None:
+            row["skip_when_unhealthy"] = app_obj.skip_when_unhealthy
+            row["health_status"] = app_obj.health_status
+            row["health_reason"] = app_obj.health_reason
+            row["last_healthy"] = app_obj.last_healthy.isoformat() if app_obj.last_healthy else None
+            row["last_healthy_human"] = (
+                humanize.naturaltime(datetime.now() - app_obj.last_healthy)
+                if app_obj.last_healthy
+                else "never"
+            )
+            row["skipped_unhealthy"] = app_obj.is_skipped_unhealthy
+        else:
+            row["skip_when_unhealthy"] = False
+            row["health_status"] = "unknown"
+            row["health_reason"] = ""
+            row["last_healthy"] = None
+            row["last_healthy_human"] = "never"
+            row["skipped_unhealthy"] = False
+        return row
+
     @app.get("/api/panels")
     async def list_panels():
-        return get_panel_db().list_panels()
+        return [_serialize_panel(p) for p in get_panel_db().list_panels()]
 
     @app.post("/api/panels")
     async def create_panel(request: Request):
@@ -606,10 +654,15 @@ def create_app() -> FastAPI:
         # Register as an app so it appears in the display cycle
         svc = get_svc()
         app_name = f"panel_{panel_id}"
+        skip_when_unhealthy = bool(body.get("skip_when_unhealthy", False))
         try:
-            svc.create_app(app_name, pixlet_config={"instance_id": panel_id})
+            svc.create_app(
+                app_name,
+                pixlet_config={"instance_id": panel_id},
+                skip_when_unhealthy=skip_when_unhealthy,
+            )
         except ValueError:
-            pass  # Already exists
+            svc.app_db.upsert(app_name, skip_when_unhealthy=skip_when_unhealthy)
 
         # Render initial preview
         try:
@@ -617,7 +670,7 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
-        return panel
+        return _serialize_panel(panel)
 
     @app.post("/api/panels/preview")
     async def preview_panel(request: Request):
@@ -663,7 +716,7 @@ def create_app() -> FastAPI:
         panel = get_panel_db().get(panel_id)
         if panel is None:
             return {"error": "not found"}
-        return panel
+        return _serialize_panel(panel)
 
     @app.put("/api/panels/{panel_id}")
     async def update_panel(panel_id: str, request: Request):
@@ -674,15 +727,18 @@ def create_app() -> FastAPI:
         except ValueError as e:
             return {"error": str(e)}
 
-        # Re-render
         svc = get_svc()
         app_name = f"panel_{panel_id}"
+        if isinstance(body.get("skip_when_unhealthy"), bool):
+            svc.app_db.upsert(app_name, skip_when_unhealthy=body["skip_when_unhealthy"])
+
+        # Re-render
         try:
             await asyncio.to_thread(svc.render_preview, app_name)
         except Exception:
             pass
 
-        return panel
+        return _serialize_panel(panel)
 
     @app.delete("/api/panels/{panel_id}")
     async def delete_panel(panel_id: str):
@@ -857,6 +913,34 @@ def create_app() -> FastAPI:
                     except (IndexError, ValueError):
                         pass
         result["render_times"] = render_times
+
+        # App / panel data-ingress health (for enabled or panel-rotated active apps)
+        svc = get_svc()
+        device_enabled = get_device_db().enabled_app_names()
+        unhealthy_apps = []
+        for app_obj in svc.list_apps():
+            if not app_obj.active or (not app_obj.enabled and app_obj.name not in device_enabled):
+                continue
+            if app_obj.health_status == "unhealthy":
+                unhealthy_apps.append({
+                    "name": app_obj.name,
+                    "reason": app_obj.health_reason,
+                    "last_healthy": app_obj.last_healthy.isoformat() if app_obj.last_healthy else None,
+                    "last_healthy_human": (
+                        humanize.naturaltime(datetime.now() - app_obj.last_healthy)
+                        if app_obj.last_healthy
+                        else "never"
+                    ),
+                    "skip_when_unhealthy": app_obj.skip_when_unhealthy,
+                    "skipped_unhealthy": app_obj.is_skipped_unhealthy,
+                })
+        result["unhealthy_apps"] = unhealthy_apps
+        if unhealthy_apps:
+            result["status"] = "degraded"
+            for entry in unhealthy_apps:
+                suffix = f": {entry['reason']}" if entry["reason"] else ""
+                tag = " [skipped]" if entry["skipped_unhealthy"] else ""
+                result["issues"].append(f"Data down · {entry['name']}{tag}{suffix}")
 
         return result
 
@@ -1277,7 +1361,11 @@ def create_app() -> FastAPI:
                 sig = json.dumps(
                     {
                         "a": [
-                            {k: v for k, v in a.items() if k not in ("last_updated", "last_updated_human")}
+                            {
+                                k: v
+                                for k, v in a.items()
+                                if k not in ("last_updated", "last_updated_human", "last_healthy_human", "health_checked_at")
+                            }
                             for a in apps
                         ],
                         "c": payload["config"],

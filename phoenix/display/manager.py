@@ -149,6 +149,7 @@ class DisplayManager:
         self.primary = primary
         self.debug_mode = debug_mode
         self.wake = wake
+        self._forced_app: str | None = None
 
     def _wait(self, seconds: float) -> None:
         if self.wake is not None:
@@ -246,14 +247,17 @@ class DisplayManager:
         """The apps eligible to show right now — global rotation, or this
         device's rotation membership overlaid on the global app definitions."""
         if not self.device_id:
-            return [a for a in self.app_db.list_apps() if a.enabled and a.active]
+            return [
+                a for a in self.app_db.list_apps()
+                if a.enabled and a.active and not a.is_skipped_unhealthy
+            ]
 
         active: list[AppConfig] = []
         for member in self.device_db.list_apps(self.device_id):
             if not member["enabled"]:
                 continue
             app = self.app_db.get(member["app_name"])
-            if app is None or not app.active:
+            if app is None or not app.active or app.is_skipped_unhealthy:
                 continue
             # Per-device priority / order override the global values.
             active.append(app.model_copy(update={
@@ -546,6 +550,14 @@ class DisplayManager:
         if fresh is None:
             return
 
+        forced = self._forced_app == fresh.name
+        if forced:
+            self._forced_app = None
+
+        if not forced and fresh.is_skipped_unhealthy:
+            logger.info("[%s] Skipping unhealthy app (%s)", fresh.name, fresh.health_reason or "data down")
+            return
+
         if _is_live_runtime(fresh):
             self._display_live_app(fresh, duration)
             return
@@ -570,6 +582,7 @@ class DisplayManager:
                 app = self.app_db.get(name)
                 if app and (_is_live_runtime(app) or output_path(name).exists()):
                     logger.info("[show_now] Jumping to %s", name)
+                    self._forced_app = name
                     return app
         except Exception:
             pass

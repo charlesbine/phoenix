@@ -210,6 +210,17 @@ async function toggleActive(a: AppItem): Promise<void> {
   replace(updated)
   replaceGlobal(updated)
 }
+async function toggleSkipWhenUnhealthy(a: AppItem): Promise<void> {
+  const updated = await api.setSkipWhenUnhealthy(a.name, !a.skip_when_unhealthy, device.value)
+  replace(updated)
+  replaceGlobal({ ...updated, enabled: globalApps.value.find((g) => g.name === a.name)?.enabled ?? updated.enabled })
+}
+function healthTooltip(a: AppItem): string {
+  const parts: string[] = [a.health_reason || 'Data ingress down']
+  if (a.skipped_unhealthy) parts.push('Skipped in rotation')
+  parts.push(`Last healthy: ${a.last_healthy_human || 'never'}`)
+  return parts.join(' · ')
+}
 
 async function deleteGlobalApp(a: AppItem): Promise<void> {
   if (a.is_live || a.source === 'builtin') return
@@ -438,15 +449,29 @@ function removeConfigValue(key: string): void {
             :key="a.name"
             draggable="true"
             class="flex cursor-grab items-center gap-2.5 border-b border-[#1c0e14] px-3 py-2 text-xs uppercase tracking-wide last:border-b-0"
-            :class="a.name === selected ? 'bg-[#1e0f18]' : 'hover:bg-[#160b12]'"
+            :class="[
+              a.name === selected ? 'bg-[#1e0f18]' : 'hover:bg-[#160b12]',
+              a.health_status === 'unhealthy' ? 'border-l-2 border-l-[#ff5a2a]' : '',
+            ]"
             @dragstart="dragName = a.name"
             @dragover.prevent
             @drop="onDrop(a.name)"
           >
             <span class="shrink-0 text-dim">⠿</span>
-            <button class="flex-1 truncate text-left" :class="a.name === selected ? 'text-core' : 'text-gold'" @click="selectApp(a.name)">
+            <button
+              class="flex-1 truncate text-left"
+              :class="a.name === selected ? 'text-core' : a.health_status === 'unhealthy' ? 'text-[#ff8a6a]' : 'text-gold'"
+              @click="selectApp(a.name)"
+            >
               {{ a.name }}
             </button>
+            <span
+              v-if="a.health_status === 'unhealthy'"
+              class="shrink-0 rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#ff6a4a]"
+              :title="healthTooltip(a)"
+            >
+              {{ a.skipped_unhealthy ? 'down · skip' : 'data down' }}
+            </span>
             <span v-if="a.priority > 0" class="shrink-0 text-[10px] text-[#ff6a4a]">×{{ a.priority + 1 }}</span>
             <button class="w-8 shrink-0 text-right text-[10px]" :class="a.enabled ? 'text-flame' : 'text-[#7a4a34]'" @click="toggleEnabled(a)">
               {{ a.enabled ? 'ON' : 'OFF' }}
@@ -620,6 +645,54 @@ function removeConfigValue(key: string): void {
         <MatrixPreview :app="selected" :tick="tick" :device="device" :live="selectedApp.is_live" @render="renderPreview" />
         <p v-if="note" class="font-mono text-[10px] text-[#c78a5a]">{{ note }}</p>
 
+        <!-- data-ingress health & skip-when-unhealthy -->
+        <div
+          class="rounded border p-3 font-mono text-xs"
+          :class="selectedApp.health_status === 'unhealthy'
+            ? 'border-[#b3241a] bg-[#1e0a0e]'
+            : 'border-[#3a2016] bg-panel'"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.16em]">
+              <span
+                class="h-2 w-2 rounded-full"
+                :class="selectedApp.health_status === 'unhealthy'
+                  ? 'bg-[#ff5a2a]'
+                  : selectedApp.health_status === 'healthy'
+                    ? 'bg-flame'
+                    : 'bg-[#7a4a34]'"
+              ></span>
+              <span :class="selectedApp.health_status === 'unhealthy' ? 'text-[#ff6a4a]' : 'text-dim'">
+                Ingress · {{ selectedApp.health_status === 'unhealthy' ? 'data down' : selectedApp.health_status }}
+              </span>
+              <span
+                v-if="selectedApp.skipped_unhealthy"
+                class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] text-[#ff6a4a]"
+              >
+                skipped in cycle
+              </span>
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-gold">
+              <input
+                type="checkbox"
+                :checked="selectedApp.skip_when_unhealthy"
+                class="accent-flame"
+                @change="toggleSkipWhenUnhealthy(selectedApp)"
+              />
+              Skip when data down
+            </label>
+          </div>
+          <p v-if="selectedApp.health_status === 'unhealthy'" class="mt-2 text-[11px] text-core">
+            {{ selectedApp.health_reason || 'Data source unavailable or empty.' }}
+          </p>
+          <p
+            class="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted"
+            :title="selectedApp.last_healthy ?? undefined"
+          >
+            Last healthy: {{ selectedApp.last_healthy_human || 'never' }}
+          </p>
+        </div>
+
         <!-- settings -->
         <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-wider">
           <button class="rounded border border-[#3a2016] px-2.5 py-1 text-gold hover:bg-[#251009]" @click="api.showNow(selectedApp.name, device)">▷ show</button>
@@ -773,6 +846,13 @@ function removeConfigValue(key: string): void {
                 {{ TYPE_MARK[app.app_type] ?? app.app_type }}
               </span>
               <span class="truncate text-xs uppercase tracking-wide text-gold">{{ app.name }}</span>
+              <span
+                v-if="app.health_status === 'unhealthy'"
+                class="shrink-0 rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[#ff6a4a]"
+                :title="healthTooltip(app)"
+              >
+                {{ app.skipped_unhealthy ? 'down · skip' : 'data down' }}
+              </span>
               <span v-if="inRotation.has(app.name)" class="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[#c78a5a]">
                 in rotation
               </span>

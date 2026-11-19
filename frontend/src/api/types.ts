@@ -1,5 +1,7 @@
 // Shapes mirror Phoenix's FastAPI responses. TODO: generate from /openapi.json.
 
+export type AppHealthStatus = 'unknown' | 'healthy' | 'unhealthy'
+
 export interface AppItem {
   name: string
   enabled: boolean
@@ -14,6 +16,13 @@ export interface AppItem {
   app_type: 'star' | 'python' | 'static' | 'panel' | 'live_audio' | 'live_nowplaying' | 'unknown'
   is_live: boolean
   source: string | null
+  skip_when_unhealthy: boolean
+  health_status: AppHealthStatus
+  health_reason: string
+  last_healthy: string | null
+  last_healthy_human: string
+  health_checked_at: string | null
+  skipped_unhealthy: boolean
 }
 
 export interface Config {
@@ -62,9 +71,19 @@ export interface Device {
   address: string
 }
 
+export interface UnhealthyAppSummary {
+  name: string
+  reason: string
+  last_healthy: string | null
+  last_healthy_human: string
+  skip_when_unhealthy: boolean
+  skipped_unhealthy: boolean
+}
+
 export interface Health {
   status: string
   issues?: string[]
+  unhealthy_apps?: UnhealthyAppSummary[]
   player?: { name: string; status: NodeSyncStatus }
   m4?: {
     connected?: boolean
@@ -143,6 +162,8 @@ export interface DataSource {
   type?: 'static' | 'http' | 'mqtt' | 'ha'
   url?: string
   ttl?: number
+  stale_after?: number
+  timestamp_path?: string
   json_path?: string
   entity_id?: string
   topic?: string
@@ -159,6 +180,12 @@ export interface Panel {
   title: string
   config: Record<string, unknown>
   data_source: DataSource
+  skip_when_unhealthy?: boolean
+  health_status?: AppHealthStatus
+  health_reason?: string
+  last_healthy?: string | null
+  last_healthy_human?: string
+  skipped_unhealthy?: boolean
 }
 
 export interface Playlist {

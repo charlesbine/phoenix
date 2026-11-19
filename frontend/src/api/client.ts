@@ -75,9 +75,12 @@ export const api = {
   showNow: (name: string, device?: string) =>
     req<void>(`/api/apps/${enc(name)}/show${qd(device)}`, { method: 'POST' }),
   preview: (name: string) =>
-    req<{ name?: string; info?: string; error?: string }>(`/api/apps/${enc(name)}/preview`, {
-      method: 'POST',
-    }),
+    req<{ name?: string; info?: string; error?: string; health_status?: string; health_reason?: string }>(
+      `/api/apps/${enc(name)}/preview`,
+      {
+        method: 'POST',
+      },
+    ),
   render: (name: string) =>
     req<{ info?: string; error?: string }>(`/api/apps/${enc(name)}/render`, { method: 'POST' }),
 
@@ -95,6 +98,11 @@ export const api = {
     req<AppItem>(`/api/apps/${enc(name)}/refresh-interval`, {
       method: 'PUT',
       body: JSON.stringify({ refresh_interval }),
+    }),
+  setSkipWhenUnhealthy: (name: string, skip_when_unhealthy: boolean, device?: string) =>
+    req<AppItem>(`/api/apps/${enc(name)}/skip-when-unhealthy${qd(device)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ skip_when_unhealthy }),
     }),
   reorder: (order: string[], device?: string) =>
     req<{ ok: boolean }>(`/api/reorder${qd(device)}`, { method: 'PUT', body: JSON.stringify({ order }) }),
