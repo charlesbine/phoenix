@@ -693,16 +693,24 @@ class TestDisplaySkipWhenUnhealthy:
         assert [a.name for a in dm._collect_active()] == ["clock", "panel_amoura_costs", "panel_amoura_mrr"]
 
     def test_paired_node_state_propagates_skip_without_timestamp_churn(self, tmp_path, monkeypatch):
+        import hashlib
+        import json
+        from threading import Event
         import phoenix.db as db_mod
         import phoenix.node as node_mod
         import phoenix.paths as paths_mod
+        from phoenix.server.nodes import create_receiver
 
         monkeypatch.setattr(db_mod, "DB_PATH", tmp_path / "central.db")
         monkeypatch.setattr(paths_mod, "DATA_DIR", tmp_path / "data")
+        node_outputs = tmp_path / "receiver"
+        node_outputs.mkdir()
+        monkeypatch.setattr(paths_mod, "OUTPUTS_DIR", node_outputs)
         central_outputs = tmp_path / "central"
         central_outputs.mkdir()
         monkeypatch.setattr(node_mod, "output_path", lambda name: central_outputs / f"{name}.webp")
-        monkeypatch.setattr(node_mod, "show_now_file", lambda _dev: central_outputs / "show_now.txt")
+        show_now_path = central_outputs / "show_now.txt"
+        monkeypatch.setattr(node_mod, "show_now_file", lambda _dev: show_now_path)
 
         ddb = DeviceDatabase()
         ddb.create("desk", "Desk", "serial")
@@ -718,7 +726,24 @@ class TestDisplaySkipWhenUnhealthy:
         ddb.set_app("desk", "panel_amoura_mrr", enabled=True)
         Image.new("RGB", (64, 64), "green").save(central_outputs / "panel_amoura_mrr.webp")
 
-        rev_healthy_1 = node_mod.build_state("desk").revision()
+        healthy_state = node_mod.build_state("desk")
+        rev_healthy_1 = healthy_state.revision()
+        assert healthy_state.apps[0].enabled is True
+        assert "panel_amoura_mrr" in healthy_state.frames
+
+        # Wire payload excludes PR #35 health metadata so older peers hash identically
+        wire_json = healthy_state.payload()
+        wire_data = json.loads(wire_json)
+        for field in (
+            "skip_when_unhealthy",
+            "health_status",
+            "health_reason",
+            "last_healthy",
+            "health_checked_at",
+        ):
+            assert field not in wire_data["apps"][0]
+        assert healthy_state.revision() == hashlib.sha256(wire_json.encode()).hexdigest()
+
         # Updating volatile check timestamps should NOT churn node revision
         adb.upsert(
             "panel_amoura_mrr",
@@ -727,13 +752,56 @@ class TestDisplaySkipWhenUnhealthy:
         )
         assert node_mod.build_state("desk").revision() == rev_healthy_1
 
-        # Flipping to unhealthy changes state revision and carries skip_when_unhealthy + health_status
+        # Flipping to unhealthy changes state revision, sets effective enabled=False, and drops frame
         adb.upsert("panel_amoura_mrr", health_status="unhealthy", health_reason="HTTP 502")
-        state = node_mod.build_state("desk")
-        assert state.revision() != rev_healthy_1
-        assert state.apps[0].skip_when_unhealthy is True
-        assert state.apps[0].health_status == "unhealthy"
-        assert state.apps[0].is_skipped_unhealthy is True
+        unhealthy_state = node_mod.build_state("desk")
+        assert unhealthy_state.revision() != rev_healthy_1
+        assert unhealthy_state.apps[0].enabled is False
+        assert "panel_amoura_mrr" not in unhealthy_state.frames
+        assert unhealthy_state.show_now is None
+
+        # Syncing to a paired receiver succeeds cleanly with matching revision and disabled membership
+        local = DeviceDatabase(tmp_path / "local.db")
+        local.create("desk", "Desk", "serial")
+        token_file = tmp_path / "token"
+        token_file.write_text("t" * 40)
+        settings = Settings(
+            _env_file=None,
+            node_device="desk",
+            node_peer="192.168.1.8",
+            node_token_file=str(token_file),
+        )
+        wake = Event()
+        receiver = create_receiver(settings, local, wake)
+        client = TestClient(receiver, client=("192.168.1.8", 50000))
+        client.headers.update({"Authorization": f"Bearer {token_file.read_text()}"})
+        publisher = node_mod.NodePublisher(settings)
+        publisher.sync_once(client)
+        assert publisher.sync_status == "synced"
+        assert publisher.report.revision == unhealthy_state.revision()
+        assert local.list_apps("desk")[0]["enabled"] == 0
+
+        # Manual show_now still includes the frame and command for peeking at a skipped-unhealthy app
+        show_now_path.write_text("panel_amoura_mrr")
+        peek_state = node_mod.build_state("desk")
+        assert peek_state.apps[0].enabled is False
+        assert "panel_amoura_mrr" in peek_state.frames
+        assert peek_state.show_now is not None
+        assert peek_state.show_now.name == "panel_amoura_mrr"
+
+        # Recovery restores effective enabled=True and frame
+        show_now_path.unlink()
+        adb.upsert("panel_amoura_mrr", health_status="healthy", health_reason="")
+        recovered_state = node_mod.build_state("desk")
+        assert recovered_state.apps[0].enabled is True
+        assert "panel_amoura_mrr" in recovered_state.frames
+        assert recovered_state.revision() == rev_healthy_1
+
+        # Publisher timeout allows larger LAN WebP uploads without premature timeouts
+        assert node_mod.NODE_TIMEOUT.connect == 4.0
+        assert node_mod.NODE_TIMEOUT.read == 15.0
+        assert node_mod.NODE_TIMEOUT.write == 30.0
+        assert node_mod.NODE_TIMEOUT.pool == 4.0
 
 
 class TestDashboardApiAndWebSocket:
@@ -821,7 +889,15 @@ class TestDashboardApiAndWebSocket:
         assert len(status["unhealthy_apps"]) == 1
         assert status["unhealthy_apps"][0]["name"] == "panel_amoura_mrr"
         assert status["unhealthy_apps"][0]["skipped_unhealthy"] is True
-        assert any("panel_amoura_mrr" in issue for issue in status["issues"])
+        # issues is reserved for system/infra problems, not per-app data ingress strings
+        assert status["issues"] == []
+
+        health_res = client.get("/api/health")
+        assert health_res.status_code == 503
+        health_body = health_res.json()
+        assert health_body["status"] == "degraded"
+        assert health_body["issues"] == []
+        assert len(health_body["unhealthy_apps"]) == 1
 
         # Disabled app should not degrade system status
         adb.upsert("panel_amoura_mrr", enabled=False)
@@ -858,3 +934,77 @@ class TestDashboardApiAndWebSocket:
             assert clock2["health_status"] == "unhealthy"
             assert clock2["health_reason"] == "Data stale"
             assert clock2["skipped_unhealthy"] is True
+
+            # Toggling skip_when_unhealthy off pushes updated skipped_unhealthy immediately
+            client.put(
+                "/api/apps/clock/skip-when-unhealthy",
+                params={"device": "main"},
+                json={"skip_when_unhealthy": False},
+            )
+            pushed2 = ws.receive_json()
+            clock3 = next(a for a in pushed2["apps"] if a["name"] == "clock")
+            assert clock3["skip_when_unhealthy"] is False
+            assert clock3["skipped_unhealthy"] is False
+
+    def test_device_apps_skipped_unhealthy_respects_device_membership(self, client):
+        from phoenix.db import AppDatabase
+
+        client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
+        client.post("/api/devices", json={"id": "aurora", "name": "Aurora", "backend": "serial"})
+        client.post("/api/apps/clock/add")
+        client.post("/api/apps/clock/add", params={"device": "apollo"})
+        client.post("/api/apps/clock/add", params={"device": "aurora"})
+        client.post("/api/apps/clock/disable", params={"device": "aurora"})
+
+        AppDatabase().upsert(
+            "clock",
+            skip_when_unhealthy=True,
+            health_status="unhealthy",
+            health_reason="HTTP 404 from example.com/api",
+        )
+
+        apollo_apps = client.get("/api/apps", params={"device": "apollo"}).json()
+        apollo_clock = next(a for a in apollo_apps if a["name"] == "clock")
+        assert apollo_clock["enabled"] is True
+        assert apollo_clock["skipped_unhealthy"] is True
+
+        aurora_apps = client.get("/api/apps", params={"device": "aurora"}).json()
+        aurora_clock = next(a for a in aurora_apps if a["name"] == "clock")
+        assert aurora_clock["enabled"] is False
+        assert aurora_clock["skipped_unhealthy"] is False
+
+        # Disabling on apollo immediately flips skipped_unhealthy to False in mutation response
+        disabled_row = client.post("/api/apps/clock/disable", params={"device": "apollo"}).json()
+        assert disabled_row["enabled"] is False
+        assert disabled_row["skipped_unhealthy"] is False
+
+    def test_health_issues_keeps_infra_issues_separate_from_unhealthy_apps(self, tmp_path, monkeypatch):
+        import phoenix.db as db_mod
+        import phoenix.paths as paths_mod
+        from phoenix.db import AppDatabase
+        from phoenix.server import dashboard
+
+        monkeypatch.setattr(db_mod, "DB_PATH", tmp_path / "infra.db")
+        data_dir = tmp_path / "data"
+        (data_dir / "output").mkdir(parents=True)
+        monkeypatch.setattr(paths_mod, "DATA_DIR", data_dir)
+        monkeypatch.setattr(
+            dashboard,
+            "get_settings",
+            lambda: Settings(_env_file=None, platform="web", mqtt_broker="127.0.0.1"),
+        )
+        test_client = TestClient(dashboard.create_app())
+        AppDatabase().upsert(
+            "panel_amoura_costs",
+            enabled=True,
+            active=True,
+            skip_when_unhealthy=True,
+            health_status="unhealthy",
+            health_reason="HTTP 404 from amoura.io/api/analytics/cost-analytics",
+        )
+
+        status = test_client.get("/api/status").json()
+        assert status["status"] == "degraded"
+        assert status["issues"] == ["MQTT disconnected"]
+        assert len(status["unhealthy_apps"]) == 1
+        assert status["unhealthy_apps"][0]["name"] == "panel_amoura_costs"

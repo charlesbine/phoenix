@@ -21,6 +21,14 @@ from phoenix.settings import Settings
 
 NODE_PATH = "/api/display-node"
 MAX_FRAME_BYTES = 32 * 1024 * 1024
+NODE_TIMEOUT = httpx.Timeout(connect=4.0, read=15.0, write=30.0, pool=4.0)
+_NODE_APP_HEALTH_FIELDS = {
+    "skip_when_unhealthy",
+    "health_status",
+    "health_reason",
+    "last_healthy",
+    "health_checked_at",
+}
 logger = logging.getLogger(__name__)
 
 
@@ -42,8 +50,12 @@ class NodeState(BaseModel):
     single_app: str | None = None
 
     def payload(self) -> str:
-        # Keep the unpinned revision compatible with older peers.
-        return self.model_dump_json(exclude={"single_app"} if self.single_app is None else None)
+        # Keep wire payloads and revision hashes compatible with older peers
+        # that predate single_app and data-ingress health fields on AppConfig.
+        exclude: dict[str, object] = {"apps": {"__all__": _NODE_APP_HEALTH_FIELDS}}
+        if self.single_app is None:
+            exclude["single_app"] = True
+        return self.model_dump_json(exclude=exclude)
 
     def revision(self) -> str:
         return hashlib.sha256(self.payload().encode()).hexdigest()
@@ -107,8 +119,9 @@ def build_state(device_id: str) -> NodeState:
         app = definitions.get(name)
         if app is None or not valid_name(name):
             continue
+        effective_enabled = bool(member["enabled"]) and not app.is_skipped_unhealthy
         apps.append(app.model_copy(update={
-            "enabled": bool(member["enabled"]),
+            "enabled": effective_enabled,
             "priority": member["priority"],
             "sort_order": member["sort_order"],
             "last_updated": None,
@@ -117,7 +130,7 @@ def build_state(device_id: str) -> NodeState:
             "health_reason": "",
             "pixlet_config": app.pixlet_config if app.runtime.startswith("live_") else {},
         }))
-        if member["enabled"] or name == requested_name:
+        if effective_enabled or name == requested_name:
             if version := frame_version(output_path(name)):
                 frames[name] = version
         if name == requested_name and (name in frames or app.runtime.startswith("live_")):
@@ -190,7 +203,7 @@ class NodePublisher:
             return
         context = ssl.create_default_context(cafile=self.settings.node_ca_file)
         headers = {"Authorization": f"Bearer {read_node_token(self.settings)}"}
-        with httpx.Client(base_url=self.settings.node_url, headers=headers, timeout=4,
+        with httpx.Client(base_url=self.settings.node_url, headers=headers, timeout=NODE_TIMEOUT,
                           verify=context, trust_env=False) as client:
             failed = False
             while not self._stop.is_set():

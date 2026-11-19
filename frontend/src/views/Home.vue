@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useMatrixStore } from '@/stores/matrix'
 import { api } from '@/api/client'
 import type { Config, Health } from '@/api/types'
+import { formatUnhealthySummary, groupUnhealthyApps, type UnhealthyGroup } from '@/utils/health'
 import MatrixPreview from '@/components/MatrixPreview.vue'
 import BrightnessSlider from '@/components/BrightnessSlider.vue'
 import AppRow from '@/components/AppRow.vue'
@@ -29,9 +30,14 @@ const scheduleLabels = {
 const visibleRotation = computed(() =>
   showDisabled.value ? rotation.value : rotation.value.filter((a) => a.enabled),
 )
-const unhealthyRotationCount = computed(() =>
-  rotation.value.filter((a) => a.enabled && a.health_status === 'unhealthy').length,
+const enabledRotationCount = computed(() => rotation.value.filter((a) => a.enabled).length)
+const skippedRotationCount = computed(() =>
+  rotation.value.filter((a) => a.enabled && a.skipped_unhealthy).length,
 )
+const downInCycleCount = computed(() =>
+  rotation.value.filter((a) => a.enabled && a.health_status === 'unhealthy' && !a.skipped_unhealthy).length,
+)
+const cyclingRotationCount = computed(() => enabledRotationCount.value - skippedRotationCount.value)
 const singleAppOptions = computed(() => rotation.value.filter((app) => app.enabled && app.active))
 const singleAppValue = computed(() =>
   singleAppOptions.value.some((app) => app.name === config.value?.single_app) ? config.value?.single_app : '',
@@ -39,10 +45,51 @@ const singleAppValue = computed(() =>
 const previewLive = computed(() => selectedApp.value?.is_live ?? (following.value && nowPlayingLive.value))
 const healthStatus = computed(() => health.value?.status ?? (healthError.value ? 'offline' : 'checking'))
 const healthIssues = computed(() => health.value?.issues ?? (healthError.value ? [healthError.value] : []))
+const unhealthyApps = computed(() => health.value?.unhealthy_apps ?? [])
+const unhealthyGroups = computed(() => groupUnhealthyApps(unhealthyApps.value))
+const unhealthySummary = computed(() => formatUnhealthySummary(unhealthyApps.value))
+const hasActiveUnhealthy = computed(() => unhealthyApps.value.some((a) => !a.skipped_unhealthy))
+const expandedGroups = ref<Record<string, boolean>>({})
+const defaultExpandGroups = computed(() => unhealthyApps.value.length <= 3)
+const hasExpandableGroups = computed(() => unhealthyGroups.value.some((g) => g.apps.length > 1))
+const allGroupsExpanded = computed(() =>
+  unhealthyGroups.value
+    .filter((g) => g.apps.length > 1)
+    .every((g) => isGroupExpanded(g)),
+)
 const m4Connected = computed(() => Boolean(health.value?.m4?.connected))
 const mqttConnected = computed(() => Boolean(health.value?.mqtt?.connected))
 const load1m = computed(() => health.value?.load?.['1m'])
 const memoryUsed = computed(() => health.value?.memory?.used_pct)
+
+function isGroupExpanded(group: UnhealthyGroup): boolean {
+  if (group.apps.length <= 1) return false
+  return expandedGroups.value[group.key] ?? defaultExpandGroups.value
+}
+
+function toggleGroup(key: string): void {
+  const current = expandedGroups.value[key] ?? defaultExpandGroups.value
+  expandedGroups.value = { ...expandedGroups.value, [key]: !current }
+}
+
+function toggleAllGroups(): void {
+  const nextState = !allGroupsExpanded.value
+  const updated: Record<string, boolean> = {}
+  for (const g of unhealthyGroups.value) {
+    if (g.apps.length > 1) updated[g.key] = nextState
+  }
+  expandedGroups.value = updated
+}
+
+function inspectApp(name: string): void {
+  if (store.selected !== name) store.select(name)
+}
+
+async function toggleSkipWhenUnhealthy(): Promise<void> {
+  if (!selectedApp.value) return
+  await store.setSkipWhenUnhealthy(selectedApp.value.name, !selectedApp.value.skip_when_unhealthy)
+  void refreshHealth()
+}
 
 async function refreshHealth(): Promise<void> {
   try {
@@ -122,7 +169,7 @@ onUnmounted(() => {
               ? 'border-flame/70 bg-[#251009] text-flame'
               : 'border-[#3a2016] text-dim hover:text-gold'"
             title="Skip this app in panel rotation while its data ingress is unhealthy"
-            @click="store.setSkipWhenUnhealthy(selectedApp.name, !selectedApp.skip_when_unhealthy)"
+            @click="toggleSkipWhenUnhealthy"
           >
             skip if down: {{ selectedApp.skip_when_unhealthy ? 'on' : 'off' }}
           </button>
@@ -167,7 +214,23 @@ onUnmounted(() => {
       <section class="flex flex-col gap-4">
         <div class="rounded border border-[#3a2016] bg-panel p-3">
           <div class="mb-3 flex items-center justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            <span>System · {{ healthStatus }}</span>
+            <span class="flex items-center gap-1.5">
+              <span>System</span>
+              <span>·</span>
+              <span
+                :class="
+                  healthStatus === 'ok'
+                    ? 'text-flame'
+                    : healthStatus === 'degraded'
+                      ? 'text-[#f0a552]'
+                      : healthStatus === 'offline'
+                        ? 'text-[#ff6a4a]'
+                        : 'text-dim'
+                "
+              >
+                {{ healthStatus }}
+              </span>
+            </span>
             <button class="text-gold hover:text-core" @click="refreshHealth">Refresh</button>
           </div>
 
@@ -204,8 +267,140 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="healthIssues.length" class="mt-3 space-y-1 border-t border-[#1c0e14] pt-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#c78a5a]">
-            <div v-for="issue in healthIssues" :key="issue">{{ issue }}</div>
+          <div
+            v-if="healthIssues.length"
+            class="mt-3 space-y-1 border-t border-[#24121c] pt-2.5 font-mono text-[11px] text-[#e6a45c]"
+          >
+            <div v-for="issue in healthIssues" :key="issue" class="flex items-center gap-2">
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[#ff6a4a]"></span>
+              <span class="truncate" :title="issue">{{ issue }}</span>
+            </div>
+          </div>
+
+          <div v-if="unhealthyApps.length" class="mt-3 border-t border-[#24121c] pt-2.5">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex min-w-0 items-center gap-2 font-mono text-[10px]">
+                <span
+                  class="h-1.5 w-1.5 shrink-0 rounded-full"
+                  :class="hasActiveUnhealthy ? 'bg-[#ff5a2a]' : 'bg-[#d98a3c]'"
+                  :style="hasActiveUnhealthy ? 'box-shadow: 0 0 6px #ff5a2a' : ''"
+                ></span>
+                <span class="uppercase tracking-[0.16em] text-dim">Data ingress</span>
+                <span class="truncate text-[#e6a45c]">{{ unhealthySummary }}</span>
+              </div>
+              <button
+                v-if="hasExpandableGroups"
+                class="shrink-0 font-mono text-[10px] text-dim hover:text-gold"
+                @click="toggleAllGroups"
+              >
+                {{ allGroupsExpanded ? 'Collapse ▾' : 'Expand ▸' }}
+              </button>
+            </div>
+
+            <div class="mt-2 divide-y divide-[#221118] rounded border border-[#3a1a1c] bg-[#12080d]/90">
+              <div v-for="group in unhealthyGroups" :key="group.key">
+                <!-- Single-app group: direct clickable row -->
+                <button
+                  v-if="group.apps.length === 1"
+                  type="button"
+                  class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px] transition-colors hover:bg-[#1c0c13]"
+                  :class="previewApp === group.apps[0].app.name ? 'bg-[#1e0f18]' : ''"
+                  :title="`${group.apps[0].app.reason || group.title} · Last healthy: ${group.apps[0].app.last_healthy_human || 'never'}`"
+                  @click="inspectApp(group.apps[0].app.name)"
+                >
+                  <span
+                    class="shrink-0"
+                    :class="previewApp === group.apps[0].app.name ? 'text-core' : 'text-gold'"
+                  >
+                    {{ group.apps[0].app.name }}
+                  </span>
+                  <span class="min-w-0 flex-1 truncate text-[10px] text-muted">
+                    {{ group.title }}
+                  </span>
+                  <span
+                    class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tracking-wide"
+                    :class="
+                      group.apps[0].app.skipped_unhealthy
+                        ? 'border-[#6b3c1e] bg-[#21120a] text-[#e6a45c]'
+                        : 'border-[#8f241c] bg-[#260b0f] text-[#ff7b5c]'
+                    "
+                  >
+                    {{ group.apps[0].app.skipped_unhealthy ? 'skipped' : 'in cycle' }}
+                  </span>
+                </button>
+
+                <!-- Multi-app group: collapsible summary row + clickable app list -->
+                <template v-else>
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px] transition-colors hover:bg-[#1c0c13]"
+                    :title="`${group.title} (${group.inlineNames})`"
+                    @click="toggleGroup(group.key)"
+                  >
+                    <span class="w-2.5 shrink-0 text-[9px] text-dim">
+                      {{ isGroupExpanded(group) ? '▾' : '▸' }}
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-core/90">{{ group.title }}</span>
+                    <span
+                      class="max-w-[9rem] shrink-0 truncate text-[10px] text-muted"
+                      :title="group.inlineNames"
+                    >
+                      {{ group.apps.length <= 2 ? group.inlineNames : group.countLabel }}
+                    </span>
+                    <span
+                      class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tracking-wide"
+                      :class="
+                        group.statusKind === 'skipped'
+                          ? 'border-[#6b3c1e] bg-[#21120a] text-[#e6a45c]'
+                          : group.statusKind === 'active'
+                            ? 'border-[#8f241c] bg-[#260b0f] text-[#ff7b5c]'
+                            : 'border-[#6b3c1e] bg-[#21120a] text-[#ff9e6a]'
+                      "
+                    >
+                      {{
+                        group.statusKind === 'skipped'
+                          ? 'skipped'
+                          : group.statusKind === 'active'
+                            ? 'in cycle'
+                            : `${group.skippedCount}/${group.apps.length} skip`
+                      }}
+                    </span>
+                  </button>
+
+                  <div
+                    v-if="isGroupExpanded(group)"
+                    class="border-t border-[#1e0f15] bg-[#0e060a]/80 py-1 pl-6 pr-2.5"
+                  >
+                    <button
+                      v-for="entry in group.apps"
+                      :key="entry.app.name"
+                      type="button"
+                      class="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left font-mono text-[10px] transition-colors hover:bg-[#1c0c13]"
+                      :class="previewApp === entry.app.name ? 'bg-[#1e0f18]' : ''"
+                      :title="`${entry.app.reason || group.title} · Last healthy: ${entry.app.last_healthy_human || 'never'}`"
+                      @click="inspectApp(entry.app.name)"
+                    >
+                      <span
+                        class="shrink-0"
+                        :class="previewApp === entry.app.name ? 'text-core' : 'text-gold'"
+                      >
+                        {{ entry.app.name }}
+                      </span>
+                      <span v-if="entry.detail" class="min-w-0 flex-1 truncate text-muted">
+                        {{ entry.detail }}
+                      </span>
+                      <span v-else class="flex-1"></span>
+                      <span
+                        class="shrink-0 text-[9px]"
+                        :class="entry.app.skipped_unhealthy ? 'text-[#c78a5a]' : 'text-[#ff7b5c]'"
+                      >
+                        {{ entry.app.skipped_unhealthy ? 'skipped' : 'in cycle' }}
+                      </span>
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -271,21 +466,31 @@ onUnmounted(() => {
           </div>
         </div>
         <div>
-          <div class="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
-            <div class="flex items-center gap-2">
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-dim">
+            <div class="flex flex-wrap items-center gap-1.5">
               <span>Rotation · {{ rotation.length }}</span>
               <span
-                v-if="unhealthyRotationCount > 0"
-                class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] text-[#ff6a4a]"
+                v-if="skippedRotationCount > 0"
+                class="rounded border border-[#8a4d22] bg-[#241309] px-1.5 py-0.5 text-[9px] text-[#f0a552]"
+                :title="`${skippedRotationCount} enabled app${skippedRotationCount === 1 ? '' : 's'} currently auto-skipped while data is down`"
               >
-                {{ unhealthyRotationCount }} down
+                {{ skippedRotationCount }} skipped
+              </span>
+              <span
+                v-if="downInCycleCount > 0"
+                class="rounded border border-[#b3241a] bg-[#2a0a0e] px-1.5 py-0.5 text-[9px] text-[#ff6a4a]"
+                :title="`${downInCycleCount} enabled app${downInCycleCount === 1 ? '' : 's'} unhealthy but still cycling`"
+              >
+                {{ downInCycleCount }} down
               </span>
             </div>
             <div class="flex items-center gap-3">
               <button class="hover:text-gold" :class="showDisabled ? 'text-gold' : ''" @click="showDisabled = !showDisabled">
                 {{ showDisabled ? '− hide disabled' : '+ show disabled' }}
               </button>
-              <span>on {{ rotation.filter((a) => a.enabled).length }}</span>
+              <span :title="skippedRotationCount > 0 ? `${cyclingRotationCount} cycling · ${skippedRotationCount} skipped` : undefined">
+                on {{ enabledRotationCount }}
+              </span>
             </div>
           </div>
           <ul class="rounded border border-[#3a2016]">
