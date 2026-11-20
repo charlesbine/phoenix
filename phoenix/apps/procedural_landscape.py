@@ -191,20 +191,21 @@ TERRAINS: tuple[str, ...] = (
     "canyon",
     "dunes",
     "archipelago",
+    "coast",
 )
 
 _TERRAIN_AFFINITIES: dict[str, tuple[str, ...]] = {
-    "dusk": ("fjord", "peaks", "archipelago", "canyon"),
-    "alpine": ("peaks", "fjord", "archipelago"),
-    "alien": ("canyon", "peaks", "archipelago", "dunes", "fjord"),
-    "sunset": ("archipelago", "fjord", "dunes", "peaks"),
+    "dusk": ("coast", "canyon", "archipelago", "dunes"),
+    "alpine": ("peaks", "coast", "fjord"),
+    "alien": ("canyon", "peaks", "dunes", "archipelago"),
+    "sunset": ("coast", "archipelago", "dunes"),
     "synthwave": ("fjord", "peaks", "canyon", "dunes"),
-    "aurora": ("fjord", "peaks", "archipelago"),
-    "volcanic": ("fjord", "canyon", "peaks", "archipelago"),
-    "desert": ("canyon", "dunes", "fjord"),
-    "sakura": ("peaks", "archipelago", "fjord"),
-    "emerald": ("archipelago", "fjord", "peaks"),
-    "moonlight": ("peaks", "fjord", "archipelago"),
+    "aurora": ("fjord", "coast", "peaks"),
+    "volcanic": ("fjord", "canyon", "peaks"),
+    "desert": ("dunes", "canyon"),
+    "sakura": ("coast", "peaks", "archipelago"),
+    "emerald": ("archipelago", "coast", "peaks"),
+    "moonlight": ("peaks", "coast", "archipelago", "fjord"),
     "mars": ("canyon", "dunes", "peaks"),
 }
 
@@ -288,6 +289,7 @@ class _SceneParams:
     shimmer_strength: float
     is_lava: bool
     has_water_channel: bool
+    coast_side: int = 1
 
 
 def _rgb(hex_color: str) -> tuple[int, int, int]:
@@ -368,15 +370,26 @@ def _build_scene(
 ) -> _SceneParams:
     palette = PALETTES.get(palette_name, PALETTES["dusk"])
     rng = random.Random(seed * 3266489917 + sum(ord(c) for c in f"{palette_name}:{terrain}") * 31)
+    coast_side = -1 if rng.random() < 0.5 else 1
 
     if default_corridor:
         sway_a = _DEFAULT_SWAY_A
         sway_b = _DEFAULT_SWAY_B
         sway_phase = _DEFAULT_SWAY_PHASE
-    else:
+    elif terrain == "fjord":
         sway_sign = -1.0 if rng.random() < 0.5 else 1.0
         sway_a = rng.uniform(6.0, 10.5) * sway_sign
         sway_b = rng.uniform(1.5, 3.6) * (-1.0 if rng.random() < 0.5 else 1.0)
+        sway_phase = rng.uniform(0.0, math.tau)
+    elif terrain == "coast":
+        sway_sign = -1.0 if rng.random() < 0.5 else 1.0
+        sway_a = rng.uniform(2.4, 4.2) * sway_sign
+        sway_b = rng.uniform(0.4, 1.0) * (-1.0 if rng.random() < 0.5 else 1.0)
+        sway_phase = rng.uniform(0.0, math.tau)
+    else:
+        sway_sign = -1.0 if rng.random() < 0.5 else 1.0
+        sway_a = rng.uniform(1.8, 3.8) * sway_sign
+        sway_b = rng.uniform(0.3, 0.9) * (-1.0 if rng.random() < 0.5 else 1.0)
         sway_phase = rng.uniform(0.0, math.tau)
 
     celestials = palette.get("celestials", ("sun_glow",))
@@ -399,6 +412,11 @@ def _build_scene(
         sun_y = rng.uniform(9.5, 15.5)
         sun_r = rng.uniform(4.8, 6.6)
 
+    # On coastline worlds, position the sun/moon over the ocean side so it lights the facing cliffs
+    # and paints a shimmering reflection path across the open water.
+    if terrain == "coast" and celestial != "synth_sun":
+        sun_x = rng.uniform(11.0, 30.0) if coast_side > 0 else rng.uniform(34.0, 53.0)
+
     has_aurora = bool(palette.get("aurora")) or (
         palette_name in ("moonlight", "alien") and rng.random() < 0.25
     )
@@ -406,33 +424,36 @@ def _build_scene(
     has_clouds = bool(palette.get("clouds", False)) and not has_aurora
     is_lava = palette_name == "volcanic"
 
-    # Dunes can be dry desert or oasis-fed depending on palette & seed
-    has_water_channel = True
-    if terrain == "dunes" and palette_name in ("desert", "mars") and rng.random() < 0.5:
-        has_water_channel = False
+    # Only fjord, archipelago, and coast feature open water; dunes and canyon are dry expanses,
+    # and peaks only form natural scattered 2D alpine tarns without a carved channel.
+    has_water_channel = terrain in ("fjord", "archipelago", "coast")
 
     horizon_map = {
         "fjord": 26.0,
-        "peaks": 26.5,
-        "canyon": 25.0,
-        "dunes": 25.0,
-        "archipelago": 25.5,
+        "peaks": 24.2,
+        "canyon": 24.8,
+        "dunes": 23.5,
+        "archipelago": 25.2,
+        "coast": 25.0,
     }
     cam_h_map = {
         "fjord": 17.5,
-        "peaks": 18.0,
-        "canyon": 18.5,
-        "dunes": 14.8,
-        "archipelago": 15.2,
+        "peaks": 21.0,
+        "canyon": 15.8,
+        "dunes": 18.2,
+        "archipelago": 15.0,
+        "coast": 16.0,
     }
-    horizon = horizon_map.get(terrain, 26.0) + (0.0 if default_corridor else rng.uniform(-1.0, 1.0))
+    horizon = horizon_map.get(terrain, 26.0) + (0.0 if default_corridor else rng.uniform(-0.9, 0.9))
     camera_height = cam_h_map.get(terrain, 17.5) + (
-        0.0 if default_corridor else rng.uniform(-0.8, 0.8)
+        0.0 if default_corridor else rng.uniform(-0.6, 0.6)
     )
 
     haze_max = 0.72 if palette_name in ("synthwave", "volcanic", "moonlight") else 0.78
-    shimmer_strength = 0.0 if (is_lava or palette_name == "mars") else (
-        0.24 if terrain == "archipelago" else 0.20
+    shimmer_strength = (
+        0.0
+        if (is_lava or palette_name == "mars" or terrain in ("dunes", "canyon"))
+        else (0.25 if terrain in ("archipelago", "coast") else 0.20)
     )
 
     return _SceneParams(
@@ -455,6 +476,7 @@ def _build_scene(
         shimmer_strength=shimmer_strength,
         is_lava=is_lava,
         has_water_channel=has_water_channel,
+        coast_side=coast_side,
     )
 
 
@@ -523,6 +545,83 @@ def _ridged(val: float, sharpness: float = 1.6) -> float:
     return r ** sharpness
 
 
+def _pick_scenic_x_shift(heights: list[list[float]], scene: _SceneParams) -> int:
+    """Choose a circular X shift so an unbroken mountain field aligns with a scenic alpine pass."""
+    best_shift = 0
+    best_score = float("inf")
+    path_cx = [
+        int(round(_channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase))) & 127
+        for z in range(MAP_SIZE)
+    ]
+    for shift in range(0, MAP_SIZE, 2):
+        path_samples: list[float] = []
+        surround_samples: list[float] = []
+        for z in range(0, MAP_SIZE, 2):
+            row = heights[z]
+            cx = (path_cx[z] + shift) & 127
+            local_max = 0.0
+            for dx in (-3, -1, 0, 1, 3):
+                h = row[(cx + dx) & 127]
+                if h > local_max:
+                    local_max = h
+            path_samples.append(local_max)
+            for dx in (-26, -15, 15, 26):
+                surround_samples.append(row[(cx + dx) & 127])
+        path_samples.sort()
+        surround_samples.sort()
+        path_max = path_samples[-1]
+        path_p90 = path_samples[int(len(path_samples) * 0.90)]
+        path_med = path_samples[len(path_samples) // 2]
+        surround_p92 = surround_samples[int(len(surround_samples) * 0.92)]
+        score = 0.55 * path_max + 0.65 * path_p90 + 0.35 * path_med - 0.55 * surround_p92
+        if score < best_score:
+            best_score = score
+            best_shift = shift
+    return best_shift
+
+
+def _place_asymmetric_features(
+    rng: random.Random,
+    scene: _SceneParams,
+    specs: list[tuple[float, float, float]],
+    *,
+    clearance_pad: float,
+) -> list[tuple[float, float, float, float, float, float, float]]:
+    """Place toroidal asymmetric elliptical features (mesas/islands) clear of the camera lens."""
+    count = len(specs)
+    features: list[tuple[float, float, float, float, float, float, float]] = []
+    # Randomize left/right side sequence while avoiding symmetrical paired walls
+    sides = [(-1 if i % 2 == 0 else 1) for i in range(count)]
+    rng.shuffle(sides)
+    for i, (rx, rz, mh) in enumerate(specs):
+        mz = ((i + rng.uniform(0.15, 0.85)) * MAP_SIZE / count) % MAP_SIZE
+        side = sides[i]
+        # Mix dramatic asymmetric passes, mid-field landmarks, and distant horizon silhouettes
+        tier = i % 3
+        if tier == 0:
+            offset = rx * 0.96 + rng.uniform(clearance_pad, clearance_pad + 4.0)
+        elif tier == 1:
+            offset = rx * 0.98 + rng.uniform(clearance_pad + 7.5, clearance_pad + 16.5)
+        else:
+            offset = rx * 0.92 + rng.uniform(clearance_pad + 18.0, 44.0)
+        ch_at_z = _channel_center(mz, scene.sway_a, scene.sway_b, scene.sway_phase)
+        mx = (ch_at_z + side * offset) % MAP_SIZE
+
+        # Guarantee the feature does not clip the curving flight path anywhere along its Z span
+        for dz_check in range(-int(rz) - 3, int(rz) + 4, 2):
+            zz = (mz + dz_check) % MAP_SIZE
+            ch_z = _channel_center(zz, scene.sway_a, scene.sway_b, scene.sway_phase)
+            dx_signed = (mx - ch_z + 64.0) % MAP_SIZE - 64.0
+            min_dist = rx * 0.94 + clearance_pad
+            if abs(dx_signed) < min_dist:
+                push = min_dist - abs(dx_signed) + 0.5
+                mx = (mx + side * push) % MAP_SIZE
+
+        ang = rng.uniform(0.0, math.tau)
+        features.append((mx, mz, rx, rz, mh, math.cos(ang), math.sin(ang)))
+    return features
+
+
 def _generate_heights(scene: _SceneParams) -> list[list[float]]:
     """Build a toroidal heightfield for the selected terrain archetype."""
     n1 = _periodic_fbm_grid(scene.seed * 7 + 11, base_period=6, octaves=4, persistence=0.52)
@@ -534,6 +633,7 @@ def _generate_heights(scene: _SceneParams) -> list[list[float]]:
     heights: list[list[float]] = []
 
     if terrain == "fjord":
+        # The sole classic carved valley / lava river / fjord corridor
         channel_w = rng.uniform(6.4, 8.2)
         wall_w = rng.uniform(14.0, 18.0)
         for z in range(MAP_SIZE):
@@ -549,85 +649,206 @@ def _generate_heights(scene: _SceneParams) -> list[list[float]]:
             heights.append(row)
 
     elif terrain == "peaks":
-        channel_w = rng.uniform(5.8, 7.6)
-        wall_w = rng.uniform(16.0, 21.0)
+        # Open unbroken alpine flyover — zero carved center corridor or road!
+        # Use broader base periods so sweeping alpine mountain chains read cleanly without
+        # near-field spiky flicker.
+        p1 = _periodic_fbm_grid(scene.seed * 7 + 11, base_period=4, octaves=4, persistence=0.50)
+        p2 = _periodic_fbm_grid(scene.seed * 13 + 37, base_period=6, octaves=3, persistence=0.48)
+        kx = rng.choice((1, 2)) * rng.choice((-1, 1))
+        kz = rng.choice((1, 2))
+        has_tarns = scene.palette_name not in ("desert", "mars")
         for z in range(MAP_SIZE):
-            ch = _channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase)
-            r1_row, r2_row, r3_row = n1[z], n2[z], n3[z]
+            r1_row, r2_row, r3_row = p1[z], p2[z], n3[z]
             row = [0.0] * MAP_SIZE
             for x in range(MAP_SIZE):
-                dist = abs((x - ch + 64.0) % MAP_SIZE - 64.0)
-                valley = _smoothstep(channel_w, channel_w + wall_w, dist)
-                # Dramatic jagged alpine spires with deep mountain saddles between peaks
-                r_main = _ridged(r1_row[x], 2.05)
-                r_sec = _ridged(r2_row[x], 1.75)
-                spire = 0.65 * r_main + 0.35 * r_sec
-                basin = _smoothstep(0.18, 0.32, r3_row[x])
-                h = _WATER_LEVEL + (2.4 + 32.5 * spire * (0.35 + 0.65 * r3_row[x])) * valley * basin
-                row[x] = h
+                chain = 0.5 + 0.5 * math.sin(
+                    math.tau * (kx * x + kz * z) / MAP_SIZE + 2.8 * (r3_row[x] - 0.5)
+                )
+                macro = 0.56 * r3_row[x] + 0.44 * chain
+                r_main = _ridged(r1_row[x], 1.95)
+                r_sec = _ridged(r2_row[x], 1.65)
+                spire = 0.66 * r_main + 0.34 * r_sec
+                if has_tarns:
+                    # Scattered natural high-alpine tarns in deep 2D basins (never a center strip)
+                    basin = _smoothstep(0.15, 0.26, macro * 0.72 + spire * 0.28)
+                    row[x] = _WATER_LEVEL + (2.6 + 26.5 * spire * (0.26 + 0.74 * macro)) * basin
+                else:
+                    row[x] = 3.8 + 25.0 * spire * (0.26 + 0.74 * macro)
             heights.append(row)
+        # Rotate untouched torus in X so the flight line naturally glides over scenic alpine passes
+        shift = _pick_scenic_x_shift(heights, scene)
+        if shift:
+            heights = [row[shift:] + row[:shift] for row in heights]
 
     elif terrain == "canyon":
-        channel_w = rng.uniform(6.2, 8.0)
-        wall_w = rng.uniform(9.0, 12.5)
+        # Monument Valley / Mars basin: wide open dry plain + scattered asymmetric terraced mesas
         step_h = rng.uniform(4.2, 5.0)
+        specs: list[tuple[float, float, float]] = []
+        # 3 grand stepped plateaus
+        for _ in range(3):
+            specs.append((rng.uniform(11.0, 15.0), rng.uniform(9.5, 14.0), rng.uniform(16.0, 20.5)))
+        # 4 medium flat-topped mesas
+        for _ in range(4):
+            specs.append((rng.uniform(6.8, 9.8), rng.uniform(6.2, 9.2), rng.uniform(14.5, 19.5)))
+        # 4 Monument Valley spires / buttes
+        for _ in range(4):
+            specs.append((rng.uniform(4.2, 5.8), rng.uniform(4.2, 5.8), rng.uniform(16.0, 20.5)))
+        rng.shuffle(specs)
+        mesas = _place_asymmetric_features(rng, scene, specs, clearance_pad=7.8)
+
         for z in range(MAP_SIZE):
-            ch = _channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase)
             r1_row, r2_row, r3_row = n1[z], n2[z], n3[z]
+            active_mesas = []
+            for mx, mz, rx, rz, mh, rc, rs in mesas:
+                dz = (z - mz + 64.0) % MAP_SIZE - 64.0
+                if abs(dz) <= max(rx, rz) * 1.52:
+                    active_mesas.append((mx, dz, rx, rz, mh, rc, rs))
+
             row = [0.0] * MAP_SIZE
             for x in range(MAP_SIZE):
-                # Subtle canyon rim wobble so walls feel carved by erosion
-                wobble = (r3_row[x] - 0.5) * 4.5
-                dist = abs((x - (ch + wobble) + 64.0) % MAP_SIZE - 64.0)
-                gorge = _smoothstep(channel_w, channel_w + wall_w, dist)
-                # Carve tributary side-canyons into the plateau so multiple buttes appear
-                butte_mask = _smoothstep(0.24, 0.58, r3_row[x])
-                raw = 4.5 + 21.0 * (0.60 * r1_row[x] + 0.40 * r2_row[x]) * (0.35 + 0.65 * butte_mask)
-                u = raw / step_h
-                fl = math.floor(u)
-                fr = u - fl
-                terraced = (fl + _smoothstep(0.36, 0.64, fr)) * step_h
-                row[x] = _WATER_LEVEL + terraced * gorge
+                # Gently undulating dry desert basin floor with subtle sunlit washes
+                floor_h = 4.2 + 2.4 * r2_row[x] + 1.8 * r3_row[x]
+                mesa_h = 0.0
+                for mx, dz, rx, rz, mh, rc, rs in active_mesas:
+                    dx = (x - mx + 64.0) % MAP_SIZE - 64.0
+                    if abs(dx) > max(rx, rz) * 1.52:
+                        continue
+                    rx_d = dx * rc + dz * rs
+                    rz_d = -dx * rs + dz * rc
+                    d = math.hypot(rx_d / rx, rz_d / rz)
+                    d_w = d + 0.22 * (r1_row[x] - 0.5) + 0.14 * (r2_row[x] - 0.5)
+                    if d_w < 1.28:
+                        raw_m = mh * _smoothstep(1.26, 0.52, d_w)
+                        u = raw_m / step_h
+                        fl = math.floor(u)
+                        fr = u - fl
+                        terraced = (fl + _smoothstep(0.30, 0.70, fr)) * step_h
+                        if terraced > mesa_h:
+                            mesa_h = terraced
+                row[x] = floor_h + mesa_h
             heights.append(row)
 
     elif terrain == "dunes":
-        kx = rng.choice((3, 4)) * rng.choice((-1, 1))
+        # Endless wind-sculpted desert — zero corridor, zero water, sweeping edge-to-edge waves!
+        kx = rng.choice((2, 3)) * rng.choice((-1, 1))
         kz = rng.choice((2, 3))
-        channel_w = rng.uniform(4.4, 6.2)
         for z in range(MAP_SIZE):
-            ch = _channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase)
             r1_row, r2_row, r3_row = n1[z], n2[z], n3[z]
             row = [0.0] * MAP_SIZE
             for x in range(MAP_SIZE):
-                dist = abs((x - ch + 64.0) % MAP_SIZE - 64.0)
-                corridor = _smoothstep(channel_w, channel_w + 15.0, dist)
-                phi = math.tau * (kx * x + kz * z) / MAP_SIZE + 2.4 * (r3_row[x] - 0.5)
-                # Skewed asymmetric wind-sculpted dune wave (broad windward, steep slip-face)
-                skew = math.sin(phi + 0.52 * math.sin(phi))
-                crest = 1.0 - math.sqrt((1.0 - (0.5 + 0.5 * skew)) ** 2 + 0.014)
-                amp = 9.0 + 13.0 * (0.55 * r2_row[x] + 0.45 * r3_row[x])
-                base = _WATER_LEVEL if scene.has_water_channel else 3.2
-                row[x] = base + (2.0 + amp * crest) * (0.28 + 0.72 * corridor)
-                if scene.has_water_channel and dist < channel_w + 1.0:
-                    row[x] = _WATER_LEVEL + (row[x] - _WATER_LEVEL) * _smoothstep(
-                        channel_w - 0.8, channel_w + 2.5, dist
+                phi = (
+                    math.tau * (kx * x + kz * z) / MAP_SIZE
+                    + 2.4 * (r3_row[x] - 0.5)
+                    + 0.80 * (r1_row[x] - 0.5)
+                )
+                # Asymmetric windward/slip-face dune profile without Nyquist kink
+                skew = math.sin(phi + 0.48 * math.sin(phi))
+                crest = 1.0 - math.sqrt((1.0 - (0.5 + 0.5 * skew)) ** 2 + 0.015)
+                mega = 0.5 + 0.5 * math.sin(
+                    math.tau * (x - z) / MAP_SIZE + 2.0 * (r2_row[x] - 0.5)
+                )
+                amp = 6.4 + 8.4 * (0.50 * r2_row[x] + 0.30 * r3_row[x] + 0.20 * mega)
+                row[x] = 4.2 + 1.6 * r3_row[x] + amp * crest
+            heights.append(row)
+
+    elif terrain == "coast":
+        # Dramatic one-sided coastline: open shimmering ocean on one side, towering cliffs on the other!
+        side = scene.coast_side
+        shore_offset = rng.uniform(5.2, 7.6)
+        p1 = rng.uniform(0.0, math.tau)
+        p2 = rng.uniform(0.0, math.tau)
+        # Optional 1-2 small offshore sea stacks on the ocean side for extra coastal drama
+        sea_stacks: list[tuple[float, float, float, float]] = []
+        if rng.random() < 0.65:
+            for _ in range(rng.randint(1, 2)):
+                sz = rng.uniform(0.0, MAP_SIZE)
+                ch_s = _channel_center(sz, scene.sway_a, scene.sway_b, scene.sway_phase)
+                sx = (ch_s - side * rng.uniform(18.0, 30.0)) % MAP_SIZE
+                sea_stacks.append((sx, sz, rng.uniform(3.2, 4.5), rng.uniform(6.5, 11.0)))
+
+        for z in range(MAP_SIZE):
+            ch = _channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase)
+            t = math.tau * z / MAP_SIZE
+            headland = 4.6 * math.sin(2.0 * t + p1) + 2.4 * math.sin(3.0 * t + p2)
+            # Keep shore curving organically without intruding directly under the camera lens
+            shore_dist = max(3.6, shore_offset + headland)
+            shore_base = ch + side * shore_dist
+            headland_mass = 0.72 + 0.28 * math.sin(2.0 * t + p1 + 0.6)
+            r1_row, r2_row, r3_row = n1[z], n2[z], n3[z]
+            row = [0.0] * MAP_SIZE
+            for x in range(MAP_SIZE):
+                # Signed distance inland from camera (positive = land side, negative = ocean side)
+                raw_u = ((x - ch + 64.0) % MAP_SIZE - 64.0) * side
+                # Taper back edge of the torus cleanly to ocean so no wraparound peaks appear at sea
+                back_fade = 1.0 - _smoothstep(44.0, 53.5, raw_u)
+                u = ((x - shore_base + 64.0) % MAP_SIZE - 64.0) * side
+                u_wobble = u + 4.4 * (r3_row[x] - 0.5) + 2.0 * (r1_row[x] - 0.5)
+                h = _WATER_LEVEL
+                if u_wobble > 0.0 and back_fade > 0.0:
+                    cliff = _smoothstep(0.0, 12.0, u_wobble)
+                    inland = _smoothstep(0.0, 26.0, u_wobble)
+                    ridge = 0.60 * _ridged(r1_row[x], 1.95) + 0.40 * _ridged(r2_row[x], 1.80)
+                    mass = (0.35 + 0.65 * r3_row[x]) * headland_mass
+                    h = (
+                        _WATER_LEVEL
+                        + (2.4 + (10.5 + 23.0 * ridge * mass) * (0.42 + 0.58 * inland))
+                        * cliff
+                        * back_fade
                     )
+                for sx, sz, sr, sh in sea_stacks:
+                    dz = (z - sz + 64.0) % MAP_SIZE - 64.0
+                    if abs(dz) <= sr * 1.5:
+                        dx = (x - sx + 64.0) % MAP_SIZE - 64.0
+                        if abs(dx) <= sr * 1.5:
+                            d_st = math.hypot(dx, dz) / sr + 0.25 * (r2_row[x] - 0.5)
+                            if d_st < 1.15:
+                                stack_h = _WATER_LEVEL + sh * _smoothstep(1.12, 0.24, d_st)
+                                if stack_h > h:
+                                    h = stack_h
+                row[x] = h
             heights.append(row)
 
     else:  # archipelago
-        corridor_w = rng.uniform(7.5, 9.5)
+        # Wide open shimmering ocean + asymmetric scattered volcanic/lush islands (no corridor!)
+        specs = []
+        # 3 dramatic volcanic peak islands
+        for _ in range(3):
+            specs.append((rng.uniform(10.0, 14.0), rng.uniform(9.0, 13.5), rng.uniform(18.5, 25.0)))
+        # 4 medium lush islands
+        for _ in range(4):
+            specs.append((rng.uniform(6.8, 10.0), rng.uniform(6.2, 9.6), rng.uniform(11.0, 17.5)))
+        # 3 small rocky islets / sandy cays
+        for _ in range(3):
+            specs.append((rng.uniform(4.0, 6.4), rng.uniform(4.0, 6.2), rng.uniform(5.5, 11.0)))
+        rng.shuffle(specs)
+        islands = _place_asymmetric_features(rng, scene, specs, clearance_pad=8.8)
+
         for z in range(MAP_SIZE):
-            ch = _channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase)
             r1_row, r2_row, r3_row = n1[z], n2[z], n3[z]
-            row = [0.0] * MAP_SIZE
+            active_islands = []
+            for ix, iz, rx, rz, ih, rc, rs in islands:
+                dz = (z - iz + 64.0) % MAP_SIZE - 64.0
+                if abs(dz) <= max(rx, rz) * 1.52:
+                    active_islands.append((ix, dz, rx, rz, ih, rc, rs))
+
+            row = [_WATER_LEVEL] * MAP_SIZE
             for x in range(MAP_SIZE):
-                dist = abs((x - ch + 64.0) % MAP_SIZE - 64.0)
-                sea_lane = _smoothstep(corridor_w, corridor_w + 9.0, dist)
-                # Distinct volcanic/lush islands rising out of wide open sea
-                island_field = 0.58 * r1_row[x] + 0.42 * r3_row[x]
-                island = _smoothstep(0.46, 0.73, island_field) * sea_lane
-                peak = 0.55 + 0.45 * _ridged(r2_row[x], 1.55)
-                row[x] = _WATER_LEVEL + 24.5 * island * peak
+                best_h = _WATER_LEVEL
+                for ix, dz, rx, rz, ih, rc, rs in active_islands:
+                    dx = (x - ix + 64.0) % MAP_SIZE - 64.0
+                    if abs(dx) > max(rx, rz) * 1.52:
+                        continue
+                    rx_d = dx * rc + dz * rs
+                    rz_d = -dx * rs + dz * rc
+                    d = math.hypot(rx_d / rx, rz_d / rz)
+                    d_w = d + 0.26 * (r1_row[x] - 0.5) + 0.16 * (r3_row[x] - 0.5)
+                    if d_w < 1.22:
+                        shape = _smoothstep(1.20, 0.26, d_w)
+                        peak = 0.56 + 0.44 * _ridged(r2_row[x], 1.55)
+                        h = _WATER_LEVEL + ih * shape * peak
+                        if h > best_h:
+                            best_h = h
+                row[x] = best_h
             heights.append(row)
 
     return heights
@@ -709,13 +930,14 @@ def _colorize_terrain(
 
             col = _elevation_color(h, stops)
 
-            # Horizontal geological rock strata bands on canyon cliffs
-            if is_canyon and h > 3.8:
+            # Horizontal geological rock strata bands on canyon mesa walls
+            if is_canyon and h > 5.2:
+                strata_mask = _smoothstep(5.2, 8.8, h)
                 strata = 0.5 + 0.5 * math.sin(h * 1.65)
                 if strata > 0.5:
-                    col = _blend_f(col, land[2], (strata - 0.5) * 0.32)
+                    col = _blend_f(col, land[2], (strata - 0.5) * 0.34 * strata_mask)
                 else:
-                    col = _blend_f(col, land[0], (0.5 - strata) * 0.36)
+                    col = _blend_f(col, land[0], (0.5 - strata) * 0.38 * strata_mask)
 
             if h > 2.35:
                 xm = (x - 1) & 127
@@ -832,7 +1054,7 @@ def _prepare_mips(
 
 
 def _safe_camera_height(heights: list[list[float]], scene: _SceneParams) -> float:
-    """Ensure the flight path always clears the underlying terrain smoothly."""
+    """Ensure a constant-altitude flight path always clears the underlying terrain smoothly."""
     max_under = 0.0
     for z in range(MAP_SIZE):
         cx = int(round(_channel_center(z, scene.sway_a, scene.sway_b, scene.sway_phase))) & 127
@@ -841,6 +1063,90 @@ def _safe_camera_height(heights: list[list[float]], scene: _SceneParams) -> floa
             if h > max_under:
                 max_under = h
     return max(scene.camera_height, max_under + 4.8)
+
+
+def _camera_altitude_profile(
+    heights: list[list[float]], scene: _SceneParams
+) -> tuple[float, tuple[tuple[float, float], ...]]:
+    """Compute a strictly periodic, C-infinity smooth Fourier camera altitude curve."""
+    if scene.terrain not in ("peaks", "dunes"):
+        return (_safe_camera_height(heights, scene), ())
+
+    # 1. Measure required near-field clearance at every z along the flight path
+    base_margin = 9.0 if scene.terrain == "peaks" else 6.8
+    req = [scene.camera_height] * MAP_SIZE
+    for z in range(MAP_SIZE):
+        need = scene.camera_height
+        for dz in range(0, 9):
+            zz = (z + dz) & 127
+            cx = (
+                int(round(_channel_center(z + dz, scene.sway_a, scene.sway_b, scene.sway_phase)))
+                & 127
+            )
+            half_w = 2 if dz <= 2 else (4 if dz <= 5 else 5)
+            margin = base_margin if dz <= 3 else max(3.2, base_margin - (dz - 3) * 0.65)
+            row = heights[zz]
+            for dx in range(-half_w, half_w + 1):
+                cand = row[(cx + dx) & 127] + margin
+                if cand > need:
+                    need = cand
+        req[z] = need
+
+    # 2. Gentle periodic upper-envelope dilation so the camera glides smoothly ahead of ridges
+    env = [0.0] * MAP_SIZE
+    for z in range(MAP_SIZE):
+        best = req[z]
+        for d in range(-14, 15):
+            cand = req[(z + d) & 127] - 0.035 * d * d
+            if cand > best:
+                best = cand
+        env[z] = best
+
+    # 3. Project onto ultra-smooth low-frequency Fourier harmonics (k=1..2) with gentle
+    # amplitude damping so vertical altitude glides smoothly without foreground vertical bobbing.
+    inv_n = 1.0 / MAP_SIZE
+    a0 = sum(env) * inv_n
+    harmonics: list[tuple[float, float]] = []
+    damp_by_k = (0.45, 0.22)
+    for k in range(1, 3):
+        ak = 0.0
+        bk = 0.0
+        step = math.tau * k * inv_n
+        for z in range(MAP_SIZE):
+            ang = z * step
+            ak += env[z] * math.cos(ang)
+            bk += env[z] * math.sin(ang)
+        damp = damp_by_k[k - 1]
+        harmonics.append((2.0 * ak * inv_n * damp, 2.0 * bk * inv_n * damp))
+
+    # 4. Lift DC offset just enough to guarantee zero terrain collision anywhere in the loop
+    max_deficit = 0.0
+    for z in range(MAP_SIZE):
+        theta = math.tau * z * inv_n
+        val = a0
+        for k, (ak, bk) in enumerate(harmonics, start=1):
+            ang = k * theta
+            val += ak * math.cos(ang) + bk * math.sin(ang)
+        deficit = req[z] - val
+        if deficit > max_deficit:
+            max_deficit = deficit
+
+    return (a0 + max_deficit, tuple(harmonics))
+
+
+def _camera_height_at(
+    profile: tuple[float, tuple[tuple[float, float], ...]], phase: float
+) -> float:
+    """Evaluate a periodic camera altitude profile at phase in [0, 1)."""
+    a0, harmonics = profile
+    if not harmonics:
+        return a0
+    theta = math.tau * (phase % 1.0)
+    h = a0
+    for k, (ak, bk) in enumerate(harmonics, start=1):
+        ang = k * theta
+        h += ak * math.cos(ang) + bk * math.sin(ang)
+    return h
 
 
 class _SkyRenderer:
@@ -1433,8 +1739,10 @@ def _frame(
         scene = _build_scene(731, palette_name, "fjord", default_corridor=True)
     h_mips, c_mips = _prepare_mips(heights, colors)
     sky = _SkyRenderer(palette, scene)
-    camera_height = _safe_camera_height(heights, scene)
-    return _render_frame(h_mips, c_mips, sky, scene, camera_height, phase)
+    camera_profile = _camera_altitude_profile(heights, scene)
+    return _render_frame(
+        h_mips, c_mips, sky, scene, _camera_height_at(camera_profile, phase), phase
+    )
 
 
 def render(
@@ -1449,10 +1757,17 @@ def render(
     heights, colors = _terrain(seed, palette, terrain=terrain_name, scene=scene)
     h_mips, c_mips = _prepare_mips(heights, colors)
     sky = _SkyRenderer(palette, scene)
-    camera_height = _safe_camera_height(heights, scene)
+    camera_profile = _camera_altitude_profile(heights, scene)
 
     frames = [
-        _render_frame(h_mips, c_mips, sky, scene, camera_height, index / FRAME_COUNT)
+        _render_frame(
+            h_mips,
+            c_mips,
+            sky,
+            scene,
+            _camera_height_at(camera_profile, index / FRAME_COUNT),
+            index / FRAME_COUNT,
+        )
         for index in range(FRAME_COUNT)
     ]
     durations = [FRAME_DELAY_MS] * FRAME_COUNT
