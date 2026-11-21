@@ -30,8 +30,10 @@ class Settings(BaseSettings):
     render_workers: int = 0  # concurrent pixlet renders; 0 = auto (min(cores, 4)). Set 1 on low-RAM hosts.
 
     # Dashboard (also serves preprocessor data, cache proxy at /proxy)
+    dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 7002
     proxy_allowed_hosts: str = ""  # optional comma-separated host allowlist for /proxy (blank = any public host)
+    allow_private_panel_urls: bool = False  # allow RFC1918/LAN endpoints in Panel HTTP sources (loopback/metadata always blocked)
 
     # A paired serial display receives playback state and rendered files.
     node_device: str = ""

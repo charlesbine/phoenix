@@ -9,7 +9,6 @@ import base64
 import io
 import json
 import logging
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -17,7 +16,8 @@ from pathlib import Path
 from PIL import Image
 
 from phoenix.cache import cache_get
-from phoenix.paths import DATA_DIR, ensure_dirs
+from phoenix.paths import ensure_dirs
+from phoenix.render import PIXLET_TIMEOUT_SECONDS, pixlet_subprocess_env
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -273,12 +273,18 @@ def main():
             ]
             if is_large:
                 cmd.extend(["-m", str(settings.magnification)])
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            proc = subprocess.run(
+                cmd,
+                env=pixlet_subprocess_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PIXLET_TIMEOUT_SECONDS,
+            )
             if proc.returncode != 0:
                 logger.warning("[spotify] pixlet info frame failed: %s", proc.stderr[:200])
 
         info_path = Path(tmp) / "info.webp"
-        info_large_path = Path(tmp) / "info_large.webp"
 
         if info_path.exists():
             frame_info = Image.open(info_path).convert("RGBA").copy()

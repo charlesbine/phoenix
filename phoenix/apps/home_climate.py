@@ -9,7 +9,9 @@ from pathlib import Path
 
 from phoenix.cache import cache_get
 from phoenix.models import DataIngressError
+from phoenix.net import is_valid_ha_entity_id
 from phoenix.paths import DATA_DIR, star_path, ensure_dirs
+from phoenix.render import PIXLET_TIMEOUT_SECONDS, pixlet_subprocess_env
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,9 @@ def _parse_sensor_map(raw: str | None, fallback: dict[str, str]) -> dict[str, st
 
 
 def _fetch_entity(entity_id: str, settings: Settings) -> dict:
+    if not is_valid_ha_entity_id(entity_id):
+        logger.warning("[home_climate] Ignoring invalid Home Assistant entity_id: %r", entity_id)
+        return {}
     url = f"{settings.ha_url.rstrip('/')}/api/states/{entity_id}"
     headers = {"Authorization": f"Bearer {settings.ha_token}"}
     try:
@@ -149,7 +154,14 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
                 "-t", str(settings.render_height),
                 "instance_id=home_climate",
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            proc = subprocess.run(
+                cmd,
+                env=pixlet_subprocess_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PIXLET_TIMEOUT_SECONDS,
+            )
             if proc.returncode != 0:
                 logger.error("[home_climate] pixlet failed: %s", proc.stderr)
                 raise RuntimeError(f"[home_climate] {proc.stderr.strip().splitlines()[-1]}")

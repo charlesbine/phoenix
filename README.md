@@ -17,8 +17,7 @@
 
 ---
 
-<!-- MEDIA_PLACEHOLDER: Replace the block below with a 10–15s physical desk matrix demo video/GIF once recorded -->
-> **Demo Reel (Coming Soon):** _Drop a 10–15s physical desk matrix clip or GIF here (`docs/media/desk-demo.gif` or embedded MP4) showing Phoenix cycling procedural landscapes, rotating pixel planets, live audio spectrum, and Starlark applets on hardware._
+<!-- TODO: drop 10-15s physical desk matrix demo clip here -->
 
 <p align="center">
   <img src="docs/media/dashboard-home.png" alt="Phoenix Ember-CRT Dashboard — Home view with live 64x64 preview and panel controls" width="100%" />
@@ -28,7 +27,7 @@
 
 ## Why Phoenix?
 
-Tidbyt proved how delightful a glanceable pixel-art desk display can be, and [Pixlet](https://github.com/tidbyt/pixlet) built an incredible ecosystem of Starlark applets. **Phoenix** keeps that ecosystem alive and pushes it further — fully local, zero cloud lock-in, native **64×64** resolution, multi-panel control, and support for both plug-and-play **WLED** displays and DIY **HUB75** builds.
+Phoenix started in April 2023 as a fully local 64×64 Tidbyt alternative mounted inside a hand-stained and lacquered wooden shadowbox. Because everything renders and plays locally without a cloud server, it kept running right through Tidbyt's November 2024 discontinuation without skipping a beat. It later absorbed a standalone WLED controller for plug-and-play panels like the Apollo M-1, unifying DIY HUB75 builds and off-the-shelf WLED matrices under one Ember-CRT dashboard, 970+ community apps, and procedural pixel worlds.
 
 - **Tidbyt / Pixlet Compatible** — Run hundreds of Starlark community apps from [`charlesbine/phoenix-apps`](https://github.com/charlesbine/phoenix-apps) (installed right from the built-in Store) alongside native Python/Pillow apps with zero limitations.
 - **Ember-CRT Web Dashboard** — Manage every panel from a live WebSocket-powered Vue 3 dashboard: real-time preview, quick per-app settings, weighted priority cycling (`1×–4×`), Single-App pinning, Show Now interrupts, playlists, and diagnostics.

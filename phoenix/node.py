@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import re
 import ssl
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,7 +15,7 @@ from phoenix.db import AppDatabase, DeviceDatabase
 from phoenix.models import (
     AppConfig, BrightnessSchedule, DisplaySettings, brightness_schedule_for, display_settings_from_json,
 )
-from phoenix.paths import output_path, show_now_file
+from phoenix.paths import is_valid_identifier, output_path, show_now_file
 from phoenix.settings import Settings
 
 NODE_PATH = "/api/display-node"
@@ -68,7 +67,7 @@ class NodeStatus(BaseModel):
 
 
 def valid_name(name: str) -> bool:
-    return re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,127}", name) is not None
+    return is_valid_identifier(name)
 
 
 def frame_version(path: Path) -> str | None:

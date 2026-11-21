@@ -282,7 +282,6 @@ class DisplayManager:
 
     def _display_live_app(self, app: AppConfig, duration: int | None) -> None:
         if app.runtime == "live_audio":
-            mode = str(app.pixlet_config.get("mode") or "bars")
             self._display_audio_app(app.name, app.pixlet_config, duration)
         elif app.runtime == "live_nowplaying":
             self._display_nowplaying_app(app.name, duration)

@@ -623,7 +623,8 @@ onMounted(load)
                 <label class="mb-1 block text-[10px] uppercase tracking-[0.18em] text-dim">Token</label>
                 <input
                   :value="recordString(authRecord(), 'token')"
-                  type="text"
+                  type="password"
+                  :placeholder="authRecord().has_token ? 'Stored (leave blank to keep)' : ''"
                   autocomplete="off"
                   data-1p-ignore
                   :class="inputClass"
@@ -644,7 +645,8 @@ onMounted(load)
                   <label class="mb-1 block text-[10px] uppercase tracking-[0.18em] text-dim">Key</label>
                   <input
                     :value="recordString(authRecord(), 'token')"
-                    type="text"
+                    type="password"
+                    :placeholder="authRecord().has_token ? 'Stored (leave blank to keep)' : ''"
                     autocomplete="off"
                     data-1p-ignore
                     :class="inputClass"
@@ -669,6 +671,7 @@ onMounted(load)
                   <input
                     :value="recordString(authRecord(), 'password')"
                     type="password"
+                    :placeholder="authRecord().has_password ? 'Stored (leave blank to keep)' : ''"
                     autocomplete="off"
                     data-1p-ignore
                     :class="inputClass"

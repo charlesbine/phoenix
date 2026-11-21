@@ -1,10 +1,9 @@
 """FastAPI dashboard — JSON API + static SPA frontend."""
 
 import asyncio
-import ipaddress
+import copy
 import json
 import logging
-import socket
 import subprocess
 import humanize
 from datetime import datetime
@@ -12,16 +11,17 @@ from urllib.parse import unquote, urlsplit
 from zoneinfo import available_timezones
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from phoenix import paths as phoenix_paths
-from phoenix.cache import cache_get
+from phoenix.cache import ResponseTooLargeError, cache_get
 from phoenix.db import DeviceDatabase, PanelDatabase, PlaylistDatabase, seed_default_device
 from phoenix.models import (
     BRIGHTNESS_SCHEDULE_BACKENDS, SPECTROGRAM_PALETTE_OPTIONS, BrightnessSchedule,
     DisplaySettings, brightness_schedule_for, display_settings_from_json, night_mode_phase,
 )
+from phoenix.net import validate_panel_url, validate_proxy_url
 from phoenix.node import NodePublisher
 from phoenix.mqtt import get_mqtt_client, list_notifications, push_notification, get_message
 from phoenix.paths import (
@@ -33,60 +33,103 @@ from phoenix.paths import (
     app_type,
     current_app_file,
     ensure_dirs,
+    ensure_within,
+    require_identifier,
     show_now_file,
 )
+from phoenix.render import validate_pixlet_config_keys
 from phoenix.schema_parser import parse_schema
 from phoenix.service import PhoenixService
 from phoenix.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_BLOCKED_HOST_SUFFIXES = (".local", ".localhost", ".internal", ".home.arpa")
 _MAX_PROXY_TTL = 86400
+REDACTED_SECRET = "••••••••"
+_PROXY_SAFE_MEDIA_TYPES = frozenset({
+    "application/json",
+    "text/plain",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+})
+_PROXY_SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; sandbox",
+    "X-Content-Type-Options": "nosniff",
+}
 
 
-def _is_public_ip(addr: str) -> bool:
-    ip = ipaddress.ip_address(addr)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    return ip.is_global
-
-
-def validate_proxy_url(url: str, allowed_hosts: str = "") -> None:
-    """Reject non-HTTP(S) URLs, private/link-local/loopback targets, and non-allowlisted hosts."""
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise ValueError("Proxy only allows http and https URLs")
-    if parsed.username or parsed.password:
-        raise ValueError("Proxy URLs must not include credentials")
-    hostname = (parsed.hostname or "").strip().lower().rstrip(".")
-    if not hostname:
-        raise ValueError("Proxy URL requires a hostname")
-    if hostname == "localhost" or hostname.endswith(_BLOCKED_HOST_SUFFIXES):
-        raise ValueError("Proxy target host is not allowed")
-
-    allowlist = {h.strip().lower().rstrip(".") for h in allowed_hosts.split(",") if h.strip()}
-    if allowlist and hostname not in allowlist:
-        raise ValueError("Proxy target host is not in proxy_allowed_hosts")
-
+def _require_id(value: str, label: str = "identifier") -> str:
     try:
-        if not _is_public_ip(hostname):
-            raise ValueError("Proxy target IP must be publicly routable")
-        return
+        return require_identifier(value, label)
     except ValueError as exc:
-        if "publicly routable" in str(exc):
-            raise
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise ValueError("Unable to resolve proxy target host") from exc
-    if not infos:
-        raise ValueError("Unable to resolve proxy target host")
-    for info in infos:
-        if not _is_public_ip(info[4][0]):
-            raise ValueError("Proxy target resolves to a non-public IP address")
+
+def _optional_device_id(device: str | None) -> str | None:
+    if device is None or device == "":
+        return None
+    return _require_id(device, "device id")
+
+
+def _is_cross_origin_headers(headers) -> bool:
+    """Return True if browser Sec-Fetch-Site or Origin headers indicate a cross-origin request."""
+    sec_fetch_site = (headers.get("sec-fetch-site") or "").strip().lower()
+    if sec_fetch_site and sec_fetch_site not in {"same-origin", "none"}:
+        return True
+    if "origin" in headers:
+        origin = headers["origin"].strip()
+        if not origin or origin.lower() == "null":
+            return True
+        parsed = urlsplit(origin)
+        host = (headers.get("host") or "").strip().lower()
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or not host:
+            return True
+        if parsed.netloc.lower() != host:
+            return True
+    return False
+
+
+def _redact_panel_data_source(data_source: object) -> object:
+    """Return a copy of data_source with auth secrets masked for API responses."""
+    if not isinstance(data_source, dict):
+        return data_source
+    out = copy.deepcopy(data_source)
+    auth = out.get("auth")
+    if isinstance(auth, dict):
+        has_token = bool(auth.get("token"))
+        has_password = bool(auth.get("password"))
+        if has_token:
+            auth["token"] = REDACTED_SECRET
+            auth["has_token"] = True
+        if has_password:
+            auth["password"] = REDACTED_SECRET
+            auth["has_password"] = True
+    return out
+
+
+def _merge_panel_auth_secrets(data_source: object, existing_data_source: object | None) -> object:
+    """Preserve stored panel auth secrets when submitted value is omitted, empty, or masked."""
+    if not isinstance(data_source, dict):
+        return data_source
+    out = copy.deepcopy(data_source)
+    auth = out.get("auth")
+    if not isinstance(auth, dict):
+        return out
+    auth.pop("has_token", None)
+    auth.pop("has_password", None)
+    prev_auth = existing_data_source.get("auth") if isinstance(existing_data_source, dict) else None
+    if not isinstance(prev_auth, dict):
+        return out
+    auth_type = auth.get("type")
+    if auth_type in ("bearer", "api_key"):
+        if auth.get("token") in (None, "", REDACTED_SECRET) and prev_auth.get("token"):
+            auth["token"] = prev_auth["token"]
+    elif auth_type == "basic":
+        if auth.get("password") in (None, "", REDACTED_SECRET) and prev_auth.get("password"):
+            auth["password"] = prev_auth["password"]
+    return out
 
 
 def create_app() -> FastAPI:
@@ -107,6 +150,13 @@ def create_app() -> FastAPI:
                     and response.status_code < 300):
                 publisher.notify()
             return response
+
+    @app.middleware("http")
+    async def csrf_origin_guard(request: Request, call_next):
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
+            if _is_cross_origin_headers(request.headers):
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin request blocked"})
+        return await call_next(request)
     mqtt_client = get_mqtt_client(settings)
     mqtt_client.start()
 
@@ -373,6 +423,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/apps")
     async def list_apps(device: str | None = Query(None)):
+        device = _optional_device_id(device)
         if device:
             return _device_apps(device)
         svc = get_svc()
@@ -415,8 +466,9 @@ def create_app() -> FastAPI:
     async def reorder_apps(request: Request, device: str | None = Query(None)):
         """Set sort_order for the rotation. Body: {"order": ["app1", "app2", ...]}.
         With ?device=, reorders that device's membership; else the global order."""
+        device = _optional_device_id(device)
         body = await request.json()
-        names = body.get("order", [])
+        names = [_require_id(n, "app name") for n in body.get("order", [])]
         if device:
             get_device_db().reorder(device, names)
             return {"ok": True}
@@ -427,10 +479,12 @@ def create_app() -> FastAPI:
 
     @app.get("/api/apps/{name}")
     async def get_app(name: str):
+        _require_id(name, "app name")
         return _serialize_app(get_svc().get_app(name))
 
     @app.get("/api/apps/{name}/schema")
     async def get_app_schema(name: str):
+        _require_id(name, "app name")
         app_obj = get_svc().app_db.get(name)
         if app_obj and app_obj.runtime:
             return _runtime_schema(app_obj)
@@ -462,11 +516,14 @@ def create_app() -> FastAPI:
 
     @app.delete("/api/apps/{name}")
     async def delete_app(name: str):
+        _require_id(name, "app name")
         get_svc().app_db.delete(name)
         return {"ok": True}
 
     @app.post("/api/apps/{name}/enable")
     async def enable_app(name: str, device: str | None = Query(None)):
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         if device:
             get_device_db().set_app(device, name, enabled=True)
             return _device_app_row(device, name)
@@ -474,6 +531,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/apps/{name}/disable")
     async def disable_app(name: str, device: str | None = Query(None)):
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         if device:
             get_device_db().set_app(device, name, enabled=False)
             return _device_app_row(device, name)
@@ -481,14 +540,18 @@ def create_app() -> FastAPI:
 
     @app.post("/api/apps/{name}/activate")
     async def activate_app(name: str):
+        _require_id(name, "app name")
         return _serialize_app(get_svc().set_active(name, True))
 
     @app.post("/api/apps/{name}/deactivate")
     async def deactivate_app(name: str):
+        _require_id(name, "app name")
         return _serialize_app(get_svc().set_active(name, False))
 
     @app.post("/api/apps/{name}/add")
     async def add_app(name: str, device: str | None = Query(None)):
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         # With ?device=, add an existing app to that panel's rotation; without,
         # register a new global app.
         if device:
@@ -499,12 +562,16 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/remove")
     async def remove_from_device(name: str, device: str = Query(...)):
         """Remove an app from a panel's rotation (does not delete the app)."""
+        _require_id(name, "app name")
+        _require_id(device, "device id")
         get_device_db().remove_app(device, name)
         return {"ok": True, "removed": name, "device": device}
 
     @app.post("/api/apps/{name}/show")
     async def show_app_now(name: str, device: str | None = Query(None)):
         """Skip to this app immediately — on one device, or all if unscoped."""
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         if device:
             get_device_db().update(device, content_mode="apps")
         show_file = show_now_file(device)
@@ -514,6 +581,8 @@ def create_app() -> FastAPI:
 
     @app.put("/api/apps/{name}/priority")
     async def update_priority(name: str, request: Request, device: str | None = Query(None)):
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         body = await request.json()
         priority = body.get("priority")
         if priority is None:
@@ -525,18 +594,19 @@ def create_app() -> FastAPI:
 
     @app.put("/api/apps/{name}/preset")
     async def update_preset(name: str, request: Request):
+        _require_id(name, "app name")
         from phoenix.models import REFRESH_PRESETS
         body = await request.json()
         preset = body.get("preset", "frequent")
         if preset not in REFRESH_PRESETS:
             return {"error": f"Unknown preset: {preset}"}
-        from datetime import timedelta
         return _serialize_app(get_svc().app_db.upsert(
             name, refresh_interval=REFRESH_PRESETS[preset]
         ))
 
     @app.put("/api/apps/{name}/refresh-interval")
     async def update_refresh_interval(name: str, request: Request):
+        _require_id(name, "app name")
         body = await request.json()
         seconds = body.get("refresh_interval")
         if seconds is not None:
@@ -546,6 +616,8 @@ def create_app() -> FastAPI:
 
     @app.put("/api/apps/{name}/skip-when-unhealthy")
     async def update_skip_when_unhealthy(name: str, request: Request, device: str | None = Query(None)):
+        _require_id(name, "app name")
+        device = _optional_device_id(device)
         body = await request.json()
         raw = body.get("skip_when_unhealthy")
         if not isinstance(raw, bool):
@@ -559,12 +631,18 @@ def create_app() -> FastAPI:
 
     @app.put("/api/apps/{name}/config")
     async def update_app_config(name: str, request: Request):
+        _require_id(name, "app name")
         body = await request.json()
+        try:
+            validated = validate_pixlet_config_keys(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         svc = get_svc()
-        return _serialize_app(svc.app_db.upsert(name, pixlet_config=body))
+        return _serialize_app(svc.app_db.upsert(name, pixlet_config=validated))
 
     @app.post("/api/apps/{name}/render")
     async def render_app(name: str):
+        _require_id(name, "app name")
         from phoenix.paths import output_path as _output_path
         try:
             svc = get_svc()
@@ -585,6 +663,7 @@ def create_app() -> FastAPI:
     @app.post("/api/apps/{name}/preview")
     async def preview_app(name: str):
         """Render a preview for any app (even if not in DB or disabled)."""
+        _require_id(name, "app name")
         from phoenix.paths import output_path as _output_path
         try:
             svc = get_svc()
@@ -610,6 +689,7 @@ def create_app() -> FastAPI:
 
     def _serialize_panel(panel: dict) -> dict:
         row = dict(panel)
+        row["data_source"] = _redact_panel_data_source(row.get("data_source", {}))
         app_obj = get_svc().app_db.get(f"panel_{panel['id']}")
         if app_obj is not None:
             row["skip_when_unhealthy"] = app_obj.skip_when_unhealthy
@@ -638,19 +718,22 @@ def create_app() -> FastAPI:
     @app.post("/api/panels")
     async def create_panel(request: Request):
         body = await request.json()
-        panel_id = body.get("id", "").strip().lower().replace(" ", "_")
+        raw_id = body.get("id", "")
+        panel_id = raw_id.strip().lower().replace(" ", "_") if isinstance(raw_id, str) else ""
         if not panel_id:
-            return {"error": "id is required"}
+            raise HTTPException(status_code=400, detail="id is required")
+        _require_id(panel_id, "panel id")
         panel_db = get_panel_db()
         if panel_db.get(panel_id):
             return {"error": f"Panel '{panel_id}' already exists"}
 
+        data_source = _merge_panel_auth_secrets(body.get("data_source", {}), None)
         panel = panel_db.create(
             panel_id=panel_id,
             layout=body.get("layout", "big_number"),
             title=body.get("title", ""),
             config=body.get("config", {}),
-            data_source=body.get("data_source", {}),
+            data_source=data_source,
         )
 
         # Register as an app so it appears in the display cycle
@@ -678,7 +761,7 @@ def create_app() -> FastAPI:
     async def preview_panel(request: Request):
         """Render a preview of a panel config without saving it."""
         import json as json_mod
-        from phoenix.paths import data_path, star_path, output_path_large
+        from phoenix.paths import data_path, star_path
         from phoenix.render import _run_pixlet
         from phoenix.models import AppConfig
         from phoenix.paths import ensure_dirs as _ensure
@@ -687,19 +770,36 @@ def create_app() -> FastAPI:
         body = await request.json()
         preview_id = "_preview"
 
+        existing_ds = None
+        raw_id = body.get("id")
+        if isinstance(raw_id, str) and raw_id.strip():
+            existing_id = _require_id(raw_id.strip().lower().replace(" ", "_"), "panel id")
+            existing_panel = get_panel_db().get(existing_id)
+            if existing_panel is not None:
+                existing_ds = existing_panel.get("data_source")
+
         # Build panel data from the request body (same as preprocessor would)
         from phoenix.preprocessors.dashboard_panel import _build_panel_data, _fetch_http_source
+        source = _merge_panel_auth_secrets(body.get("data_source", {}), existing_ds)
         panel = {
             "layout": body.get("layout", "big_number"),
             "title": body.get("title", ""),
             "config": body.get("config", {}),
-            "data_source": body.get("data_source", {}),
+            "data_source": source,
         }
-        source = panel["data_source"]
         fetched = {}
-        if source.get("type") == "http" and source.get("url"):
+        if isinstance(source, dict) and source.get("type") == "http" and source.get("url"):
             try:
-                fetched = _fetch_http_source(source)
+                validate_panel_url(
+                    str(source["url"]).strip(),
+                    allow_private=settings.allow_private_panel_urls,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                fetched = _fetch_http_source(source, settings=settings, raise_on_blocked=True)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             except Exception:
                 pass
         panel_data = _build_panel_data(panel, fetched)
@@ -715,6 +815,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/panels/{panel_id}")
     async def get_panel(panel_id: str):
+        _require_id(panel_id, "panel id")
         panel = get_panel_db().get(panel_id)
         if panel is None:
             return {"error": "not found"}
@@ -722,8 +823,13 @@ def create_app() -> FastAPI:
 
     @app.put("/api/panels/{panel_id}")
     async def update_panel(panel_id: str, request: Request):
+        _require_id(panel_id, "panel id")
         body = await request.json()
         panel_db = get_panel_db()
+        existing = panel_db.get(panel_id)
+        if existing is not None and isinstance(body.get("data_source"), dict):
+            body = dict(body)
+            body["data_source"] = _merge_panel_auth_secrets(body["data_source"], existing.get("data_source"))
         try:
             panel = panel_db.update(panel_id, **body)
         except ValueError as e:
@@ -744,6 +850,7 @@ def create_app() -> FastAPI:
 
     @app.delete("/api/panels/{panel_id}")
     async def delete_panel(panel_id: str):
+        _require_id(panel_id, "panel id")
         panel_db = get_panel_db()
         panel_db.delete(panel_id)
         # Also remove the app
@@ -766,18 +873,22 @@ def create_app() -> FastAPI:
     @app.post("/api/playlists")
     async def create_playlist(request: Request):
         body = await request.json()
-        pid = body.get("id", "").strip().lower().replace(" ", "_")
+        raw_pid = body.get("id", "")
+        pid = raw_pid.strip().lower().replace(" ", "_") if isinstance(raw_pid, str) else ""
         if not pid:
-            return {"error": "id is required"}
+            raise HTTPException(status_code=400, detail="id is required")
+        _require_id(pid, "playlist id")
         return get_playlist_db().create_playlist(pid, body.get("name", pid), body.get("app_names", []))
 
     @app.put("/api/playlists/{playlist_id}")
     async def update_playlist(playlist_id: str, request: Request):
+        _require_id(playlist_id, "playlist id")
         body = await request.json()
         return get_playlist_db().update_playlist(playlist_id, **body)
 
     @app.delete("/api/playlists/{playlist_id}")
     async def delete_playlist(playlist_id: str):
+        _require_id(playlist_id, "playlist id")
         get_playlist_db().delete_playlist(playlist_id)
         return {"ok": True}
 
@@ -792,8 +903,9 @@ def create_app() -> FastAPI:
     @app.post("/api/schedule")
     async def create_schedule_rule(request: Request):
         body = await request.json()
+        playlist_id = _require_id(str(body.get("playlist_id", "")), "playlist id")
         return get_playlist_db().create_rule(
-            playlist_id=body["playlist_id"],
+            playlist_id=playlist_id,
             start_time=body["start_time"],
             end_time=body["end_time"],
             days=body.get("days", ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
@@ -1036,6 +1148,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/now-playing")
     async def now_playing(device: str | None = Query(None)):
+        device = _optional_device_id(device)
         current = _read_now_playing(device)
         result = {"app": current, "is_live": _is_live_app_name(current)}
         if publisher and device == settings.node_device:
@@ -1051,19 +1164,36 @@ def create_app() -> FastAPI:
     ):
         target = unquote(url)
         allowed_hosts = settings.proxy_allowed_hosts
-        validate = lambda candidate: validate_proxy_url(candidate, allowed_hosts)
+
+        def validate(candidate: str) -> None:
+            validate_proxy_url(candidate, allowed_hosts)
+
         try:
             validate(target)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         try:
             status_code, body, content_type = cache_get(target, ttl, validate_url=validate)
-            return Response(content=body, status_code=status_code, media_type=content_type)
+            raw_media = (content_type or "").split(";", 1)[0].strip().lower()
+            headers = dict(_PROXY_SECURITY_HEADERS)
+            if raw_media in _PROXY_SAFE_MEDIA_TYPES:
+                media_type = raw_media
+            else:
+                media_type = "application/octet-stream"
+                headers["Content-Disposition"] = "attachment"
+            return Response(content=body, status_code=status_code, media_type=media_type, headers=headers)
+        except ResponseTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception:
             logger.warning("[proxy] Upstream fetch failed for %s", target)
-            return Response(content=b"Upstream fetch failed", status_code=502)
+            return Response(
+                content=b"Upstream fetch failed",
+                status_code=502,
+                media_type="text/plain",
+                headers=dict(_PROXY_SECURITY_HEADERS),
+            )
 
     @app.get("/api/cache/stats")
     async def cache_stats():
@@ -1138,11 +1268,12 @@ def create_app() -> FastAPI:
     @app.post("/api/store/{name}/install")
     async def store_install(name: str):
         """Import a community app and register it."""
+        _require_id(name, "community app name")
         from phoenix.shop import import_app
         from phoenix.models import REFRESH_PRESETS
 
         svc = get_svc()
-        safe_name = name.replace("-", "_")
+        safe_name = _require_id(name.replace("-", "_"), "app name")
 
         # Check if already installed
         if svc.app_db.get(safe_name) is not None:
@@ -1172,6 +1303,7 @@ def create_app() -> FastAPI:
     @app.post("/api/store/{name}/preview")
     async def store_preview(name: str):
         """Render a preview of a community app without installing it."""
+        _require_id(name, "community app name")
         from phoenix.shop import _resolve_app_dir
         from phoenix.paths import output_path as _output_path
         import shutil
@@ -1182,13 +1314,14 @@ def create_app() -> FastAPI:
         except ValueError as e:
             return {"error": str(e)}
 
-        star_files = list(app_dir.glob("*.star"))
+        apps_root = (catalog / "apps").resolve()
+        star_files = [sf for sf in app_dir.glob("*.star") if sf.resolve().is_relative_to(apps_root)]
         if not star_files:
             return {"error": f"No .star file found for '{name}'"}
 
         # Copy .star to apps dir temporarily for rendering
-        safe_name = name.replace("-", "_")
-        tmp_star = APPS_DIR / f"{safe_name}.star"
+        safe_name = _require_id(name.replace("-", "_"), "app name")
+        tmp_star = ensure_within(APPS_DIR, APPS_DIR / f"{safe_name}.star", "preview app path")
         already_exists = tmp_star.exists()
 
         if not already_exists:
@@ -1216,6 +1349,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/config")
     async def get_config(device: str | None = Query(None)):
+        device = _optional_device_id(device)
         if device:
             cfg = _device_config(device)
             return cfg if cfg is not None else {"error": f"no device {device}"}
@@ -1224,6 +1358,7 @@ def create_app() -> FastAPI:
 
     @app.put("/api/config")
     async def update_config(request: Request, device: str | None = Query(None)):
+        device = _optional_device_id(device)
         body = await request.json()
         if device:
             fields = {k: body[k] for k in ("layout_mode", "cycle_interval", "brightness", "single_app") if k in body}
@@ -1278,10 +1413,13 @@ def create_app() -> FastAPI:
         name = body.get("name")
         backend = body.get("backend", "web")
         if not device_id or not name:
-            return {"error": "id and name are required"}
+            raise HTTPException(status_code=400, detail="id and name are required")
+        _require_id(str(device_id), "device id")
         ddb = get_device_db()
         if ddb.get(device_id) is not None:
             return {"error": f"device '{device_id}' already exists"}
+        if body.get("mirror_of"):
+            _require_id(str(body["mirror_of"]), "mirror_of device id")
         extra = {
             k: body[k]
             for k in ("brightness", "layout_mode", "cycle_interval", "mirror_of", "sort_order", "enabled")
@@ -1291,12 +1429,16 @@ def create_app() -> FastAPI:
 
     @app.get("/api/devices/{device_id}")
     async def get_device(device_id: str):
+        _require_id(device_id, "device id")
         dev = get_device_db().get(device_id)
         return _serialize_device(dev) if dev else {"error": f"no device {device_id}"}
 
     @app.put("/api/devices/{device_id}")
     async def update_device(device_id: str, request: Request):
+        _require_id(device_id, "device id")
         body = await request.json()
+        if body.get("mirror_of"):
+            _require_id(str(body["mirror_of"]), "mirror_of device id")
         if "single_app" in body:
             _validate_single_app(device_id, body["single_app"])
         dev = get_device_db().update(device_id, **body)
@@ -1304,11 +1446,13 @@ def create_app() -> FastAPI:
 
     @app.delete("/api/devices/{device_id}")
     async def delete_device(device_id: str):
+        _require_id(device_id, "device id")
         get_device_db().delete(device_id)
         return {"ok": True, "deleted": device_id}
 
     @app.put("/api/devices/{device_id}/brightness-schedule")
     async def update_brightness_schedule(device_id: str, schedule: BrightnessSchedule):
+        _require_id(device_id, "device id")
         ddb = get_device_db()
         device = ddb.get(device_id)
         if device is None:
@@ -1326,8 +1470,17 @@ def create_app() -> FastAPI:
         """Push {apps, config, now_playing} on connect and whenever it changes,
         with a heartbeat every ~15s. One socket replaces per-client polling.
         Pass ?device=<id> to scope the push to a single panel."""
-        await ws.accept()
+        if _is_cross_origin_headers(ws.headers):
+            await ws.close(code=1008)
+            return
         device = ws.query_params.get("device") or None
+        if device is not None:
+            try:
+                require_identifier(device, "device id")
+            except ValueError:
+                await ws.close(code=1008)
+                return
+        await ws.accept()
         last_sig: str | None = None
         ticks = 0
         try:

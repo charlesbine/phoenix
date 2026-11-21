@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 CACHE_DB = DB_PATH.parent / "cache.db"
 DEFAULT_TTL = 300  # 5 minutes
 MAX_REDIRECTS = 5
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+class ResponseTooLargeError(ValueError):
+    """Raised when an upstream HTTP response exceeds MAX_RESPONSE_BYTES."""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS http_cache (
@@ -64,22 +69,84 @@ def _url_hash(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:32]
 
 
+def _read_bounded_response(
+    client: httpx.Client,
+    url: str,
+    headers: dict[str, str],
+    max_bytes: int,
+) -> tuple[int, bytes, dict[str, str], bool]:
+    """Fetch a single HTTP response while enforcing a streaming max body size cap."""
+    if hasattr(client, "stream"):
+        with client.stream("GET", url, headers=headers) as resp:
+            if resp.is_redirect and resp.headers.get("location"):
+                return resp.status_code, b"", dict(resp.headers), True
+            raw_len = resp.headers.get("content-length")
+            if raw_len is not None:
+                try:
+                    declared = int(raw_len)
+                except ValueError:
+                    declared = None
+                if declared is not None and declared > max_bytes:
+                    raise ResponseTooLargeError(f"Upstream response exceeds {max_bytes} byte limit")
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in resp.iter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ResponseTooLargeError(f"Upstream response exceeds {max_bytes} byte limit")
+                chunks.append(chunk)
+            return resp.status_code, b"".join(chunks), dict(resp.headers), False
+
+    # Fallback for test doubles that only implement client.get()
+    resp = client.get(url, headers=headers)
+    if resp.is_redirect and resp.headers.get("location"):
+        return resp.status_code, b"", dict(resp.headers), True
+    body = resp.content
+    if len(body) > max_bytes:
+        raise ResponseTooLargeError(f"Upstream response exceeds {max_bytes} byte limit")
+    return resp.status_code, body, dict(resp.headers), False
+
+
+def _header_get(headers: dict[str, str], key: str, default: str = "") -> str:
+    key_lower = key.lower()
+    for k, v in headers.items():
+        if k.lower() == key_lower:
+            return v
+    return default
+
+
 def _fetch_with_validation(
     url: str,
     headers: dict[str, str],
     validate_url: Callable[[str], None],
-) -> httpx.Response:
+    max_bytes: int,
+) -> tuple[int, bytes, dict[str, str]]:
     """Follow redirects manually so every hop is re-validated against SSRF rules."""
     current = url
     with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
         for _ in range(MAX_REDIRECTS + 1):
             validate_url(current)
-            resp = client.get(current, headers=headers)
-            if resp.is_redirect and resp.headers.get("location"):
-                current = urljoin(current, resp.headers["location"])
-                continue
-            return resp
+            status_code, body, resp_headers, is_redirect = _read_bounded_response(
+                client, current, headers, max_bytes
+            )
+            if is_redirect:
+                location = _header_get(resp_headers, "location")
+                if location:
+                    current = urljoin(current, location)
+                    continue
+            return status_code, body, resp_headers
     raise ValueError("Too many redirects")
+
+
+def _fetch_unvalidated(
+    url: str,
+    headers: dict[str, str],
+    max_bytes: int,
+) -> tuple[int, bytes, dict[str, str]]:
+    """Fetch a URL with redirects and streaming body size enforcement."""
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        status_code, body, resp_headers, _ = _read_bounded_response(client, url, headers, max_bytes)
+        return status_code, body, resp_headers
 
 
 @dataclass(frozen=True)
@@ -103,11 +170,13 @@ def cache_get_meta(
     headers: dict[str, str] | None = None,
     *,
     validate_url: Callable[[str], None] | None = None,
+    max_bytes: int | None = None,
 ) -> CacheResponse:
     """Fetch a URL through the cache with freshness and fallback metadata."""
     if validate_url is not None:
         validate_url(url)
 
+    limit = MAX_RESPONSE_BYTES if max_bytes is None else max_bytes
     now = time.time()
     # Include headers in cache key so different auth tokens get separate cache entries
     h = _url_hash(url + (str(sorted(headers.items())) if headers else ""))
@@ -132,18 +201,17 @@ def cache_get_meta(
     # Cache miss or stale — try to fetch fresh
     try:
         if validate_url is not None:
-            resp = _fetch_with_validation(url, headers or {}, validate_url)
+            status_code, body, resp_headers = _fetch_with_validation(url, headers or {}, validate_url, limit)
         else:
-            with httpx.Client(timeout=15, follow_redirects=True) as client:
-                resp = client.get(url, headers=headers or {})
-        content_type = resp.headers.get("content-type", "application/octet-stream")
+            status_code, body, resp_headers = _fetch_unvalidated(url, headers or {}, limit)
+        content_type = _header_get(resp_headers, "content-type", "application/octet-stream")
         fetched_at = time.time()
-        if 200 <= resp.status_code < 300:
-            _store(h, url, resp.status_code, resp.content, content_type, ttl, fetched_at)
-        logger.debug("[cache] MISS — fetched fresh %s (%d)", url, resp.status_code)
+        if 200 <= status_code < 300:
+            _store(h, url, status_code, body, content_type, ttl, fetched_at)
+        logger.debug("[cache] MISS — fetched fresh %s (%d)", url, status_code)
         return CacheResponse(
-            status_code=resp.status_code,
-            body=resp.content,
+            status_code=status_code,
+            body=body,
             content_type=content_type,
             fetched_at=fetched_at,
             from_cache=False,
@@ -173,9 +241,10 @@ def cache_get(
     headers: dict[str, str] | None = None,
     *,
     validate_url: Callable[[str], None] | None = None,
+    max_bytes: int | None = None,
 ) -> tuple[int, bytes, str]:
     """Fetch a URL through the cache. Returns (status_code, body, content_type)."""
-    res = cache_get_meta(url, ttl, headers=headers, validate_url=validate_url)
+    res = cache_get_meta(url, ttl, headers=headers, validate_url=validate_url, max_bytes=max_bytes)
     return res.status_code, res.body, res.content_type
 
 

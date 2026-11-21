@@ -10,6 +10,7 @@ from pathlib import Path
 
 from phoenix.mqtt import get_message, get_mqtt_client
 from phoenix.paths import DATA_DIR, star_path, ensure_dirs
+from phoenix.render import PIXLET_TIMEOUT_SECONDS, pixlet_subprocess_env
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,14 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
             ]
             if mag:
                 cmd.extend(["-m", str(mag)])
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            proc = subprocess.run(
+                cmd,
+                env=pixlet_subprocess_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PIXLET_TIMEOUT_SECONDS,
+            )
             if proc.returncode != 0:
                 logger.error("[packages] pixlet failed: %s", proc.stderr)
                 raise RuntimeError(f"[packages] {proc.stderr.strip().splitlines()[-1]}")

@@ -481,7 +481,7 @@ def dashboard():
     uvicorn.run(
         "phoenix.server.dashboard:create_app",
         factory=True,
-        host="0.0.0.0",
+        host=settings.dashboard_host,
         port=settings.dashboard_port,
         reload=False,
     )

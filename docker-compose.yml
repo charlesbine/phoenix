@@ -2,21 +2,30 @@ services:
   phoenix:
     build: .
     ports:
-      - "7002:7002"
-    devices:
-      - "/dev/ttyACM0:/dev/ttyACM0"   # Matrix Portal M4 serial
-      - "/dev/snd:/dev/snd"           # ALSA — USB mic for the audio visualizer
+      - "127.0.0.1:7002:7002"
+    # Uncomment for physical USB hardware (Matrix Portal M4 serial / USB audio mic):
+    # devices:
+    #   - "/dev/ttyACM0:/dev/ttyACM0"   # Matrix Portal M4 serial
+    #   - "/dev/snd:/dev/snd"           # ALSA — USB mic for the audio visualizer
     volumes:
       - phoenix-data:/app/phoenix/data
       - phoenix-outputs:/app/phoenix/outputs
     environment:
-      - PHOENIX_PLATFORM=serial
-      - PHOENIX_SERIAL_PORT=/dev/ttyACM0
+      - PHOENIX_PLATFORM=${PHOENIX_PLATFORM:-web}
+      - PHOENIX_DASHBOARD_HOST=0.0.0.0
+      # Uncomment when switching PHOENIX_PLATFORM=serial:
+      # - PHOENIX_SERIAL_PORT=/dev/ttyACM0
       # USB mic: "" = ALSA default. Pin by name substring once you know it, e.g.
       # PHOENIX_AUDIO_DEVICE=USB. Find it with:
       #   docker compose exec phoenix uv run python -c \
       #     "from phoenix.audio.source import list_input_devices as l; print(l())"
       - PHOENIX_AUDIO_DEVICE=${PHOENIX_AUDIO_DEVICE:-}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7002/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
 volumes:

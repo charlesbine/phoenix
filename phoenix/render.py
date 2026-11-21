@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +30,26 @@ from phoenix.settings import Settings
 logger = logging.getLogger(__name__)
 
 MAX_TIME_BETWEEN_UPDATES = timedelta(seconds=30)
+PIXLET_TIMEOUT_SECONDS = 60
+PIXLET_CONFIG_KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
+_PIXLET_ENV_KEYS = ("PATH", "HOME", "TZ", "LANG", "LC_ALL", "TMPDIR")
+
+
+def validate_pixlet_config_keys(config: dict) -> dict[str, str]:
+    """Validate pixlet_config keys to prevent CLI flag injection (e.g. leading '-')."""
+    if not isinstance(config, dict):
+        raise ValueError("pixlet_config must be a JSON object")
+    cleaned: dict[str, str] = {}
+    for key, value in config.items():
+        if not isinstance(key, str) or PIXLET_CONFIG_KEY_RE.fullmatch(key) is None:
+            raise ValueError(f"Invalid pixlet_config key: {key!r}")
+        cleaned[key] = "" if value is None else str(value)
+    return cleaned
+
+
+def pixlet_subprocess_env() -> dict[str, str]:
+    """Return a minimal environment for pixlet subprocesses without host secrets."""
+    return {k: v for k, v in os.environ.items() if k in _PIXLET_ENV_KEYS}
 
 
 def _is_panel(name: str) -> bool:
@@ -464,15 +485,23 @@ def _run_pixlet(app: AppConfig, settings: Settings, large: bool = False, star_ov
         if large:
             cmd.extend(["-m", str(settings.magnification)])
 
-        for key, value in app.pixlet_config.items():
+        validated_config = validate_pixlet_config_keys(app.pixlet_config)
+        for key, value in validated_config.items():
             cmd.append(f"{key}={value}")
 
         logger.debug("[%s] pixlet: %s", app.name, " ".join(cmd))
-        proc = subprocess.run(cmd, env=os.environ, capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            cmd,
+            env=pixlet_subprocess_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=PIXLET_TIMEOUT_SECONDS,
+        )
         if proc.returncode != 0:
             logger.error("[%s] pixlet failed (rc=%d): %s", app.name, proc.returncode, proc.stderr)
             # Extract the useful part of stderr (last line of traceback usually has the error)
-            stderr_lines = [l.strip() for l in proc.stderr.strip().splitlines() if l.strip()]
+            stderr_lines = [line.strip() for line in proc.stderr.strip().splitlines() if line.strip()]
             detail = stderr_lines[-1] if stderr_lines else "unknown error"
             raise RuntimeError(f"[{app.name}] {detail}")
 
