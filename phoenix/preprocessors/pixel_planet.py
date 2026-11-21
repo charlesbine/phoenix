@@ -1,4 +1,10 @@
-"""Select a planet GIF — either pre-generated from assets or procedurally generated."""
+"""Select a planet GIF — either pre-generated from assets or procedurally generated.
+
+Pre-generated planet GIFs and the procedural planet re-implementation are based on
+Deep-Fold's Pixel Planet Generator (MIT License):
+https://deep-fold.itch.io/pixel-planet-generator
+https://github.com/Deep-Fold/PixelPlanets
+"""
 
 import base64
 import json

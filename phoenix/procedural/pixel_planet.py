@@ -1,8 +1,12 @@
 """Procedural pixel planet generator.
 
-Port of Deep-Fold's Pixel Planet Generator shaders to pure Python/Pillow.
-Original: https://github.com/Deep-Fold/PixelPlanets (MIT License)
+Pure Python/Pillow re-implementation of the shader algorithms from
+Deep-Fold's Pixel Planet Generator (MIT License).
+Web / Itch.io: https://deep-fold.itch.io/pixel-planet-generator
+Original repo: https://github.com/Deep-Fold/PixelPlanets
 JS port reference: https://github.com/Timur310/PixelPlanets
+
+Copyright (c) 2020 Deep-Fold (MIT License — see THIRD_PARTY_LICENSES.md).
 """
 
 from __future__ import annotations

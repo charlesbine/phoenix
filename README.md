@@ -183,6 +183,9 @@ c++ -std=c++11 -Wall -Wextra -Werror firmware/tests/panel_color_test.cpp -o /tmp
 /tmp/panel-color-test
 ```
 
-## License
+## Credits & License
+
+- **Procedural Planet (`procedural_planet` / `pixel_planet`):** Re-implements the shader algorithms from Deep-Fold's **[Pixel Planet Generator](https://deep-fold.itch.io/pixel-planet-generator)** ([`Deep-Fold/PixelPlanets`](https://github.com/Deep-Fold/PixelPlanets), MIT License). See [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+- **Tidbyt / Pixlet & Tronbyt Ecosystem:** Starlark rendering via [Pixlet](https://github.com/tidbyt/pixlet) and community catalog mirrored from [`tronbyt/apps`](https://github.com/tronbyt/apps).
 
 MIT — see [`LICENSE`](LICENSE).
