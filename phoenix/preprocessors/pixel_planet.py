@@ -1,10 +1,16 @@
-"""Select a planet GIF — either pre-generated from assets or procedurally generated."""
+"""Select a planet GIF — either pre-generated from assets or procedurally generated.
+
+Pre-generated planet GIFs and the procedural planet re-implementation are based on
+Deep-Fold's Pixel Planet Generator (MIT License):
+https://deep-fold.itch.io/pixel-planet-generator
+https://github.com/Deep-Fold/PixelPlanets
+"""
 
 import base64
 import json
 import random
 
-from phoenix.models import AppStatus, PreprocessorResult
+from phoenix.models import PreprocessorResult
 from phoenix.paths import ASSETS_DIR, data_path
 from phoenix.procedural.pixel_planet import PLANET_TYPES, generate_planet_gif
 from phoenix.settings import Settings

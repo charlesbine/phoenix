@@ -621,6 +621,46 @@ class DeviceDatabase:
             conn.commit()
 
 
+_STARTER_APPS: tuple[dict, ...] = (
+    {
+        "name": "procedural_landscape",
+        "refresh_interval": 1800.0,
+        "priority": 2,
+        "pixlet_config": {"terrain": "auto", "palette": "auto"},
+    },
+    {
+        "name": "procedural_planet",
+        "refresh_interval": 1800.0,
+        "priority": 2,
+        "pixlet_config": {},
+    },
+    {
+        "name": "gradient_clock",
+        "refresh_interval": 30.0,
+        "priority": 1,
+        "pixlet_config": {},
+    },
+    {
+        "name": "day_night_map",
+        "refresh_interval": 900.0,
+        "priority": 1,
+        "pixlet_config": {},
+    },
+    {
+        "name": "life",
+        "refresh_interval": 1800.0,
+        "priority": 1,
+        "pixlet_config": {},
+    },
+    {
+        "name": "aquarium",
+        "refresh_interval": 1800.0,
+        "priority": 0,
+        "pixlet_config": {},
+    },
+)
+
+
 def seed_default_device(
     device_id: str = "main",
     name: str = "Main",
@@ -628,8 +668,9 @@ def seed_default_device(
     path: str | Path | None = None,
 ) -> str | None:
     """If no devices exist yet, migrate the current single-device state into one
-    device (config + the whole global rotation). Idempotent and non-destructive —
-    it only reads the legacy tables and writes the new ones.
+    device (config + the whole global rotation). On a brand-new empty database
+    with no user apps yet, also seeds a curated set of zero-config starter apps.
+    Idempotent and non-destructive.
 
     Returns the seeded device id, or None if devices already existed.
     """
@@ -645,9 +686,21 @@ def seed_default_device(
         layout_mode=cfg.layout_mode,
         cycle_interval=cfg.cycle_interval,
     )
-    for app in AppDatabase(path).list_apps():
-        if app.source == "builtin":
-            continue
+    adb = AppDatabase(path)
+    existing_apps = [app for app in adb.list_apps() if app.source != "builtin"]
+    if not existing_apps:
+        for idx, starter in enumerate(_STARTER_APPS):
+            adb.upsert(
+                starter["name"],
+                enabled=True,
+                active=True,
+                refresh_interval=starter["refresh_interval"],
+                priority=starter["priority"],
+                sort_order=idx,
+                pixlet_config=dict(starter["pixlet_config"]),
+            )
+        existing_apps = [app for app in adb.list_apps() if app.source != "builtin"]
+    for app in existing_apps:
         ddb.set_app(
             device_id,
             app.name,
@@ -655,7 +708,7 @@ def seed_default_device(
             priority=app.priority,
             sort_order=app.sort_order,
         )
-    logger.info("Seeded default device %r from existing single-device state", device_id)
+    logger.info("Seeded default device %r with %d apps", device_id, len(existing_apps))
     return device_id
 
 

@@ -10,6 +10,8 @@ from threading import Lock
 
 import yaml  # type: ignore[import-untyped]
 
+from phoenix.paths import ensure_within, require_identifier
+
 logger = logging.getLogger(__name__)
 
 COMMUNITY_REPO = "https://github.com/charlesbine/phoenix-apps.git"
@@ -146,22 +148,27 @@ def _resolve_app_dir(repo_path: Path, name: str) -> Path:
 
     Tries: exact directory match, then scans manifests for matching id.
     """
+    require_identifier(name, "community app name")
+    apps_dir = repo_path / "apps"
+    apps_dir_resolved = apps_dir.resolve()
+
     # Direct directory match
-    app_dir = repo_path / "apps" / name
-    if app_dir.exists():
+    app_dir = ensure_within(apps_dir_resolved, apps_dir / name, "community app path")
+    if app_dir.exists() and app_dir.is_dir():
         return app_dir
 
     # Scan manifests for matching id (handles fuzzy-clock -> fuzzyclock)
-    apps_dir = repo_path / "apps"
     if apps_dir.exists():
         for d in apps_dir.iterdir():
             if not d.is_dir():
+                continue
+            if not d.resolve().is_relative_to(apps_dir_resolved):
                 continue
             manifest = d / "manifest.yaml"
             if manifest.exists():
                 try:
                     meta = yaml.safe_load(manifest.read_text())
-                    if meta.get("id") == name:
+                    if isinstance(meta, dict) and meta.get("id") == name:
                         return d
                 except Exception:
                     pass
@@ -181,24 +188,29 @@ def import_app(repo_path: Path, name: str, dest: Path) -> Path:
     Apps with asset subdirectories (images/, etc.) get their own directory under
     dest. Simple single-file apps get copied as a flat .star file.
     """
+    require_identifier(name, "community app name")
     app_dir = _resolve_app_dir(repo_path, name)
+    apps_dir_resolved = (repo_path / "apps").resolve()
+    dest_resolved = dest.resolve()
 
-    star_files = list(app_dir.glob("*.star"))
+    star_files = [sf for sf in app_dir.glob("*.star") if sf.resolve().is_relative_to(apps_dir_resolved)]
     if not star_files:
         raise ValueError(f"No .star file found in {app_dir}")
 
-    safe_name = name.replace("-", "_")
+    safe_name = require_identifier(name.replace("-", "_"), "app name")
     has_assets = any(item.is_dir() for item in app_dir.iterdir())
 
     if has_assets:
         # Copy entire directory: dest/safe_name/
-        dst_dir = dest / safe_name
+        dst_dir = ensure_within(dest_resolved, dest / safe_name, "import destination")
+        if dst_dir.resolve() == dest_resolved:
+            raise ValueError(f"Invalid import destination for '{name}'")
         if dst_dir.exists():
             shutil.rmtree(dst_dir)
         shutil.copytree(app_dir, dst_dir, ignore=shutil.ignore_patterns("manifest.yaml", "*.webp", "*.md"))
         # Rename the .star file to match the safe_name
         for sf in dst_dir.glob("*.star"):
-            target = dst_dir / f"{safe_name}.star"
+            target = ensure_within(dst_dir, dst_dir / f"{safe_name}.star", "star target")
             if sf != target:
                 sf.rename(target)
             break
@@ -206,7 +218,7 @@ def import_app(repo_path: Path, name: str, dest: Path) -> Path:
         return dst_dir / f"{safe_name}.star"
     else:
         # Simple app: just copy the .star file
-        dst_star = dest / f"{safe_name}.star"
+        dst_star = ensure_within(dest_resolved, dest / f"{safe_name}.star", "import destination")
         shutil.copy(star_files[0], dst_star)
         logger.info("Imported %s -> %s", star_files[0].name, dst_star)
         return dst_star

@@ -49,7 +49,7 @@ def _isolate_mqtt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestModelAndMigration:
     def test_app_config_health_defaults_and_skip_property(self):
-        app = AppConfig(name="panel_amoura_mrr")
+        app = AppConfig(name="panel_acme_mrr")
         assert app.skip_when_unhealthy is False
         assert app.health_status == "unknown"
         assert app.health_reason == ""
@@ -88,30 +88,30 @@ class TestModelAndMigration:
                 )
                 """
             )
-            conn.execute("INSERT INTO apps (name, enabled) VALUES ('panel_amoura_mrr', 1)")
+            conn.execute("INSERT INTO apps (name, enabled) VALUES ('panel_acme_mrr', 1)")
             conn.commit()
         _initialized.discard(str(db_path))
 
         adb = AppDatabase(db_path)
-        app = adb.get("panel_amoura_mrr")
+        app = adb.get("panel_acme_mrr")
         assert app is not None
         assert app.skip_when_unhealthy is False
         assert app.health_status == "unknown"
 
         now = datetime.now()
         adb.upsert(
-            "panel_amoura_mrr",
+            "panel_acme_mrr",
             skip_when_unhealthy=True,
             health_status="unhealthy",
-            health_reason="HTTP 502 from api.amoura.app/metrics",
+            health_reason="HTTP 502 from metrics.example.com/metrics",
             last_healthy=now - timedelta(minutes=20),
             health_checked_at=now,
         )
-        updated = adb.get("panel_amoura_mrr")
+        updated = adb.get("panel_acme_mrr")
         assert updated is not None
         assert updated.skip_when_unhealthy is True
         assert updated.health_status == "unhealthy"
-        assert updated.health_reason == "HTTP 502 from api.amoura.app/metrics"
+        assert updated.health_reason == "HTTP 502 from metrics.example.com/metrics"
         assert updated.last_healthy is not None
         assert updated.is_skipped_unhealthy is True
 
@@ -213,11 +213,11 @@ class TestPanelIngressHealth:
 
         self._make_panel(
             db_path,
-            "amoura_mrr",
+            "acme_mrr",
             "big_number",
             {
                 "type": "http",
-                "url": "https://api.amoura.app/v1/metrics?api_key=super_secret_token",
+                "url": "https://metrics.example.com/v1/metrics?api_key=super_secret_token",
                 "ttl": 60,
                 "mappings": {"value": "mrr_cents"},
             },
@@ -232,18 +232,18 @@ class TestPanelIngressHealth:
             ),
         )
         monkeypatch.setattr(dp, "cache_get_meta", cache_mod.cache_get_meta)
-        res = dp.run_panel("amoura_mrr", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_mrr", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "HTTP 502" in res.health_reason
-        assert "api.amoura.app/v1/metrics" in res.health_reason
+        assert "metrics.example.com/v1/metrics" in res.health_reason
         assert "super_secret_token" not in res.health_reason
 
         # Network error
         def boom(*args, **kwargs):
-            raise httpx.ConnectError("failed connecting to https://api.amoura.app/v1/metrics?api_key=super_secret_token")
+            raise httpx.ConnectError("failed connecting to https://metrics.example.com/v1/metrics?api_key=super_secret_token")
 
         monkeypatch.setattr(dp, "cache_get_meta", boom)
-        res = dp.run_panel("amoura_mrr", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_mrr", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "ConnectError" in res.health_reason
         assert "super_secret_token" not in res.health_reason
@@ -254,14 +254,14 @@ class TestPanelIngressHealth:
         db_path = tmp_path / "p.db"
         monkeypatch.setattr(dp, "data_path", lambda name: tmp_path / f"{name}.json")
 
-        # 1. key_value with all mapped fields missing (mirrors Amoura LLM Costs / Sessions outage)
+        # 1. key_value with all mapped fields missing (mirrors a metrics / sessions outage)
         self._make_panel(
             db_path,
-            "amoura_costs",
+            "acme_costs",
             "key_value",
             {
                 "type": "http",
-                "url": "https://api.amoura.app/costs",
+                "url": "https://metrics.example.com/costs",
                 "mappings": {
                     "items": [
                         {"key": "Spend:", "value_path": "spend_usd"},
@@ -277,18 +277,18 @@ class TestPanelIngressHealth:
                 status_code=200, body=b'{"other": 1}', content_type="application/json", fetched_at=time.time()
             ),
         )
-        res = dp.run_panel("amoura_costs", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_costs", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "missing" in res.health_reason.lower()
 
         # 2. sparkline with empty points array
         self._make_panel(
             db_path,
-            "amoura_mrr_chart",
+            "acme_mrr_chart",
             "sparkline",
             {
                 "type": "http",
-                "url": "https://api.amoura.app/mrr-chart",
+                "url": "https://metrics.example.com/mrr-chart",
                 "mappings": {"points": "daily_mrr", "point_value": "mrr_cents"},
             },
         )
@@ -299,18 +299,18 @@ class TestPanelIngressHealth:
                 status_code=200, body=b'{"daily_mrr": []}', content_type="application/json", fetched_at=time.time()
             ),
         )
-        res = dp.run_panel("amoura_mrr_chart", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_mrr_chart", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "data points" in res.health_reason.lower()
 
         # 3. multi_stat with all stats missing
         self._make_panel(
             db_path,
-            "amoura_growth",
+            "acme_growth",
             "multi_stat",
             {
                 "type": "http",
-                "url": "https://api.amoura.app/growth",
+                "url": "https://metrics.example.com/growth",
                 "mappings": {
                     "stats": [
                         {"label": "Users", "value_path": "users.total"},
@@ -326,7 +326,7 @@ class TestPanelIngressHealth:
                 status_code=200, body=b'{"status": "ok"}', content_type="application/json", fetched_at=time.time()
             ),
         )
-        res = dp.run_panel("amoura_growth", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_growth", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "missing" in res.health_reason.lower()
 
@@ -348,7 +348,7 @@ class TestPanelIngressHealth:
         assert res.healthy is False
         assert "headline" in res.health_reason
 
-        # 5. Valid Amoura payload -> healthy
+        # 5. Valid metrics payload -> healthy
         monkeypatch.setattr(
             dp,
             "cache_get_meta",
@@ -359,7 +359,7 @@ class TestPanelIngressHealth:
                 fetched_at=time.time(),
             ),
         )
-        res = dp.run_panel("amoura_costs", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_costs", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is True
         assert res.health_reason == ""
 
@@ -373,11 +373,11 @@ class TestPanelIngressHealth:
 
         self._make_panel(
             db_path,
-            "amoura_mrr",
+            "acme_mrr",
             "big_number",
             {
                 "type": "http",
-                "url": "https://api.amoura.app/mrr",
+                "url": "https://metrics.example.com/mrr",
                 "stale_after": 600,
                 "timestamp_path": "updated_at",
                 "mappings": {"value": "mrr"},
@@ -396,7 +396,7 @@ class TestPanelIngressHealth:
                 fetched_at=now,
             ),
         )
-        res = dp.run_panel("amoura_mrr", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_mrr", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is True
 
         # Stale ISO-8601 timestamp (30m old, limit 10m) -> unhealthy
@@ -411,16 +411,16 @@ class TestPanelIngressHealth:
                 fetched_at=now,
             ),
         )
-        res = dp.run_panel("amoura_mrr", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_mrr", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "stale" in res.health_reason.lower()
 
         # Stale cache fallback with no explicit stale_after -> immediately unhealthy
         self._make_panel(
             db_path,
-            "amoura_subs",
+            "acme_subs",
             "big_number",
-            {"type": "http", "url": "https://api.amoura.app/subs", "mappings": {"value": "subs"}},
+            {"type": "http", "url": "https://metrics.example.com/subs", "mappings": {"value": "subs"}},
         )
         monkeypatch.setattr(
             dp,
@@ -435,7 +435,7 @@ class TestPanelIngressHealth:
                 error="ConnectError",
             ),
         )
-        res = dp.run_panel("amoura_subs", Settings(_env_file=None), db_path=db_path)
+        res = dp.run_panel("acme_subs", Settings(_env_file=None), db_path=db_path)
         assert res.healthy is False
         assert "unreachable" in res.health_reason.lower()
 
@@ -515,19 +515,19 @@ class TestRenderAndRecovery:
 
         db_path = tmp_path / "r.db"
         adb = AppDatabase(db_path)
-        adb.upsert("panel_amoura_mrr", enabled=True, skip_when_unhealthy=True)
+        adb.upsert("panel_acme_mrr", enabled=True, skip_when_unhealthy=True)
 
         results = iter([
             PreprocessorResult(data={"layout": "big_number", "value": "$641"}, healthy=True),
-            PreprocessorResult(data={"layout": "big_number", "value": "—"}, healthy=False, health_reason="HTTP 502 from api.amoura.app"),
+            PreprocessorResult(data={"layout": "big_number", "value": "—"}, healthy=False, health_reason="HTTP 502 from metrics.example.com"),
             PreprocessorResult(data={"layout": "big_number", "value": "$650"}, healthy=True),
         ])
         monkeypatch.setattr(dp, "run_panel", lambda pid, settings, db_path=None: next(results))
         monkeypatch.setattr(render_mod, "_render_dispatch", lambda app, settings: None)
 
         # 1. Healthy render sets last_healthy
-        run_app("panel_amoura_mrr", Settings(_env_file=None), adb)
-        healthy = adb.get("panel_amoura_mrr")
+        run_app("panel_acme_mrr", Settings(_env_file=None), adb)
+        healthy = adb.get("panel_acme_mrr")
         assert healthy is not None
         assert healthy.health_status == "healthy"
         assert healthy.health_reason == ""
@@ -535,18 +535,18 @@ class TestRenderAndRecovery:
         first_healthy_ts = healthy.last_healthy
 
         # 2. Outage marks unhealthy WITHOUT disabling and preserves last_healthy
-        run_app("panel_amoura_mrr", Settings(_env_file=None), adb)
-        down = adb.get("panel_amoura_mrr")
+        run_app("panel_acme_mrr", Settings(_env_file=None), adb)
+        down = adb.get("panel_acme_mrr")
         assert down is not None
         assert down.enabled is True
         assert down.health_status == "unhealthy"
-        assert down.health_reason == "HTTP 502 from api.amoura.app"
+        assert down.health_reason == "HTTP 502 from metrics.example.com"
         assert down.last_healthy == first_healthy_ts
         assert down.is_skipped_unhealthy is True
 
         # 3. Recovery clears reason and updates last_healthy
-        run_app("panel_amoura_mrr", Settings(_env_file=None), adb)
-        recovered = adb.get("panel_amoura_mrr")
+        run_app("panel_acme_mrr", Settings(_env_file=None), adb)
+        recovered = adb.get("panel_acme_mrr")
         assert recovered is not None
         assert recovered.health_status == "healthy"
         assert recovered.health_reason == ""
@@ -615,7 +615,7 @@ class TestRenderAndRecovery:
         db_path = tmp_path / "preview.db"
         monkeypatch.setattr(db_mod, "DB_PATH", db_path)
         adb = AppDatabase(db_path)
-        adb.upsert("panel_amoura_costs", enabled=True, skip_when_unhealthy=True)
+        adb.upsert("panel_acme_costs", enabled=True, skip_when_unhealthy=True)
         monkeypatch.setattr(
             dp,
             "run_panel",
@@ -627,8 +627,8 @@ class TestRenderAndRecovery:
         )
         monkeypatch.setattr(render_mod, "_render_dispatch", lambda app, settings: None)
 
-        render_preview("panel_amoura_costs", Settings(_env_file=None))
-        state = adb.get("panel_amoura_costs")
+        render_preview("panel_acme_costs", Settings(_env_file=None))
+        state = adb.get("panel_acme_costs")
         assert state is not None
         assert state.health_status == "unhealthy"
         assert state.health_reason == "All mapped fields missing from payload"
@@ -643,45 +643,45 @@ class TestDisplaySkipWhenUnhealthy:
 
         adb.upsert("clock", enabled=True, health_status="healthy", skip_when_unhealthy=True)
         adb.upsert(
-            "panel_amoura_costs",
+            "panel_acme_costs",
             enabled=True,
             health_status="unhealthy",
             health_reason="All mapped fields missing from payload",
             skip_when_unhealthy=True,
         )
         adb.upsert(
-            "panel_amoura_mrr",
+            "panel_acme_mrr",
             enabled=True,
             health_status="unhealthy",
             health_reason="HTTP 502",
             skip_when_unhealthy=False,
         )
 
-        for idx, name in enumerate(("clock", "panel_amoura_costs", "panel_amoura_mrr")):
+        for idx, name in enumerate(("clock", "panel_acme_costs", "panel_acme_mrr")):
             ddb.set_app("apollo", name, enabled=True, sort_order=idx)
 
         # Device mode
         dm = DisplayManager(FakeBackend(), app_db=adb, device_id="apollo", device_db=ddb)
-        assert [a.name for a in dm._collect_active()] == ["clock", "panel_amoura_mrr"]
+        assert [a.name for a in dm._collect_active()] == ["clock", "panel_acme_mrr"]
 
         # Global mode
         global_dm = DisplayManager(FakeBackend(), app_db=adb, config_db=ConfigDatabase(db), device_db=ddb)
-        assert {a.name for a in global_dm._collect_active()} == {"clock", "panel_amoura_mrr"}
+        assert {a.name for a in global_dm._collect_active()} == {"clock", "panel_acme_mrr"}
 
         # Mid-cycle guard in _display_app skips unhealthy opt-in app
         outputs = tmp_path / "outputs"
         outputs.mkdir()
-        (outputs / "panel_amoura_costs.webp").write_bytes(b"webp")
+        (outputs / "panel_acme_costs.webp").write_bytes(b"webp")
         monkeypatch.setattr(manager_mod, "output_path", lambda name: outputs / f"{name}.webp")
 
         backend = FakeBackend()
         dm = DisplayManager(backend, app_db=adb, device_id="apollo", device_db=ddb)
-        dm._display_app(adb.get("panel_amoura_costs"), 10)  # type: ignore[arg-type]
+        dm._display_app(adb.get("panel_acme_costs"), 10)  # type: ignore[arg-type]
         assert backend.shown == []
 
         # Explicit show_now can still preview an unhealthy app on demand
         show_file = tmp_path / "show_now__apollo.txt"
-        show_file.write_text("panel_amoura_costs")
+        show_file.write_text("panel_acme_costs")
         monkeypatch.setattr(manager_mod, "show_now_file", lambda dev=None: show_file)
         shown = dm._check_show_now()
         assert shown is not None
@@ -689,8 +689,8 @@ class TestDisplaySkipWhenUnhealthy:
         assert len(backend.shown) == 1
 
         # Recovery immediately restores app to rotation
-        adb.upsert("panel_amoura_costs", health_status="healthy", health_reason="")
-        assert [a.name for a in dm._collect_active()] == ["clock", "panel_amoura_costs", "panel_amoura_mrr"]
+        adb.upsert("panel_acme_costs", health_status="healthy", health_reason="")
+        assert [a.name for a in dm._collect_active()] == ["clock", "panel_acme_costs", "panel_acme_mrr"]
 
     def test_paired_node_state_propagates_skip_without_timestamp_churn(self, tmp_path, monkeypatch):
         import hashlib
@@ -717,19 +717,19 @@ class TestDisplaySkipWhenUnhealthy:
         adb = AppDatabase()
         now = datetime.now()
         adb.upsert(
-            "panel_amoura_mrr",
+            "panel_acme_mrr",
             skip_when_unhealthy=True,
             health_status="healthy",
             last_healthy=now,
             health_checked_at=now,
         )
-        ddb.set_app("desk", "panel_amoura_mrr", enabled=True)
-        Image.new("RGB", (64, 64), "green").save(central_outputs / "panel_amoura_mrr.webp")
+        ddb.set_app("desk", "panel_acme_mrr", enabled=True)
+        Image.new("RGB", (64, 64), "green").save(central_outputs / "panel_acme_mrr.webp")
 
         healthy_state = node_mod.build_state("desk")
         rev_healthy_1 = healthy_state.revision()
         assert healthy_state.apps[0].enabled is True
-        assert "panel_amoura_mrr" in healthy_state.frames
+        assert "panel_acme_mrr" in healthy_state.frames
 
         # Wire payload excludes PR #35 health metadata so older peers hash identically
         wire_json = healthy_state.payload()
@@ -746,18 +746,18 @@ class TestDisplaySkipWhenUnhealthy:
 
         # Updating volatile check timestamps should NOT churn node revision
         adb.upsert(
-            "panel_amoura_mrr",
+            "panel_acme_mrr",
             last_healthy=now + timedelta(minutes=1),
             health_checked_at=now + timedelta(minutes=1),
         )
         assert node_mod.build_state("desk").revision() == rev_healthy_1
 
         # Flipping to unhealthy changes state revision, sets effective enabled=False, and drops frame
-        adb.upsert("panel_amoura_mrr", health_status="unhealthy", health_reason="HTTP 502")
+        adb.upsert("panel_acme_mrr", health_status="unhealthy", health_reason="HTTP 502")
         unhealthy_state = node_mod.build_state("desk")
         assert unhealthy_state.revision() != rev_healthy_1
         assert unhealthy_state.apps[0].enabled is False
-        assert "panel_amoura_mrr" not in unhealthy_state.frames
+        assert "panel_acme_mrr" not in unhealthy_state.frames
         assert unhealthy_state.show_now is None
 
         # Syncing to a paired receiver succeeds cleanly with matching revision and disabled membership
@@ -782,19 +782,19 @@ class TestDisplaySkipWhenUnhealthy:
         assert local.list_apps("desk")[0]["enabled"] == 0
 
         # Manual show_now still includes the frame and command for peeking at a skipped-unhealthy app
-        show_now_path.write_text("panel_amoura_mrr")
+        show_now_path.write_text("panel_acme_mrr")
         peek_state = node_mod.build_state("desk")
         assert peek_state.apps[0].enabled is False
-        assert "panel_amoura_mrr" in peek_state.frames
+        assert "panel_acme_mrr" in peek_state.frames
         assert peek_state.show_now is not None
-        assert peek_state.show_now.name == "panel_amoura_mrr"
+        assert peek_state.show_now.name == "panel_acme_mrr"
 
         # Recovery restores effective enabled=True and frame
         show_now_path.unlink()
-        adb.upsert("panel_amoura_mrr", health_status="healthy", health_reason="")
+        adb.upsert("panel_acme_mrr", health_status="healthy", health_reason="")
         recovered_state = node_mod.build_state("desk")
         assert recovered_state.apps[0].enabled is True
-        assert "panel_amoura_mrr" in recovered_state.frames
+        assert "panel_acme_mrr" in recovered_state.frames
         assert recovered_state.revision() == rev_healthy_1
 
         # Publisher timeout allows larger LAN WebP uploads without premature timeouts
@@ -849,13 +849,13 @@ class TestDashboardApiAndWebSocket:
         created = client.post(
             "/api/panels",
             json={
-                "id": "amoura_mrr",
-                "title": "Amoura MRR",
+                "id": "acme_mrr",
+                "title": "Acme MRR",
                 "layout": "big_number",
                 "config": {},
                 "data_source": {
                     "type": "http",
-                    "url": "https://api.amoura.app/mrr",
+                    "url": "https://metrics.example.com/mrr",
                     "stale_after": 900,
                     "timestamp_path": "updated_at",
                     "mappings": {"value": "mrr"},
@@ -863,7 +863,7 @@ class TestDashboardApiAndWebSocket:
                 "skip_when_unhealthy": True,
             },
         ).json()
-        assert created["id"] == "amoura_mrr"
+        assert created["id"] == "acme_mrr"
         assert created["skip_when_unhealthy"] is True
         assert created["data_source"]["stale_after"] == 900
 
@@ -871,23 +871,23 @@ class TestDashboardApiAndWebSocket:
         adb = AppDatabase()
         last_ok = datetime.now() - timedelta(minutes=15)
         adb.upsert(
-            "panel_amoura_mrr",
+            "panel_acme_mrr",
             health_status="unhealthy",
-            health_reason="HTTP 502 from api.amoura.app/mrr",
+            health_reason="HTTP 502 from metrics.example.com/mrr",
             last_healthy=last_ok,
         )
 
         panels = client.get("/api/panels").json()
-        panel = next(p for p in panels if p["id"] == "amoura_mrr")
+        panel = next(p for p in panels if p["id"] == "acme_mrr")
         assert panel["health_status"] == "unhealthy"
-        assert panel["health_reason"] == "HTTP 502 from api.amoura.app/mrr"
+        assert panel["health_reason"] == "HTTP 502 from metrics.example.com/mrr"
         assert panel["skipped_unhealthy"] is True
         assert panel["last_healthy"] is not None
 
         status = client.get("/api/status").json()
         assert status["status"] == "degraded"
         assert len(status["unhealthy_apps"]) == 1
-        assert status["unhealthy_apps"][0]["name"] == "panel_amoura_mrr"
+        assert status["unhealthy_apps"][0]["name"] == "panel_acme_mrr"
         assert status["unhealthy_apps"][0]["skipped_unhealthy"] is True
         # issues is reserved for system/infra problems, not per-app data ingress strings
         assert status["issues"] == []
@@ -900,13 +900,13 @@ class TestDashboardApiAndWebSocket:
         assert len(health_body["unhealthy_apps"]) == 1
 
         # Disabled app should not degrade system status
-        adb.upsert("panel_amoura_mrr", enabled=False)
+        adb.upsert("panel_acme_mrr", enabled=False)
         status_disabled = client.get("/api/status").json()
         assert status_disabled["unhealthy_apps"] == []
 
         # PUT /api/panels/{id} can toggle skip_when_unhealthy off
         updated = client.put(
-            "/api/panels/amoura_mrr",
+            "/api/panels/acme_mrr",
             json={"skip_when_unhealthy": False},
         ).json()
         assert updated["skip_when_unhealthy"] is False
@@ -950,11 +950,11 @@ class TestDashboardApiAndWebSocket:
         from phoenix.db import AppDatabase
 
         client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
-        client.post("/api/devices", json={"id": "aurora", "name": "Aurora", "backend": "serial"})
+        client.post("/api/devices", json={"id": "desk_m4", "name": "Desk M4", "backend": "serial"})
         client.post("/api/apps/clock/add")
         client.post("/api/apps/clock/add", params={"device": "apollo"})
-        client.post("/api/apps/clock/add", params={"device": "aurora"})
-        client.post("/api/apps/clock/disable", params={"device": "aurora"})
+        client.post("/api/apps/clock/add", params={"device": "desk_m4"})
+        client.post("/api/apps/clock/disable", params={"device": "desk_m4"})
 
         AppDatabase().upsert(
             "clock",
@@ -968,10 +968,10 @@ class TestDashboardApiAndWebSocket:
         assert apollo_clock["enabled"] is True
         assert apollo_clock["skipped_unhealthy"] is True
 
-        aurora_apps = client.get("/api/apps", params={"device": "aurora"}).json()
-        aurora_clock = next(a for a in aurora_apps if a["name"] == "clock")
-        assert aurora_clock["enabled"] is False
-        assert aurora_clock["skipped_unhealthy"] is False
+        desk_apps = client.get("/api/apps", params={"device": "desk_m4"}).json()
+        desk_clock = next(a for a in desk_apps if a["name"] == "clock")
+        assert desk_clock["enabled"] is False
+        assert desk_clock["skipped_unhealthy"] is False
 
         # Disabling on apollo immediately flips skipped_unhealthy to False in mutation response
         disabled_row = client.post("/api/apps/clock/disable", params={"device": "apollo"}).json()
@@ -995,16 +995,16 @@ class TestDashboardApiAndWebSocket:
         )
         test_client = TestClient(dashboard.create_app())
         AppDatabase().upsert(
-            "panel_amoura_costs",
+            "panel_acme_costs",
             enabled=True,
             active=True,
             skip_when_unhealthy=True,
             health_status="unhealthy",
-            health_reason="HTTP 404 from amoura.io/api/analytics/cost-analytics",
+            health_reason="HTTP 404 from metrics.example.com/api/analytics/cost-analytics",
         )
 
         status = test_client.get("/api/status").json()
         assert status["status"] == "degraded"
         assert status["issues"] == ["MQTT disconnected"]
         assert len(status["unhealthy_apps"]) == 1
-        assert status["unhealthy_apps"][0]["name"] == "panel_amoura_costs"
+        assert status["unhealthy_apps"][0]["name"] == "panel_acme_costs"

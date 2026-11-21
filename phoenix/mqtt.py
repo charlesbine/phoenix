@@ -330,7 +330,6 @@ class MQTTClient:
             try:
                 data = json.loads(payload)
                 config_db = ConfigDatabase()
-                current = config_db.get()
 
                 if data.get("state") == "OFF":
                     config_db.update(brightness=0)

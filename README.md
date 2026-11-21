@@ -17,8 +17,11 @@
 
 ---
 
-<!-- MEDIA_PLACEHOLDER: Replace the block below with a 10–15s physical desk matrix demo video/GIF once recorded -->
-> **Demo Reel (Coming Soon):** _Drop a 10–15s physical desk matrix clip or GIF here (`docs/media/desk-demo.gif` or embedded MP4) showing Phoenix cycling procedural landscapes, rotating pixel planets, live audio spectrum, and Starlark applets on hardware._
+<p align="center">
+  <img src="docs/media/shadowbox-hero.jpg" alt="Phoenix 64x64 LED matrix in a 152x152x55 mm stained mitered plywood shadowbox on a brushed aluminum stand running procedural aurora mountains" width="100%" />
+  <br />
+  <sub><em>The 152 × 152 × 55 mm stained mitered-plywood shadowbox running <code>procedural_landscape</code> (peaks / aurora). Full disclosure: studio-lit AI re-shoot of the real wooden box and real Phoenix pixel art because I couldn't be bothered to clean my desk for a product photo — <a href="docs/media/shadowbox-back.jpg">unvarnished real side profile here</a>.</em></sub>
+</p>
 
 <p align="center">
   <img src="docs/media/dashboard-home.png" alt="Phoenix Ember-CRT Dashboard — Home view with live 64x64 preview and panel controls" width="100%" />
@@ -28,7 +31,7 @@
 
 ## Why Phoenix?
 
-Tidbyt proved how delightful a glanceable pixel-art desk display can be, and [Pixlet](https://github.com/tidbyt/pixlet) built an incredible ecosystem of Starlark applets. **Phoenix** keeps that ecosystem alive and pushes it further — fully local, zero cloud lock-in, native **64×64** resolution, multi-panel control, and support for both plug-and-play **WLED** displays and DIY **HUB75** builds.
+Phoenix started in April 2023 as a fully local 64×64 Tidbyt alternative mounted inside a hand-stained and lacquered wooden shadowbox. Because everything renders and plays locally without a cloud server, it kept running right through Tidbyt's November 2024 discontinuation without skipping a beat. It later absorbed a standalone WLED controller for plug-and-play panels like the Apollo M-1, unifying DIY HUB75 builds and off-the-shelf WLED matrices under one Ember-CRT dashboard, 970+ community apps, and procedural pixel worlds.
 
 - **Tidbyt / Pixlet Compatible** — Run hundreds of Starlark community apps from [`charlesbine/phoenix-apps`](https://github.com/charlesbine/phoenix-apps) (installed right from the built-in Store) alongside native Python/Pillow apps with zero limitations.
 - **Ember-CRT Web Dashboard** — Manage every panel from a live WebSocket-powered Vue 3 dashboard: real-time preview, quick per-app settings, weighted priority cycling (`1×–4×`), Single-App pinning, Show Now interrupts, playlists, and diagnostics.
@@ -47,7 +50,7 @@ Pick the path that fits your desk — no hardware is required to try Phoenix in 
 
 | Path | Hardware | Setup Effort | Connection | Best For | Guide |
 |---|---|---|---|---|---|
-| **Recommended Easy Path** | **Apollo M-1** (or any 64×64 ESP32 WLED matrix) | ~10 min — zero soldering or flashing | Wi-Fi / LAN (DDP UDP `4048`) | Plug-and-play desk display managed from any Mac, Linux box, or home server | [Apollo M-1 & WLED Guide](docs/hardware/apollo-m1-wled.md) |
+| **Recommended Easy Path** | **[Apollo Automation M-1](https://apolloautomation.com/products/m-1-led-matrix)** (or any 64×64 ESP32 WLED matrix) | ~10 min — zero soldering or flashing | Wi-Fi / LAN (DDP UDP `4048`) | Easiest way into the LED matrix world — plug-and-play desk display managed from any Mac, Linux box, or home server | [Apollo M-1 & WLED Guide](docs/hardware/apollo-m1-wled.md) |
 | **DIY HUB75 Build** | **64×64 P2/P2.5 HUB75E panel** + **Adafruit Matrix Portal M4** + 5V 4A PSU | ~30 min — 1 solder jumper + `just flash-m4` | USB-C serial to Pi / mini-PC / Mac | Maximum color fidelity (6-bit sRGB + hardware OE dimming), custom enclosures, optional SCD40 CO₂ sensor | [Matrix Portal M4 Guide](docs/hardware/matrix-portal-m4.md) |
 | **No Hardware Yet** | Any laptop or server | 60 seconds | Browser (`PHOENIX_PLATFORM=web`) | Trying the dashboard, developing Starlark/Python applets | [60-Second Quick Start](#60-second-quick-start) |
 
@@ -180,6 +183,9 @@ c++ -std=c++11 -Wall -Wextra -Werror firmware/tests/panel_color_test.cpp -o /tmp
 /tmp/panel-color-test
 ```
 
-## License
+## Credits & License
+
+- **Procedural Planet (`procedural_planet` / `pixel_planet`):** Re-implements the shader algorithms from Deep-Fold's **[Pixel Planet Generator](https://deep-fold.itch.io/pixel-planet-generator)** ([`Deep-Fold/PixelPlanets`](https://github.com/Deep-Fold/PixelPlanets), MIT License). See [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+- **Tidbyt / Pixlet & Tronbyt Ecosystem:** Starlark rendering via [Pixlet](https://github.com/tidbyt/pixlet) and community catalog mirrored from [`tronbyt/apps`](https://github.com/tronbyt/apps).
 
 MIT — see [`LICENSE`](LICENSE).

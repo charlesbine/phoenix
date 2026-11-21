@@ -1,4 +1,8 @@
-"""Procedural pixel planet — pure Python applet (no Starlark/pixlet)."""
+"""Procedural pixel planet — pure Python applet (no Starlark/pixlet).
+
+Re-implements the planet shader algorithms from Deep-Fold's Pixel Planet Generator
+(MIT License): https://deep-fold.itch.io/pixel-planet-generator
+"""
 
 import io
 import logging

@@ -8,6 +8,7 @@ values using dot-notation paths, and writes the JSON that dashboard_panel.star r
 import json
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,10 +18,16 @@ from urllib.parse import urlsplit
 from phoenix.cache import cache_get_meta
 from phoenix.db import PanelDatabase
 from phoenix.models import PreprocessorResult
-from phoenix.paths import data_path
+from phoenix.net import is_valid_ha_entity_id, validate_panel_url
+from phoenix.paths import data_path, require_identifier
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+_SAFE_NUMERIC_FMT_RE = re.compile(
+    r"^(?:[^%]|%%)*%[-+ #0]?(?:\d{1,2})?(?:\.\d{1,2})?[diuoxXeEfFgG](?:[^%]|%%)*$"
+)
+_MAX_FMT_LENGTH = 64
 
 
 @dataclass(frozen=True)
@@ -138,7 +145,13 @@ def _apply_transform(value: object, transform: str) -> object:
                 v = int(v)
             elif step.startswith("format "):
                 fmt = step[7:]
-                return fmt % v
+                if len(fmt) > _MAX_FMT_LENGTH or _SAFE_NUMERIC_FMT_RE.fullmatch(fmt) is None:
+                    logger.warning("Ignoring unsafe panel format specifier: %r", fmt)
+                    return str(v)
+                try:
+                    return fmt % v
+                except (TypeError, ValueError, OverflowError):
+                    return str(v)
 
         # String operations (work on any value)
         if step.startswith("prefix "):
@@ -236,6 +249,8 @@ def _fetch_ha_source_checked(source: dict, settings: Settings) -> _SourceFetchRe
     entity_id = str(source.get("entity_id") or "").strip()
     if not entity_id:
         return _SourceFetchResult(data={}, healthy=False, reason="Home Assistant entity ID not configured")
+    if not is_valid_ha_entity_id(entity_id):
+        return _SourceFetchResult(data={}, healthy=False, reason=f"Invalid Home Assistant entity ID '{entity_id}'")
     if not settings.ha_url or not settings.ha_token:
         return _SourceFetchResult(data={}, healthy=False, reason="Home Assistant connection not configured")
     url = f"{settings.ha_url.rstrip('/')}/api/states/{entity_id}"
@@ -320,7 +335,7 @@ def _fetch_ha_source(source: dict, settings: Settings) -> dict:
     return res.data if isinstance(res.data, dict) else {}
 
 
-def _fetch_http_source_checked(source: dict) -> _SourceFetchResult:
+def _fetch_http_source_checked(source: dict, settings: Settings | None = None) -> _SourceFetchResult:
     """Fetch data from an HTTP JSON endpoint through the cache proxy with health metadata."""
     url = str(source.get("url") or "").strip()
     if not url:
@@ -328,8 +343,20 @@ def _fetch_http_source_checked(source: dict) -> _SourceFetchResult:
     label = _safe_source_label(url)
     ttl = int(source.get("ttl", 300))
     headers = _build_headers(source)
+    allow_private = bool(settings.allow_private_panel_urls) if settings is not None else False
+
+    def validate(candidate: str) -> None:
+        validate_panel_url(candidate, allow_private=allow_private)
+
     try:
-        res = cache_get_meta(url, ttl, headers=headers if headers else None)
+        res = cache_get_meta(url, ttl, headers=headers if headers else None, validate_url=validate)
+    except ValueError as exc:
+        logger.warning("HTTP source blocked for %s: %s", label, exc)
+        return _SourceFetchResult(
+            data={},
+            healthy=False,
+            reason=f"Blocked URL for {label}: {exc}",
+        )
     except Exception as exc:
         logger.warning("HTTP source fetch failed for %s: %s", label, type(exc).__name__)
         return _SourceFetchResult(
@@ -391,9 +418,16 @@ def _fetch_http_source_checked(source: dict) -> _SourceFetchResult:
     return _SourceFetchResult(data=parsed, healthy=True, data_timestamp=res.fetched_at)
 
 
-def _fetch_http_source(source: dict) -> dict:
+def _fetch_http_source(source: dict, settings: Settings | None = None, *, raise_on_blocked: bool = False) -> dict:
     """Fetch data from an HTTP JSON endpoint through the cache proxy."""
-    res = _fetch_http_source_checked(source)
+    if raise_on_blocked:
+        url = str(source.get("url") or "").strip()
+        allow_private = bool(settings.allow_private_panel_urls) if settings is not None else False
+        if url:
+            validate_panel_url(url, allow_private=allow_private)
+    res = _fetch_http_source_checked(source, settings=settings)
+    if raise_on_blocked and not res.healthy and res.reason.startswith("Blocked URL"):
+        raise ValueError(res.reason)
     if isinstance(res.data, dict):
         return res.data
     return res.data if isinstance(res.data, list) else {}  # type: ignore[return-value]
@@ -578,6 +612,7 @@ def run_panel(
     db_path: str | Path | None = None,
 ) -> PreprocessorResult:
     """Run preprocessor for a specific panel instance."""
+    require_identifier(panel_id, "panel id")
     panel_db = PanelDatabase(db_path)
     panel = panel_db.get(panel_id)
     if panel is None:
@@ -588,7 +623,7 @@ def run_panel(
 
     fetch_result = _SourceFetchResult(data={})
     if source_type == "http":
-        fetch_result = _fetch_http_source_checked(source)
+        fetch_result = _fetch_http_source_checked(source, settings=settings)
     elif source_type == "mqtt":
         fetch_result = _fetch_mqtt_source_checked(source)
     elif source_type == "ha":
