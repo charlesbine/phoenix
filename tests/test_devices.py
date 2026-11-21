@@ -59,3 +59,21 @@ def test_seed_migrates_existing_single_device_state(tmp_path):
 
     # idempotent — running again is a no-op
     assert seed_default_device(path=db) is None
+
+
+def test_seed_fresh_db_populates_curated_starter_apps(tmp_path):
+    db = str(tmp_path / "fresh.db")
+    seeded = seed_default_device("main", "Main", "web", path=db)
+    assert seeded == "main"
+
+    ddb = DeviceDatabase(db)
+    members = [m["app_name"] for m in ddb.list_apps("main")]
+    assert members == [
+        "procedural_landscape",
+        "procedural_planet",
+        "gradient_clock",
+        "day_night_map",
+        "life",
+        "aquarium",
+    ]
+    assert "nyan_cat" not in members

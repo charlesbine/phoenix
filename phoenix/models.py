@@ -44,8 +44,8 @@ REFRESH_PRESETS: dict[str, timedelta] = {
 
 # Default preset assignments based on app name patterns
 _DEFAULT_PRESET_PATTERNS: dict[str, list[str]] = {
-    "realtime": ["clock", "fuzzy_clock"],
-    "ambient": ["procedural_landscape", "procedural_planet", "pixel_planet", "aquarium", "nyan_cat",
+    "realtime": ["clock", "fuzzy_clock", "gradient_clock"],
+    "ambient": ["procedural_landscape", "procedural_planet", "pixel_planet", "aquarium",
                 "programming_excuses", "life", "maps", "hello_world",
                 "schema_hello_world", "font-preview", "quadrants"],
     # Everything else defaults to "frequent"
