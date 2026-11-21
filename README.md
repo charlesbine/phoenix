@@ -17,7 +17,11 @@
 
 ---
 
-<!-- TODO: drop 10-15s physical desk matrix demo clip here -->
+<p align="center">
+  <img src="docs/media/shadowbox-hero.jpg" alt="Phoenix 64x64 LED matrix in a 152x152x55 mm stained mitered plywood shadowbox on a brushed aluminum stand running procedural aurora mountains" width="100%" />
+  <br />
+  <sub><em>The 152 × 152 × 55 mm stained mitered-plywood shadowbox running <code>procedural_landscape</code> (peaks / aurora). Full disclosure: studio-lit AI re-shoot of the real wooden box and real Phoenix pixel art because I couldn't be bothered to clean my desk for a product photo — <a href="docs/media/shadowbox-back.jpg">unvarnished real side profile here</a>.</em></sub>
+</p>
 
 <p align="center">
   <img src="docs/media/dashboard-home.png" alt="Phoenix Ember-CRT Dashboard — Home view with live 64x64 preview and panel controls" width="100%" />
