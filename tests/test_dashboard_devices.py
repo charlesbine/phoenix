@@ -35,13 +35,14 @@ def test_device_rotation_is_independent(client):
         assert client.post(f"/api/apps/{name}/add").status_code == 200
     client.post("/api/devices", json={"id": "apollo", "name": "Apollo", "backend": "wled"})
 
-    # Add both to apollo's rotation; main stays empty.
+    # Add both to apollo's rotation; main keeps only its seeded starter rotation.
     client.post("/api/apps/clock/add", params={"device": "apollo"})
     client.post("/api/apps/weather/add", params={"device": "apollo"})
 
     apollo = client.get("/api/apps", params={"device": "apollo"}).json()
     assert {a["name"] for a in apollo} == {"clock", "weather"}
-    assert client.get("/api/apps", params={"device": "main"}).json() == []
+    main_names = {a["name"] for a in client.get("/api/apps", params={"device": "main"}).json()}
+    assert "clock" not in main_names and "weather" not in main_names
 
     # Disable weather on apollo — global app definition untouched.
     client.post("/api/apps/weather/disable", params={"device": "apollo"})

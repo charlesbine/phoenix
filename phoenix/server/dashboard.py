@@ -557,6 +557,9 @@ def create_app() -> FastAPI:
         if device:
             get_device_db().set_app(device, name, enabled=True)
             return _device_app_row(device, name)
+        existing = get_svc().app_db.get(name)
+        if existing is not None:
+            return _serialize_app(existing)
         return _serialize_app(get_svc().create_app(name))
 
     @app.post("/api/apps/{name}/remove")
