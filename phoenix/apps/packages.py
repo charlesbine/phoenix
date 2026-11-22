@@ -1,16 +1,12 @@
 """Package deliveries via MQTT. Only renders when packages are pending."""
 
-import json
 import logging
-import shutil
-import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from phoenix.mqtt import get_message, get_mqtt_client
-from phoenix.paths import DATA_DIR, star_path, ensure_dirs
-from phoenix.render import PIXLET_TIMEOUT_SECONDS, pixlet_subprocess_env
+from phoenix.panel_render import render_panel_to_files
+from phoenix.paths import ensure_dirs
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -105,34 +101,15 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
             age = _format_age(d.get("received_utc", ""))
             panel_data["items"].append({"key": pkg_type[:10] + ":", "value": age})
 
-    # Write data and render
-    data_file = DATA_DIR / "dashboard_panel_packages.json"
-    data_file.write_text(json.dumps(panel_data))
-
-    template = star_path("dashboard_panel")
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_star = shutil.copy(template, tmp)
-        for out, mag in [(output, None), (output_large, settings.magnification)]:
-            cmd = [
-                "pixlet", "render", str(tmp_star),
-                "-o", str(out),
-                "-w", str(settings.render_width),
-                "-t", str(settings.render_height),
-                "instance_id=packages",
-            ]
-            if mag:
-                cmd.extend(["-m", str(mag)])
-            proc = subprocess.run(
-                cmd,
-                env=pixlet_subprocess_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=PIXLET_TIMEOUT_SECONDS,
-            )
-            if proc.returncode != 0:
-                logger.error("[packages] pixlet failed: %s", proc.stderr)
-                raise RuntimeError(f"[packages] {proc.stderr.strip().splitlines()[-1]}")
+    # Render directly with the pure-Python panel renderer
+    render_panel_to_files(
+        panel_data,
+        output,
+        output_large,
+        width=settings.render_width,
+        height=settings.render_height,
+        magnification=settings.magnification,
+    )
 
 
 def _format_age(iso_time: str) -> str:

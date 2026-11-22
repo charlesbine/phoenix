@@ -86,9 +86,22 @@ In a second terminal, run `PHOENIX_PLATFORM=web uv run phoenix render` to contin
 
 ---
 
-## Dashboard Tour
+## Dashboard & Data Showcase
+
+Phoenix isn't just for ambient pixel art — it includes a pure-Python **Programmatic Panel Builder** that turns any HTTP JSON endpoint, Home Assistant entity, or MQTT topic into crisp 64×64 hardware telemetry instruments (`multi_stat`, `sparkline`, `key_value`, `big_number`, `marquee`).
+
+<p align="center">
+  <img src="docs/media/data-panels-gallery.png" alt="Phoenix 64x64 Programmatic Data Panels — Homelab Telemetry multi_stat, API P95 sparkline, Home Climate key_value, and Active Users big_number" width="100%" />
+</p>
 
 <table>
+  <tr>
+    <td colspan="2">
+      <strong>Panel Builder Studio</strong><br />
+      Design live data panels without writing code: pick a layout wireframe, wire an HTTP JSON / Home Assistant / MQTT source with dot-path mappings and transforms, choose LED-tuned colors, and preview instantly on the glowing 64×64 CRT monitor.<br /><br />
+      <img src="docs/media/dashboard-panels.png" alt="Phoenix Panel Builder Studio with live 64x64 sparkline preview, wireframe layout picker, starter templates, and LED palette swatches" />
+    </td>
+  </tr>
   <tr>
     <td width="50%">
       <strong>Apps &amp; Live Configurator</strong><br />
@@ -134,20 +147,85 @@ The paired display node persists its accepted rotation, Night Mode settings, and
 
 ---
 
-## Built-In Apps & Writing Your Own
+## Four Ways to Build for Phoenix
 
-Phoenix supports four applet types out of the box:
+Phoenix supports four distinct tiers of apps and data panels — start with zero code in the browser and reach for Starlark, native Python, or 60 FPS live generators whenever you want full pixel control:
 
-1. **Starlark (`.star`)** — Drop any Tidbyt/Pixlet-compatible `.star` file into `phoenix/apps/` (or import from the **Store** tab). Starlark `get_schema()` fields automatically appear in the dashboard settings UI.
-2. **Python (`.py`)** — Full Pillow/Python rendering with zero sandbox limits. Built-in Python apps include:
-   - `procedural_landscape` — Seamless 12-second looping anti-aliased generative terrain flyover (12 LED-tuned palettes × 6 terrain archetypes, `auto` random worlds)
-   - `procedural_planet` — Continuously rotating procedural planets with bounded smooth animation timing
-   - `christmas_countdown` — Animated snowfall, sleigh, gift-pop, and shooting-star interludes
-   - `home_climate` — Multi-room temperature & humidity dashboard from configurable Home Assistant sensors
-   - `spotify` — Full-screen album art + song progress frame from Home Assistant `media_player` entities
-   - `packages` — Conditional MQTT package delivery alert (automatically skips rotation when count is `0`)
-3. **Live Real-Time Apps** — `audio_bars`, `audio_vu`, `audio_spectrogram` (60 FPS FFT audio visualizer) and live now-playing.
-4. **Static Media & Custom Panels** — Drop `.webp`, `.gif`, or `.png` files directly, or build custom multi-stat / sparkline / key-value panels in the **Panels** tab.
+### 1. Programmatic Custom Panels (No Code)
+
+Open the **Panels** tab to build live data displays directly in the Ember-CRT **Panel Builder Studio** — no code, no Pixlet sandbox, rendered natively with crisp pixel typography in milliseconds:
+
+- **Five hardware-styled layouts:**
+  - `big_number` — Hero metric with unit, auto-colored delta pill (`+18.6%` / `-2.1%`), subtitle, and optional goal progress bar
+  - `sparkline` — Full-width shaded area curve with dashed midline, white-hot latest-point beacon, delta badge, and min/max bounds
+  - `multi_stat` — Structured 2×2 (or 2×1) dark slate metric tiles with color-coded top accent stripes
+  - `key_value` — Banded telemetry table with per-row status pips and right-aligned tabular values
+  - `marquee` — Framed hardware ticker tape with smooth animated WebP scrolling
+- **Live data ingress:** Connect to **HTTP JSON** (with Bearer, API-key, or Basic auth stored redacted in SQLite), **Home Assistant** entity states, **MQTT** topics, or **Static** values.
+- **Dot-path extraction & transforms:** Extract nested fields (e.g. `metrics.latency.p95`, `series.0.value`), chain safe transforms (`/ 100 | round 1 | format $%.1f`), and enable **`skip_when_unhealthy`** + `stale_after` so broken or stale feeds automatically drop out of your rotation until they recover.
+
+### 2. Starlark Applets (`.star` — Tidbyt / Pixlet Compatible)
+
+Drop any Tidbyt/Pixlet-compatible `.star` file into `phoenix/apps/` or one-click import from **970+ community apps** mirrored in [`charlesbine/phoenix-apps`](https://github.com/charlesbine/phoenix-apps) via the **Store** tab. Any `get_schema()` fields you define are automatically rendered as form controls in the dashboard:
+
+```python
+load("render.star", "render")
+load("schema.star", "schema")
+
+def main(config):
+    label = config.get("label", "PHOENIX")
+    return render.Root(
+        child = render.Box(
+            child = render.Text(content = label, font = "6x13", color = "#FF9E3D"),
+        ),
+    )
+
+def get_schema():
+    return schema.Schema(
+        version = "1",
+        fields = [
+            schema.Text(id = "label", name = "Label", desc = "Text to display", default = "PHOENIX"),
+        ],
+    )
+```
+
+### 3. Native Python Apps (`.py` — Zero Sandbox Limits)
+
+For shaders, Pillow compositing, async APIs, or conditional alerts, drop a `.py` file into `phoenix/apps/` implementing an optional `SETTINGS_SCHEMA` list and `render(settings, config, output, output_large)`:
+
+```python
+from pathlib import Path
+from PIL import Image, ImageDraw
+from phoenix.settings import Settings
+
+SETTINGS_SCHEMA = [
+    {"id": "accent", "name": "Accent Color", "type": "color", "default": "#5BCEFA"},
+]
+
+def render(settings: Settings, config: dict[str, str], output: Path, output_large: Path) -> None:
+    img = Image.new("RGB", (settings.render_width, settings.render_height), (0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([4, 4, 59, 59], outline=config.get("accent", "#5BCEFA"))
+    img.save(output, "WEBP", lossless=True)
+    img.resize(
+        (settings.render_width * settings.magnification, settings.render_height * settings.magnification),
+        Image.Resampling.NEAREST,
+    ).save(output_large, "WEBP", lossless=True)
+```
+
+Built-in Python apps include:
+- `procedural_landscape` — Seamless 12-second looping anti-aliased generative terrain flyover (12 LED-tuned palettes × 6 terrain archetypes, `auto` random worlds)
+- `procedural_planet` — Continuously rotating procedural planets with bounded smooth animation timing
+- `christmas_countdown` — Animated snowfall, sleigh, gift-pop, and shooting-star interludes
+- `home_climate` — Multi-room temperature & humidity dashboard from configurable Home Assistant sensors
+- `spotify` — Full-screen album art + song progress frame from Home Assistant `media_player` entities
+- `packages` — Conditional MQTT package delivery alert (automatically skips rotation when count is `0`)
+
+### 4. Live 60 FPS Generators & Static Media
+
+- **Real-time 60 FPS audio visualizers** (`audio_bars`, `audio_vu`, `audio_spectrogram`) driven by a USB mic or audio loopback with live palette switching (`Hue heat`, `Fire`, `Ice`, `Mono`, and more).
+- **Live now-playing** (`media_player`) streaming album art and track progress directly to the panel without waiting on render intervals.
+- **Static & animated media drops:** Place any `.webp`, `.gif`, or `.png` file into `phoenix/apps/` and add it directly to any panel's rotation or playlist.
 
 ---
 

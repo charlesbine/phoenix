@@ -63,13 +63,29 @@ def _render_dispatch(app: AppConfig, settings: Settings) -> None:
     start = _time.perf_counter()
 
     if _is_panel(app.name):
+        import json as _json
+        from phoenix.panel_render import render_panel_to_files
+        from phoenix.paths import data_path
+
         logger.info("[%s] Rendering dashboard panel", app.name)
-        panel_app = AppConfig(
-            name=app.name,
-            pixlet_config={"instance_id": app.name.removeprefix("panel_")},
+        panel_id = app.name.removeprefix("panel_")
+        data_file = data_path(f"dashboard_panel_{panel_id}")
+        if data_file.exists():
+            try:
+                panel_data = _json.loads(data_file.read_text())
+            except Exception:
+                panel_data = {"layout": "_error", "message": "Invalid data"}
+        else:
+            panel_data = {"layout": "_error", "message": "No data"}
+
+        render_panel_to_files(
+            panel_data,
+            output_path(app.name),
+            output_path_large(app.name),
+            width=settings.render_width,
+            height=settings.render_height,
+            magnification=settings.magnification,
         )
-        _run_pixlet(panel_app, settings, large=False, star_override=star_path("dashboard_panel"))
-        _run_pixlet(panel_app, settings, large=True, star_override=star_path("dashboard_panel"))
         elapsed = _time.perf_counter() - start
         logger.info("[%s] Render complete (%.2fs)", app.name, elapsed)
         return

@@ -2,16 +2,13 @@
 
 import json
 import logging
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 
 from phoenix.cache import cache_get
 from phoenix.models import DataIngressError
 from phoenix.net import is_valid_ha_entity_id
-from phoenix.paths import DATA_DIR, star_path, ensure_dirs
-from phoenix.render import PIXLET_TIMEOUT_SECONDS, pixlet_subprocess_env
+from phoenix.panel_render import render_panel_frames
+from phoenix.paths import ensure_dirs
 from phoenix.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -117,8 +114,6 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     if valid_readings == 0:
         raise DataIngressError("All Home Assistant climate sensors unavailable")
 
-    template = star_path("dashboard_panel")
-
     # Render both views as separate frames into an animated webp
     temp_data = {
         "layout": "multi_stat",
@@ -137,35 +132,16 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         ],
     }
 
-    # Render each view separately, then combine into animated webp
     from PIL import Image
     frames = []
-    for i, panel_data in enumerate([temp_data, humidity_data]):
-        data_file = DATA_DIR / "dashboard_panel_home_climate.json"
-        data_file.write_text(json.dumps(panel_data))
-
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_star = shutil.copy(template, tmp)
-            tmp_out = Path(tmp) / f"frame_{i}.webp"
-            cmd = [
-                "pixlet", "render", str(tmp_star),
-                "-o", str(tmp_out),
-                "-w", str(settings.render_width),
-                "-t", str(settings.render_height),
-                "instance_id=home_climate",
-            ]
-            proc = subprocess.run(
-                cmd,
-                env=pixlet_subprocess_env(),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=PIXLET_TIMEOUT_SECONDS,
-            )
-            if proc.returncode != 0:
-                logger.error("[home_climate] pixlet failed: %s", proc.stderr)
-                raise RuntimeError(f"[home_climate] {proc.stderr.strip().splitlines()[-1]}")
-            frames.append(Image.open(tmp_out).convert("RGBA").copy())
+    for panel_data in (temp_data, humidity_data):
+        rendered, _ = render_panel_frames(
+            panel_data,
+            width=settings.render_width,
+            height=settings.render_height,
+        )
+        if rendered:
+            frames.append(rendered[0].convert("RGBA"))
 
     if not frames:
         return
