@@ -446,7 +446,7 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
     }
 
     # Apply color overrides from config
-    for key in ("color", "label_color", "key_color", "value_color", "title_color"):
+    for key in ("color", "accent_color", "delta_color", "label_color", "key_color", "value_color", "title_color"):
         if config.get(key):
             base[key] = config[key]
 
@@ -459,6 +459,29 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
         base["value"] = str(value) if value is not None else "—"
         base["unit"] = config.get("unit", "")
 
+        subtitle_path = mappings.get("subtitle", "")
+        subtitle = _extract_path(fetched, subtitle_path) if subtitle_path else config.get("subtitle")
+        if subtitle is not None and str(subtitle).strip():
+            base["subtitle"] = str(subtitle).strip()
+
+        delta_path = mappings.get("delta", "")
+        delta = _extract_path(fetched, delta_path) if delta_path else config.get("delta")
+        delta_transform = mappings.get("delta_transform", "")
+        if delta_transform and delta is not None:
+            delta = _apply_transform(delta, delta_transform)
+        if delta is not None and str(delta).strip():
+            base["delta"] = str(delta).strip()
+
+        progress_path = mappings.get("progress", "")
+        progress = _extract_path(fetched, progress_path) if progress_path else config.get("progress")
+        if progress is not None and progress != "" and not isinstance(progress, bool):
+            try:
+                p_val = float(progress)
+                if math.isfinite(p_val):
+                    base["progress"] = p_val
+            except (TypeError, ValueError):
+                pass
+
     elif layout == "key_value":
         items = []
         for item_map in mappings.get("items", []):
@@ -469,7 +492,10 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
             if transform and value is not None:
                 value = _apply_transform(value, transform)
             unit = item_map.get("unit", "")
-            items.append({"key": key, "value": str(value) + unit if value is not None else "—"})
+            row: dict = {"key": key, "value": str(value) + unit if value is not None else "—"}
+            if item_map.get("color"):
+                row["color"] = item_map["color"]
+            items.append(row)
         for item in config.get("items", []):
             items.append(item)
         base["items"] = items
@@ -481,6 +507,8 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
         if transform and text is not None:
             text = _apply_transform(text, transform)
         base["text"] = str(text) if text else ""
+        if config.get("subtitle"):
+            base["subtitle"] = str(config["subtitle"]).strip()
 
     elif layout == "multi_stat":
         stats = []
@@ -531,10 +559,21 @@ def _build_panel_data(panel: dict, fetched: dict) -> dict:
 
         base["points"] = points
         base["fill"] = config.get("fill", True)
+        if config.get("unit"):
+            base["unit"] = str(config["unit"])
+        if config.get("subtitle"):
+            base["subtitle"] = str(config["subtitle"]).strip()
+        if "show_minmax" in config:
+            base["show_minmax"] = bool(config["show_minmax"])
+
+        delta_path = mappings.get("delta", "")
+        delta = _extract_path(fetched, delta_path) if delta_path else config.get("delta")
+        if delta is not None and str(delta).strip():
+            base["delta"] = str(delta).strip()
 
         # Current value (last point or explicit)
         current_path = mappings.get("value", "")
-        current = _extract_path(fetched, current_path) if current_path else None
+        current = _extract_path(fetched, current_path) if current_path else config.get("value")
         if current is None and points:
             current = points[-1]
         transform = mappings.get("transform", "")

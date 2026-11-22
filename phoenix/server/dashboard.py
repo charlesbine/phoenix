@@ -764,10 +764,8 @@ def create_app() -> FastAPI:
     async def preview_panel(request: Request):
         """Render a preview of a panel config without saving it."""
         import json as json_mod
-        from phoenix.paths import data_path, star_path
-        from phoenix.render import _run_pixlet
-        from phoenix.models import AppConfig
-        from phoenix.paths import ensure_dirs as _ensure
+        from phoenix.panel_render import render_panel_to_files
+        from phoenix.paths import data_path, ensure_dirs as _ensure, output_path, output_path_large
 
         _ensure()
         body = await request.json()
@@ -782,7 +780,13 @@ def create_app() -> FastAPI:
                 existing_ds = existing_panel.get("data_source")
 
         # Build panel data from the request body (same as preprocessor would)
-        from phoenix.preprocessors.dashboard_panel import _build_panel_data, _fetch_http_source
+        from phoenix.preprocessors.dashboard_panel import (
+            _build_panel_data,
+            _fetch_ha_source,
+            _fetch_http_source,
+            _fetch_mqtt_source,
+        )
+
         source = _merge_panel_auth_secrets(body.get("data_source", {}), existing_ds)
         panel = {
             "layout": body.get("layout", "big_number"),
@@ -791,27 +795,48 @@ def create_app() -> FastAPI:
             "data_source": source,
         }
         fetched = {}
-        if isinstance(source, dict) and source.get("type") == "http" and source.get("url"):
-            try:
-                validate_panel_url(
-                    str(source["url"]).strip(),
-                    allow_private=settings.allow_private_panel_urls,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            try:
-                fetched = _fetch_http_source(source, settings=settings, raise_on_blocked=True)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except Exception:
-                pass
+        if isinstance(source, dict):
+            src_type = source.get("type")
+            if src_type == "http" and source.get("url"):
+                try:
+                    validate_panel_url(
+                        str(source["url"]).strip(),
+                        allow_private=settings.allow_private_panel_urls,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                try:
+                    fetched = _fetch_http_source(source, settings=settings, raise_on_blocked=True)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                except Exception:
+                    pass
+            elif src_type == "ha" and source.get("entity_id"):
+                try:
+                    fetched = _fetch_ha_source(source, settings)
+                except Exception:
+                    pass
+            elif src_type == "mqtt" and source.get("topic"):
+                try:
+                    fetched = _fetch_mqtt_source(source)
+                except Exception:
+                    pass
+
         panel_data = _build_panel_data(panel, fetched)
         data_path(f"dashboard_panel_{preview_id}").write_text(json_mod.dumps(panel_data))
 
-        # Render
+        # Render directly with the pure-Python Pillow panel engine (no loopback/pixlet needed)
         try:
-            app = AppConfig(name=f"panel_{preview_id}", pixlet_config={"instance_id": preview_id})
-            await asyncio.to_thread(_run_pixlet, app, get_svc().settings, True, star_path("dashboard_panel"))
+            svc_settings = get_svc().settings
+            await asyncio.to_thread(
+                render_panel_to_files,
+                panel_data,
+                output_path(f"panel_{preview_id}"),
+                output_path_large(f"panel_{preview_id}"),
+                width=svc_settings.render_width,
+                height=svc_settings.render_height,
+                magnification=svc_settings.magnification,
+            )
             return {"preview_url": f"/static/outputs/panel_{preview_id}.large.webp?t={__import__('time').time()}"}
         except Exception as e:
             return {"error": str(e)}

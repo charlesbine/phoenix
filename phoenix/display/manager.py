@@ -27,7 +27,6 @@ from phoenix.paths import (
     ensure_dirs,
     output_path,
     show_now_file,
-    star_path,
 )
 from phoenix.settings import Settings, get_settings
 
@@ -610,15 +609,20 @@ class DisplayManager:
         data_file = DATA_DIR / "dashboard_panel__notification.json"
         data_file.write_text(json.dumps(panel_data))
 
-        # Render via pixlet using the dashboard_panel template
+        # Render directly with the pure-Python panel renderer
         try:
-            from phoenix.render import _run_pixlet
-            from phoenix.models import AppConfig as AC
+            from phoenix.panel_render import render_panel_to_files
 
-            app = AC(name="panel__notification", pixlet_config={"instance_id": "_notification"})
-            _run_pixlet(app, Settings(), large=False, star_override=star_path("dashboard_panel"))
-
+            notif_settings = Settings()
             notif_output = output_path("panel__notification")
+            render_panel_to_files(
+                panel_data,
+                notif_output,
+                None,
+                width=notif_settings.render_width,
+                height=notif_settings.render_height,
+                magnification=notif_settings.magnification,
+            )
             if notif_output.exists():
                 self._show(notif_output, notif["duration"], "panel__notification")
         except Exception:
