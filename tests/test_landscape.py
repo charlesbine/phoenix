@@ -1,8 +1,11 @@
 """The flyover uses a closed flight path and preserves exported animation timing."""
 
+import sys
+
 import pytest
 from PIL import Image, ImageSequence
 
+import phoenix.apps
 from phoenix.apps import procedural_landscape as landscape
 from phoenix.models import default_preset_for
 from phoenix.settings import Settings
@@ -139,6 +142,9 @@ def test_landscape_render_entry_point_keeps_animation(tmp_path, monkeypatch):
     from phoenix import render
     from phoenix.models import AppConfig
 
+    # The renderer starts without the landscape module imported by this test file.
+    monkeypatch.delitem(sys.modules, landscape.__name__)
+    monkeypatch.delattr(phoenix.apps, "procedural_landscape")
     monkeypatch.setattr(render, "output_path", lambda name: native)
     monkeypatch.setattr(render, "output_path_large", lambda name: large)
     render._render_dispatch(

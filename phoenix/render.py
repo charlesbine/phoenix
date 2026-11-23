@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from time import sleep
 
@@ -538,13 +539,7 @@ def _run_python_app(app: AppConfig, settings: Settings) -> None:
     The Python file must define a render(settings, config, output, output_large) function.
     """
     mod_path = python_app_path(app.name)
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(f"phoenix.apps.{app.name}", mod_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"[{app.name}] Could not load {mod_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = import_module(f"phoenix.apps.{app.name}")
 
     render_fn = getattr(mod, "render", None)
     if render_fn is None:
