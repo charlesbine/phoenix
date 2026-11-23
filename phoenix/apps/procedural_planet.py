@@ -86,20 +86,29 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
         except EOFError:
             pass
 
-        if frames:
-            # Native size output
-            frames[0].save(
-                output, "WEBP", save_all=True, append_images=frames[1:],
-                duration=durations, loop=0,
-            )
+    if len(frames) > 1:
+        # Average adjacent exposures in the loop to soften pixels that flash as
+        # sharp texture edges cross the grid. Keep each exposure centered in time.
+        softened = []
+        for index, frame in enumerate(frames):
+            previous = frames[index - 1]
+            following = frames[(index + 1) % len(frames)]
+            softened.append(Image.blend(frame, Image.blend(previous, following, 0.5), 0.5))
+        frames = softened
 
-            # Magnified output
-            mag = settings.magnification
-            large_frames = [
-                f.resize((64 * mag, 64 * mag), Image.Resampling.NEAREST)
-                for f in frames
-            ]
-            large_frames[0].save(
-                output_large, "WEBP", save_all=True, append_images=large_frames[1:],
-                duration=durations, loop=0,
-            )
+    # Lossless WebP keeps the dark background and pixel colors steady as the
+    # texture moves.
+    frames[0].save(
+        output, "WEBP", save_all=True, append_images=frames[1:],
+        duration=durations, loop=0, lossless=True,
+    )
+
+    mag = settings.magnification
+    large_frames = [
+        f.resize((64 * mag, 64 * mag), Image.Resampling.NEAREST)
+        for f in frames
+    ]
+    large_frames[0].save(
+        output_large, "WEBP", save_all=True, append_images=large_frames[1:],
+        duration=durations, loop=0, lossless=True,
+    )

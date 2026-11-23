@@ -11,7 +11,7 @@ import AppRow from '@/components/AppRow.vue'
 import AppQuickSettings from '@/components/AppQuickSettings.vue'
 
 const store = useMatrixStore()
-const { rotation, config, nowPlaying, nowPlayingLive, nodeSync, online, tick, note, previewApp, selectedApp, following } =
+const { rotation, config, nowPlaying, nowPlayingLive, nodeSync, online, tick, liveTick, note, previewApp, selectedApp, following } =
   storeToRefs(store)
 
 const showDisabled = ref(false)
@@ -43,6 +43,10 @@ const singleAppValue = computed(() =>
   singleAppOptions.value.some((app) => app.name === config.value?.single_app) ? config.value?.single_app : '',
 )
 const previewLive = computed(() => selectedApp.value?.is_live ?? (following.value && nowPlayingLive.value))
+const previewTick = computed(() => {
+  const revision = previewLive.value ? liveTick.value : selectedApp.value?.last_updated ?? ''
+  return `${revision}:${tick.value}`
+})
 const healthStatus = computed(() => health.value?.status ?? (healthError.value ? 'offline' : 'checking'))
 const healthIssues = computed(() => health.value?.issues ?? (healthError.value ? [healthError.value] : []))
 const unhealthyApps = computed(() => health.value?.unhealthy_apps ?? [])
@@ -134,7 +138,7 @@ onUnmounted(() => {
       <section>
         <MatrixPreview
           :app="previewApp"
-          :tick="tick"
+          :tick="previewTick"
           :device="store.activeDevice"
           :live="previewLive"
           @render="previewApp && store.render(previewApp)"

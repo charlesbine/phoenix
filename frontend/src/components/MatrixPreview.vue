@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 
-const props = defineProps<{ app: string | null; tick: number; device?: string; live?: boolean }>()
+const props = defineProps<{ app: string | null; tick: number | string; device?: string; live?: boolean }>()
 const emit = defineEmits<{ render: [] }>()
 
 const broken = ref(false)
@@ -10,16 +10,12 @@ const broken = ref(false)
 const src = computed(() => {
   if (!props.app) return null
   const url = props.live && props.device ? api.liveFrameUrl(props.device) : api.frameUrl(props.app)
-  return `${url}?t=${props.tick}`
+  return `${url}?t=${encodeURIComponent(props.tick)}`
 })
 
-// Retry the image whenever the app or the cache-bust tick changes.
-watch(
-  () => [props.app, props.tick],
-  () => {
-    broken.value = false
-  },
-)
+watch(src, () => {
+  broken.value = false
+})
 </script>
 
 <template>

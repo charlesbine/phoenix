@@ -19,7 +19,8 @@ export const useMatrixStore = defineStore('matrix', () => {
   const nodeSync = ref<NodeSyncStatus>()
   const online = ref(false)
   const error = ref<string | null>(null)
-  const tick = ref(0) // bumps on every state push / render — cache-busts the preview frame
+  const tick = ref(0) // cache-busts an explicitly rendered preview
+  const liveTick = ref(0) // refreshes the latest frame of a live app on state pushes
 
   // Which physical panel the UI is driving. 'main' is seeded server-side, so it
   // always exists; all apps/config/now-playing calls are scoped to this device.
@@ -69,7 +70,7 @@ export const useMatrixStore = defineStore('matrix', () => {
     nodeSync.value = s.node_sync
     online.value = true
     error.value = null
-    tick.value++
+    liveTick.value++
   }
 
   async function refresh(): Promise<void> {
@@ -197,7 +198,7 @@ export const useMatrixStore = defineStore('matrix', () => {
   }
 
   return {
-    apps, config, nowPlaying, nowPlayingLive, nodeSync, online, error, tick, note,
+    apps, config, nowPlaying, nowPlayingLive, nodeSync, online, error, tick, liveTick, note,
     devices, activeDevice, activeDeviceObj,
     selected, rotation, previewApp, selectedApp, following,
     refresh, connect, disconnect, select, followLive, render,
