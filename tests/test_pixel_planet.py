@@ -62,6 +62,28 @@ def test_procedural_planet_webps_keep_the_loop_and_timing(tmp_path):
         _assert_loop(output, duration_ms=6_250)
 
 
+def test_procedural_planet_softens_frame_changes_across_loop_boundary(tmp_path, monkeypatch):
+    source = [Image.new("RGB", (64, 64)) for _ in range(4)]
+    for frame, color in zip(source, [(0, 0, 0), (200, 0, 0), (0, 200, 0), (0, 0, 200)]):
+        frame.putpixel((32, 32), color)
+    gif = io.BytesIO()
+    source[0].save(
+        gif, "GIF", save_all=True, append_images=source[1:], duration=[60, 70, 70, 70], loop=0,
+    )
+    monkeypatch.setattr("phoenix.apps.procedural_planet.generate_planet_gif", lambda **kwargs: gif.getvalue())
+
+    native, large = tmp_path / "planet.webp", tmp_path / "planet.large.webp"
+    render(Settings(_env_file=None, magnification=2), {}, native, large)
+
+    for path, center in [(native, 32), (large, 64)]:
+        with Image.open(path) as animation:
+            frames = [frame.convert("RGB") for frame in ImageSequence.Iterator(animation)]
+        assert [frame.getpixel((center, center)) for frame in frames] == [
+            (50, 0, 50), (100, 50, 0), (50, 100, 50), (0, 50, 100),
+        ]
+        assert all(frame.getpixel((0, 0)) == (0, 0, 0) for frame in frames)
+
+
 def test_zero_speed_renders_a_still_planet():
     gif = generate_planet_gif("lava", seed=2319, size=16, n_frames=4, time_speed=0)
     with Image.open(io.BytesIO(gif)) as image:
