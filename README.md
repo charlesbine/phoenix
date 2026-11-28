@@ -219,6 +219,10 @@ for a 24-hour clock over the rain. In the last 2.2 seconds of each minute, the c
 code glyphs while the rain behind them quickens. They settle into the new time
 on the minute, inspired by [AnimatedPixelClock style 12](https://github.com/Keralots/AnimatedPixelClock#hour-change-animations). Both run on the player. The clock uses the time
 zone in Phoenix display settings, including on a paired node playing offline.
+Open either app’s **Settings** to set **Rain speed** (0.5× to 2×) and **Rain density**
+(Sparse, Normal or Dense). Each app saves its own choices across panels. The
+defaults are 1× and Normal. Rain speed affects the streams only; the clock
+always finishes its decode on the minute.
 
 ![Matrix Clock on the left and Matrix Rain on the right](docs/media/matrix-clock-and-rain.gif)
 

@@ -283,7 +283,7 @@ class DisplayManager:
 
     def _display_live_app(self, app: AppConfig, duration: int | None) -> None:
         if app.runtime == "live_matrix":
-            self._display_matrix_app(app.name, duration)
+            self._display_matrix_app(app, duration)
         elif app.runtime == "live_audio":
             self._display_audio_app(app.name, app.pixlet_config, duration)
         elif app.runtime == "live_nowplaying":
@@ -296,11 +296,12 @@ class DisplayManager:
             return False
         return self._current_brightness() > 0
 
-    def _display_matrix_app(self, name: str, duration: int | None) -> None:
+    def _display_matrix_app(self, app: AppConfig, duration: int | None) -> None:
         if self._matrix_rain is None:
             self._matrix_rain = MatrixRain()
-        clock = self.device_db.get_display_settings() if name == "matrix_clock" else None
-        self._write_now_playing(name)
+        self._matrix_rain.configure(app.pixlet_config)
+        clock = self.device_db.get_display_settings() if app.name == "matrix_clock" else None
+        self._write_now_playing(app.name)
         start = time.perf_counter()
         next_preview = start
         # Streaming sinks receive the animation; the web backend reads the preview.

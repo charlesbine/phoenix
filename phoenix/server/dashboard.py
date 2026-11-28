@@ -275,6 +275,10 @@ def create_app() -> FastAPI:
         return {"error": f"{name} not in device {device_id}"}
 
     def _runtime_schema(app_obj) -> list[dict]:
+        if app_obj and app_obj.runtime == "live_matrix":
+            from phoenix.procedural.matrix_rain import SETTINGS_SCHEMA
+
+            return SETTINGS_SCHEMA
         if not app_obj or app_obj.runtime != "live_audio":
             return []
         def audio_floor_gate_fields(floor_default: str, gate_default: str) -> list[dict]:

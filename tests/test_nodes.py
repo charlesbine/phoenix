@@ -33,6 +33,8 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     app_db.upsert("planet", pixlet_config={"server_private": "value"})
     app_db.upsert("christmas")
     central.set_app("desk", "planet", sort_order=2)
+    rain_config = {"rain_speed": "0.5", "rain_density": "dense"}
+    app_db.upsert("matrix_clock", pixlet_config=rain_config)
     central.set_app("desk", "matrix_clock", sort_order=3)
     central.update("desk", layout_mode="single", single_app="planet")
     central.set_app("apollo", "christmas")
@@ -80,6 +82,7 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     assert [row["app_name"] for row in local.list_apps("desk")] == ["planet", "matrix_clock"]
     clock = AppDatabase(local._path).get("matrix_clock")
     assert clock.active and clock.runtime == "live_matrix"
+    assert clock.pixlet_config == rain_config
     assert not (node_outputs / "matrix_clock.webp").exists()
     assert AppDatabase(local._path).get("planet").pixlet_config == {}
 

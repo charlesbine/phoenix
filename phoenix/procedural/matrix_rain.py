@@ -52,6 +52,15 @@ _DIGITS = tuple(_bitmap(rows, 5).resize((10, 21), Image.Resampling.NEAREST) for 
 DIGIT_X = (4, 17, 35, 48)
 DECODE_MS = 2200
 GLYPH_MS = 80
+SPEEDS = {str(value): float(value) for value in (0.5, 0.75, 1, 1.5, 2)}
+# Density changes the number of empty cells between trails on a column.
+GAP_SCALE = {"sparse": 2.0, "normal": 1.0, "dense": 0.5}
+SETTINGS_SCHEMA = [
+    {"type": "dropdown", "id": "rain_speed", "name": "Rain speed", "default": "1",
+     "options": [{"value": speed, "display": f"{speed}×"} for speed in SPEEDS]},
+    {"type": "dropdown", "id": "rain_density", "name": "Rain density", "default": "normal",
+     "options": [{"value": density, "display": density.title()} for density in GAP_SCALE]},
+]
 
 
 @lru_cache(maxsize=4)
@@ -71,8 +80,14 @@ class MatrixRain:
             for _ in range(MATRIX_SIZE[0] // 4)
         ]
 
+        self._speed = 1.0
+        self._gap_scale = 1.0
         self._extra_fall = [0.0] * len(self.columns)
         self._last_clock_frame: float | None = None
+
+    def configure(self, config: dict[str, str]) -> None:
+        self._speed = SPEEDS.get(config.get("rain_speed", "1"), 1.0)
+        self._gap_scale = GAP_SCALE.get(config.get("rain_density", "normal"), 1.0)
 
     def frame(self, elapsed: float, local_time: datetime | None = None) -> Image.Image:
         image = Image.new("RGB", MATRIX_SIZE)
@@ -100,7 +115,8 @@ class MatrixRain:
 
         for col, (rate, offset, period, length, symbols) in enumerate(self.columns):
             t = elapsed + self._extra_fall[col] if local_time is not None else elapsed
-            tick = int(t * rate) + offset
+            tick = int(t * rate * self._speed) + offset
+            period = length + round((period - length) * self._gap_scale)
             cycle, head = divmod(tick, period)
             for age in range(length):
                 row = (head - age) % period

@@ -56,6 +56,27 @@ def test_decode_targets_the_actual_dst_jump():
     assert (199, 255, 207) in {color for _, color in during.crop(minutes).getcolors()}
 
 
+def test_rain_speed_scales_only_fall_and_defaults_preserve_the_pattern():
+    base, fast = MatrixRain(), MatrixRain()
+    fast.configure({"rain_speed": "2"})
+    assert fast.frame(4).tobytes() == base.frame(8).tobytes()
+    face = (48, 20, 60, 43)
+    decode_at = datetime(2026, 11, 28, 12, 34, 59, tzinfo=ZoneInfo("UTC"))
+    assert fast.frame(4, decode_at).crop(face).tobytes() == base.frame(4, decode_at).crop(face).tobytes()
+    fast.configure({"rain_speed": "-9", "rain_density": "unknown"})
+    assert fast.frame(4).tobytes() == base.frame(4).tobytes()
+
+
+def test_denser_rain_puts_more_glyphs_on_the_panel():
+    rain = MatrixRain()
+    coverage = []
+    for density in ("sparse", "normal", "dense"):
+        rain.configure({"rain_density": density})
+        samples = [rain.frame(second).convert("L") for second in range(60)]
+        coverage.append(sum(image.width * image.height - image.histogram()[0] for image in samples))
+    assert coverage[0] < coverage[1] < coverage[2]
+
+
 @pytest.mark.parametrize("name", ["matrix_clock", "matrix_rain"])
 def test_player_streams_builtin_without_cached_artwork(tmp_path, monkeypatch, name):
     apps = AppDatabase(tmp_path / "test.db")
