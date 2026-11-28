@@ -13,7 +13,7 @@ export interface AppItem {
   sort_order: number
   pixlet_config: Record<string, unknown>
   refresh_preset: string | null
-  app_type: 'star' | 'python' | 'static' | 'panel' | 'live_audio' | 'live_nowplaying' | 'unknown'
+  app_type: 'star' | 'python' | 'static' | 'panel' | 'live_audio' | 'live_nowplaying' | 'live_matrix' | 'unknown'
   is_live: boolean
   source: string | null
   skip_when_unhealthy: boolean

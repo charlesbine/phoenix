@@ -59,6 +59,7 @@ const TYPE_MARK: Record<string, string> = {
   panel: 'panel',
   live_audio: 'audio',
   live_nowplaying: 'playing',
+  live_matrix: 'matrix',
   unknown: 'app',
 }
 

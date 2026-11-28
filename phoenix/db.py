@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS device_brightness_schedules (
 _initialized: set[str] = set()
 
 _BUILTIN_APPS: tuple[dict, ...] = (
+    {"name": "matrix_rain", "runtime": "live_matrix", "pixlet_config": {}},
+    {"name": "matrix_clock", "runtime": "live_matrix", "pixlet_config": {}},
     {
         "name": "nowplaying",
         "runtime": "live_nowplaying",
