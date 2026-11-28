@@ -30,8 +30,14 @@ def test_serves_built_vue_dashboard_and_spa_routes(tmp_path, monkeypatch):
 
     client = make_client(tmp_path, monkeypatch, frontend_dist)
 
-    assert client.get("/").text == "<div id=\"app\"></div>"
-    assert client.get("/devices").text == "<div id=\"app\"></div>"
+    root = client.get("/")
+    assert root.text == "<div id=\"app\"></div>"
+    assert root.headers.get("cache-control") == "no-cache"
+
+    spa = client.get("/devices")
+    assert spa.text == "<div id=\"app\"></div>"
+    assert spa.headers.get("cache-control") == "no-cache"
+
     assert client.get("/phoenix.png").content == b"png"
     assert client.get("/api/not-a-route").status_code == 404
 

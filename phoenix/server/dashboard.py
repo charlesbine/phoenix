@@ -1597,7 +1597,7 @@ def create_app() -> FastAPI:
     def _frontend_index_response() -> FileResponse | HTMLResponse:
         index_file = phoenix_paths.FRONTEND_DIST_DIR / "index.html"
         if index_file.exists():
-            return FileResponse(index_file)
+            return FileResponse(index_file, headers={"Cache-Control": "no-cache"})
         return _missing_frontend_response()
 
     def _frontend_public_file(path: str) -> FileResponse | None:
