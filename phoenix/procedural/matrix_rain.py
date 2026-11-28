@@ -52,7 +52,7 @@ _DIGITS = tuple(_bitmap(rows, 5).resize((10, 21), Image.Resampling.NEAREST) for 
 DIGIT_X = (4, 17, 35, 48)
 DECODE_MS = 2200
 GLYPH_MS = 80
-SPEEDS = {str(value): float(value) for value in (0.5, 0.75, 1, 1.5, 2)}
+SPEEDS = {str(value): float(value) for value in (0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8)}
 # Density changes the number of empty cells between trails on a column.
 GAP_SCALE = {"sparse": 2.0, "normal": 1.0, "dense": 0.5}
 SETTINGS_SCHEMA = [

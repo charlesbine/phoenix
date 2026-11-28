@@ -56,10 +56,11 @@ def test_decode_targets_the_actual_dst_jump():
     assert (199, 255, 207) in {color for _, color in during.crop(minutes).getcolors()}
 
 
-def test_rain_speed_scales_only_fall_and_defaults_preserve_the_pattern():
+@pytest.mark.parametrize("speed", [2, 3, 4, 6, 8])
+def test_rain_speed_scales_only_fall_and_defaults_preserve_the_pattern(speed):
     base, fast = MatrixRain(), MatrixRain()
-    fast.configure({"rain_speed": "2"})
-    assert fast.frame(4).tobytes() == base.frame(8).tobytes()
+    fast.configure({"rain_speed": str(speed)})
+    assert fast.frame(4).tobytes() == base.frame(4 * speed).tobytes()
     face = (48, 20, 60, 43)
     decode_at = datetime(2026, 11, 28, 12, 34, 59, tzinfo=ZoneInfo("UTC"))
     assert fast.frame(4, decode_at).crop(face).tobytes() == base.frame(4, decode_at).crop(face).tobytes()
