@@ -42,7 +42,12 @@ const singleAppOptions = computed(() => rotation.value.filter((app) => app.enabl
 const singleAppValue = computed(() =>
   singleAppOptions.value.some((app) => app.name === config.value?.single_app) ? config.value?.single_app : '',
 )
-const previewLive = computed(() => selectedApp.value?.is_live ?? (following.value && nowPlayingLive.value))
+const previewLive = computed(() => {
+  if (selectedApp.value) {
+    return selectedApp.value.is_live && selectedApp.value.app_type !== 'live_matrix'
+  }
+  return following.value && nowPlayingLive.value
+})
 const previewTick = computed(() => {
   const revision = previewLive.value ? liveTick.value : selectedApp.value?.last_updated ?? ''
   return `${revision}:${tick.value}`

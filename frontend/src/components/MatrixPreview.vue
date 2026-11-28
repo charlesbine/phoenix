@@ -34,14 +34,14 @@ watch(src, () => {
       <div v-else class="grid h-full w-full place-items-center px-6 text-center">
         <div>
           <div class="text-[11px] uppercase tracking-widest text-dim">
-            {{ app ? 'no frame rendered' : 'no signal' }}
+            {{ !app ? 'no signal' : live ? 'live stream · no panel frame' : 'no frame rendered' }}
           </div>
           <button
             v-if="app"
             class="mt-3 rounded border border-[#3a2016] px-3 py-1 text-[11px] uppercase tracking-wider text-flame hover:bg-[#251009]"
             @click="emit('render')"
           >
-            ⟳ Render preview
+            {{ live ? '↻ Refresh frame' : '⟳ Render preview' }}
           </button>
         </div>
       </div>

@@ -654,9 +654,9 @@ def create_app() -> FastAPI:
         try:
             svc = get_svc()
             app_obj = svc.app_db.get(name)
-            if app_obj and app_obj.runtime.startswith("live_"):
+            if app_obj and app_obj.runtime.startswith("live_") and app_obj.runtime != "live_matrix":
                 return {"info": f"{name}: live app streams directly to the panel"}
-            if app_obj and not app_obj.enabled:
+            if app_obj and (not app_obj.enabled or app_obj.runtime == "live_matrix"):
                 await asyncio.to_thread(svc.render_preview, name)
             else:
                 await asyncio.to_thread(svc.render_app, name)
@@ -675,7 +675,7 @@ def create_app() -> FastAPI:
         try:
             svc = get_svc()
             app_obj = svc.app_db.get(name)
-            if app_obj and app_obj.runtime.startswith("live_"):
+            if app_obj and app_obj.runtime.startswith("live_") and app_obj.runtime != "live_matrix":
                 return {"info": f"{name}: live app preview uses the panel's latest frame"}
             await asyncio.to_thread(svc.render_preview, name)
             fresh = svc.app_db.get(name)

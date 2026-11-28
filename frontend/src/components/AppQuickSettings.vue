@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { AppItem, SchemaField } from '@/api/types'
 import AppSettingsFields from '@/components/AppSettingsFields.vue'
 
 const props = defineProps<{ app: AppItem }>()
 const emit = defineEmits<{ rendered: [] }>()
+const canRenderPreview = computed(() => !props.app.is_live || props.app.app_type === 'live_matrix')
 const schema = ref<SchemaField[] | null>(null)
 const values = ref<Record<string, string>>({})
 const saved = ref<Record<string, string>>({})
@@ -44,7 +45,7 @@ async function save(): Promise<void> {
       await api.setAppConfig(name, { ...props.app.pixlet_config, ...edits })
       saved.value = { ...values.value }
     }
-    if (props.app.is_live) {
+    if (!canRenderPreview.value) {
       note.value = 'Settings saved.'
       return
     }
@@ -75,7 +76,7 @@ async function save(): Promise<void> {
       <fieldset :disabled="saving">
         <AppSettingsFields :schema="schema" :values="values" @change="(id, value) => values[id] = value" />
         <button class="mt-3 rounded bg-flame px-3 py-1.5 text-xs text-[#160a0a] disabled:opacity-60" type="submit">
-          {{ app.is_live ? 'Save settings' : 'Save & render' }}
+          {{ canRenderPreview ? 'Save & render' : 'Save settings' }}
         </button>
       </fieldset>
     </form>

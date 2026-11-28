@@ -1,8 +1,10 @@
 """Digital rain in a 64×64 LED grid, with an optional live clock face."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
+from pathlib import Path
 from random import Random
+import tempfile
 
 from PIL import Image, ImageDraw
 
@@ -144,3 +146,54 @@ def _draw_time(image: Image.Image, digits: str, decoding: dict[int, Image.Image]
     draw.rectangle((30, y, 33, y + 22), fill="black")
     for dy in (7, 15):
         draw.rectangle((31, y + dy, 32, y + dy + 1), fill=(160, 222, 177))
+
+
+def render_preview(
+    config: dict[str, str],
+    output: Path,
+    output_large: Path,
+    *,
+    magnification: int = 2,
+    local_time: datetime | None = None,
+    duration_seconds: float = 3.0,
+    fps: int = 15,
+) -> None:
+    """Render an animated WebP preview (64x64 and magnified) using current rain settings."""
+    rain = MatrixRain()
+    rain.configure(config)
+    count = max(1, int(round(duration_seconds * fps)))
+    frame_ms = max(20, round(1000 / fps))
+    frames = [
+        rain.frame(
+            i / fps,
+            local_time + timedelta(seconds=i / fps) if local_time is not None else None,
+        )
+        for i in range(count)
+    ]
+    scale = max(1, magnification)
+    large_size = (MATRIX_SIZE[0] * scale, MATRIX_SIZE[1] * scale)
+    large_frames = (
+        frames
+        if scale == 1
+        else [frame.resize(large_size, Image.Resampling.NEAREST) for frame in frames]
+    )
+
+    for dest, seq in ((output, frames), (output_large, large_frames)):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=dest.parent, suffix=".webp", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            seq[0].save(
+                tmp_path,
+                "WEBP",
+                save_all=True,
+                append_images=seq[1:],
+                duration=frame_ms,
+                loop=0,
+                lossless=True,
+            )
+            tmp_path.chmod(0o644)
+            tmp_path.replace(dest)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
