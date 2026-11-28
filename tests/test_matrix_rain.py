@@ -9,18 +9,51 @@ from phoenix.display.manager import DisplayManager
 from phoenix.procedural.matrix_rain import MatrixRain
 
 
-def test_rain_animates_and_clock_keeps_unchanged_digits_stationary():
-    rain = MatrixRain()
+def test_changed_digit_cycles_whole_glyphs_and_locks_on_the_minute():
     now = datetime(2026, 11, 28, 12, 35, tzinfo=ZoneInfo("America/New_York"))
-    before = rain.frame(8.5, now - timedelta(seconds=1))
-    during = rain.frame(8.5, now.replace(microsecond=350000))
-    after = rain.frame(8.5, now.replace(second=1))
-    plain = rain.frame(8.5)
-    assert plain.size == (64, 64)
-    assert plain.tobytes() != rain.frame(9.5).tobytes()
-    assert plain.crop((0, 0, 64, 18)).tobytes() == after.crop((0, 0, 64, 18)).tobytes()
-    assert before.crop((0, 0, 48, 64)).tobytes() == during.crop((0, 0, 48, 64)).tobytes()
-    assert len({im.crop((48, 20, 60, 43)).tobytes() for im in (before, during, after, plain)}) == 4
+    rain = MatrixRain()
+
+    def face(seconds):
+        return rain.frame(9.0, now + timedelta(seconds=seconds))
+
+    before = face(-3)
+    tick0, same_tick, tick1 = face(-2.2), face(-2.15), face(-2.12)
+    after = face(0)
+    for image in (tick0, same_tick, tick1, after):
+        assert image.crop((4, 20, 47, 43)).tobytes() == before.crop((4, 20, 47, 43)).tobytes()
+    slot = (48, 20, 60, 43)
+    assert tick0.crop(slot).tobytes() == same_tick.crop(slot).tobytes()
+    assert len({im.crop(slot).tobytes() for im in (before, tick0, tick1, after)}) == 4
+    assert after.crop(slot).tobytes() == face(20).crop(slot).tobytes()
+    # A decoding plate contains only the code glyph, with no numeral behind it.
+    assert {color for count, color in tick0.crop(slot).getcolors()} == {(0, 0, 0), (199, 255, 207)}
+
+
+def test_only_rain_streams_under_changing_digits_accelerate():
+    rain = MatrixRain()
+    start = datetime(2026, 11, 28, 12, 34, 57, tzinfo=ZoneInfo("UTC"))
+    for step in range(31):
+        t = step / 10
+        clock = rain.frame(t, start + timedelta(seconds=t))
+    plain = rain.frame(t)
+    assert plain.tobytes() == MatrixRain().frame(t).tobytes()
+    assert plain.tobytes() != rain.frame(t + 1).tobytes()
+    assert plain.crop((0, 0, 48, 19)).tobytes() == clock.crop((0, 0, 48, 19)).tobytes()
+    assert plain.crop((48, 0, 60, 19)).tobytes() != clock.crop((48, 0, 60, 19)).tobytes()
+
+
+def test_decode_targets_the_actual_dst_jump():
+    rain = MatrixRain()
+    zone = ZoneInfo("America/New_York")
+    just_before_jump = datetime(2026, 11, 1, 1, 59, 59, tzinfo=zone, fold=0)
+    # In the repeated hour 01:59 becomes 01:00, so the hour stays still.
+    hour = (4, 20, 29, 43)
+    minutes = (35, 20, 60, 43)
+    during = rain.frame(0, just_before_jump)
+    at_jump = datetime.fromtimestamp(just_before_jump.timestamp() + 1, zone)
+    settled = rain.frame(0, at_jump)
+    assert during.crop(hour).tobytes() == settled.crop(hour).tobytes()
+    assert (199, 255, 207) in {color for _, color in during.crop(minutes).getcolors()}
 
 
 @pytest.mark.parametrize("name", ["matrix_clock", "matrix_rain"])

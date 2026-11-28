@@ -28,6 +28,7 @@ from phoenix.paths import (
     output_path,
     show_now_file,
 )
+from phoenix.procedural.matrix_rain import MatrixRain
 from phoenix.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,7 @@ class DisplayManager:
         self.debug_mode = debug_mode
         self.wake = wake
         self._forced_app: str | None = None
+        self._matrix_rain: MatrixRain | None = None
 
     def _wait(self, seconds: float) -> None:
         if self.wake is not None:
@@ -295,9 +297,8 @@ class DisplayManager:
         return self._current_brightness() > 0
 
     def _display_matrix_app(self, name: str, duration: int | None) -> None:
-        from phoenix.procedural.matrix_rain import MatrixRain
-
-        rain = MatrixRain()
+        if self._matrix_rain is None:
+            self._matrix_rain = MatrixRain()
         clock = self.device_db.get_display_settings() if name == "matrix_clock" else None
         self._write_now_playing(name)
         start = time.perf_counter()
@@ -315,10 +316,12 @@ class DisplayManager:
                     self.backend.set_brightness(brightness)
                 if brightness == 0:
                     break
-            frame = rain.frame(now, clock.local_time() if clock else None).tobytes()
+            frame = self._matrix_rain.frame(now, clock.local_time() if clock else None).tobytes()
             interval = 0.5
             if self.player is not None:
-                interval = 0.1 if self.backend.send_frame(frame) else RECONNECT_DELAY
+                interval = 0.08 if clock else 0.1
+                if not self.backend.send_frame(frame):
+                    interval = RECONNECT_DELAY
             if now >= next_preview:
                 self._save_preview(frame)
                 next_preview = now + 0.5

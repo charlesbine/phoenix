@@ -4,7 +4,7 @@ from datetime import datetime
 from functools import lru_cache
 from random import Random
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
 from phoenix.display.sink import MATRIX_SIZE
 
@@ -36,6 +36,29 @@ def _bitmap(rows: tuple[int, ...], width: int) -> Image.Image:
 
 
 _GLYPHS = tuple(_bitmap(rows, 3) for rows in GLYPHS)
+# Full-size code symbols use the numeral stroke width on the clock plates.
+_CODE_ROWS = (
+    (0, 31, 1, 5, 4, 8, 16), (4, 31, 17, 1, 2, 4, 8),
+    (2, 31, 6, 10, 18, 2, 6), (8, 31, 9, 9, 9, 17, 2),
+    (4, 31, 4, 31, 4, 2, 2), (0, 14, 2, 2, 4, 8, 31),
+    (0, 31, 1, 2, 4, 10, 17), (0, 21, 21, 1, 2, 4, 8),
+    (0, 10, 31, 10, 31, 10, 0), (0, 4, 21, 14, 21, 4, 0),
+    (0, 2, 4, 8, 4, 2, 0), (0, 8, 4, 2, 4, 8, 0),
+    (0, 14, 8, 8, 8, 14, 0), (0, 31, 0, 4, 0, 31, 0),
+    (0, 1, 2, 4, 8, 16, 0), (0, 8, 16, 14, 1, 2, 0),
+)
+_CODE = tuple(_bitmap(rows, 5).resize((10, 21), Image.Resampling.NEAREST) for rows in _CODE_ROWS)
+_DIGITS = tuple(_bitmap(rows, 5).resize((10, 21), Image.Resampling.NEAREST) for rows in DIGITS)
+DIGIT_X = (4, 17, 35, 48)
+DECODE_MS = 2200
+GLYPH_MS = 80
+
+
+@lru_cache(maxsize=4)
+def _decode_sequence(minute: int, slot: int) -> list[Image.Image]:
+    # Repeated draws of a single tick must show the same glyph on a slower player.
+    rng = Random(minute * 4 + slot)
+    return rng.sample(_CODE, len(_CODE))
 
 
 class MatrixRain:
@@ -48,10 +71,36 @@ class MatrixRain:
             for _ in range(MATRIX_SIZE[0] // 4)
         ]
 
+        self._extra_fall = [0.0] * len(self.columns)
+        self._last_clock_frame: float | None = None
+
     def frame(self, elapsed: float, local_time: datetime | None = None) -> Image.Image:
         image = Image.new("RGB", MATRIX_SIZE)
+        decoding = {}
+        if local_time is not None:
+            digits = local_time.strftime("%H%M")
+            ms_left = (60 - local_time.second) * 1000 - local_time.microsecond // 1000
+            if ms_left <= DECODE_MS:
+                # Step along the UTC timeline to handle midnight and DST folds or gaps.
+                next_minute = datetime.fromtimestamp(local_time.timestamp() + 60, local_time.tzinfo)
+                glyph_index = ((DECODE_MS - ms_left) // GLYPH_MS) % len(_CODE)
+                minute = int(next_minute.timestamp()) // 60
+                for slot, (old, new) in enumerate(zip(digits, next_minute.strftime("%H%M"))):
+                    if old != new:
+                        decoding[slot] = _decode_sequence(minute, slot)[glyph_index]
+            # Advance just the streams crossing a decoding slot, keeping their new
+            # positions when the clock locks. Cap the step on re-entry from rotation.
+            if decoding and self._last_clock_frame is not None:
+                dt = min(max(0, elapsed - self._last_clock_frame), 0.5, (DECODE_MS - ms_left) / 1000)
+                for slot in decoding:
+                    for col in range(len(self.columns)):
+                        if DIGIT_X[slot] <= col * 4 + 1 < DIGIT_X[slot] + 12:
+                            self._extra_fall[col] += dt
+            self._last_clock_frame = elapsed
+
         for col, (rate, offset, period, length, symbols) in enumerate(self.columns):
-            tick = int(elapsed * rate) + offset
+            t = elapsed + self._extra_fall[col] if local_time is not None else elapsed
+            tick = int(t * rate) + offset
             cycle, head = divmod(tick, period)
             for age in range(length):
                 row = (head - age) % period
@@ -63,40 +112,19 @@ class MatrixRain:
                 glyph = symbols[(row + generation * 13) % len(symbols)]
                 image.paste(TRAIL[age], (col * 4, y), glyph)
         if local_time is not None:
-            _draw_time(image, local_time)
+            _draw_time(image, digits, decoding)
         return image
 
 
-@lru_cache(maxsize=10)
-def _digit_layers(digit: str) -> tuple[Image.Image, Image.Image]:
-    # The dark one-pixel outline preserves the shape when rain passes behind it.
-    mask = Image.new("L", (12, 23))
-    glyph = _bitmap(DIGITS[int(digit)], 5).resize((10, 21), Image.Resampling.NEAREST)
-    mask.paste(glyph, (1, 1))
-    return mask, mask.filter(ImageFilter.MaxFilter(3))
-
-
-def _draw_time(image: Image.Image, now: datetime) -> None:
-    current = now.strftime("%H%M")
-    # Work in elapsed seconds so DST jumps decode from the actual preceding minute.
-    previous = current
-    reveal = 23
-    if now.second == 0 and now.microsecond < 750_000:
-        previous = datetime.fromtimestamp(now.timestamp() - 60, now.tzinfo).strftime("%H%M")
-        reveal = 23 * now.microsecond // 750_000
-    y = (image.height - 23) // 2
-    for x, old, new in zip((4, 17, 35, 48), previous, current):
-        mask, outline = _digit_layers(new)
-        if old != new and reveal < 23:
-            old_mask, old_outline = _digit_layers(old)
-            mask, outline = mask.copy(), outline.copy()
-            remaining = (0, reveal, 12, 23)
-            mask.paste(old_mask.crop(remaining), (0, reveal))
-            outline.paste(old_outline.crop(remaining), (0, reveal))
-        image.paste((0, 10, 4), (x, y), outline)
-        image.paste((165, 255, 194), (x, y), mask)
-        if old != new and reveal < 23:
-            ImageDraw.Draw(image).line((x + 1, y + reveal, x + 10, y + reveal), fill=(217, 255, 231))
+def _draw_time(image: Image.Image, digits: str, decoding: dict[int, Image.Image]) -> None:
     draw = ImageDraw.Draw(image)
+    y = (image.height - 23) // 2
+    for slot, (x, digit) in enumerate(zip(DIGIT_X, digits)):
+        draw.rectangle((x, y, x + 11, y + 22), fill="black")
+        if slot in decoding:
+            image.paste((199, 255, 207), (x + 1, y + 1), decoding[slot])
+        else:
+            image.paste((235, 255, 241), (x + 1, y + 1), _DIGITS[int(digit)])
+    draw.rectangle((30, y, 33, y + 22), fill="black")
     for dy in (7, 15):
-        draw.rectangle((31, y + dy, 32, y + dy + 1), fill=(74, 205, 120))
+        draw.rectangle((31, y + dy, 32, y + dy + 1), fill=(160, 222, 177))

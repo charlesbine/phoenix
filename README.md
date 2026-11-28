@@ -215,8 +215,9 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
 
 For Matrix-style digital rain, open **Apps**, select a device and choose **Add app to rotation**.
 Choose `matrix_rain` for streams of green terminal glyphs, or `matrix_clock`
-for a 24-hour clock over the rain. At the minute boundary a bright scanline
-reveals the changed digits. Both run on the player. The clock uses the time
+for a 24-hour clock over the rain. In the last 2.2 seconds of each minute, the changing digits cycle through bright
+code glyphs while the rain behind them quickens. They settle into the new time
+on the minute, inspired by [AnimatedPixelClock style 12](https://github.com/Keralots/AnimatedPixelClock#hour-change-animations). Both run on the player. The clock uses the time
 zone in Phoenix display settings, including on a paired node playing offline.
 
 ![Matrix Clock on the left and Matrix Rain on the right](docs/media/matrix-clock-and-rain.gif)
