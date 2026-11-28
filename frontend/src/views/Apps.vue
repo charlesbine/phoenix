@@ -288,6 +288,10 @@ function candidateMeta(c: AddCandidate): string {
   return parts.join(' · ')
 }
 
+function usesPanelLiveFrame(app?: Pick<AppItem, 'is_live' | 'app_type'> | null): boolean {
+  return Boolean(app?.is_live && app.app_type !== 'live_matrix')
+}
+
 function candidateByName(name: string): AddCandidate | null {
   return addCandidates.value.find((c) => c.name === name) ?? null
 }
@@ -295,14 +299,14 @@ function candidateByName(name: string): AddCandidate | null {
 function focusCandidate(name: string): void {
   const candidate = candidateByName(name)
   addPreviewApp.value = name
-  addPreviewLive.value = Boolean(candidate?.app?.is_live)
+  addPreviewLive.value = usesPanelLiveFrame(candidate?.app)
   addNote.value = null
 }
 
 async function previewCandidate(name: string): Promise<void> {
   const candidate = candidateByName(name)
   addPreviewApp.value = name
-  addPreviewLive.value = Boolean(candidate?.app?.is_live)
+  addPreviewLive.value = usesPanelLiveFrame(candidate?.app)
   addNote.value = 'previewing...'
   try {
     const r = await api.preview(name)
@@ -328,7 +332,7 @@ async function previewVisibleCandidates(): Promise<void> {
   try {
     for (const candidate of targets) {
       addPreviewApp.value = candidate.name
-      addPreviewLive.value = Boolean(candidate.app?.is_live)
+      addPreviewLive.value = usesPanelLiveFrame(candidate.app)
       addNote.value = `previewing ${addBatchDone.value + 1}/${addBatchTotal.value} · ${candidate.name}`
       try {
         const r = await api.preview(candidate.name)
@@ -643,7 +647,7 @@ function removeConfigValue(key: string): void {
       </section>
 
       <section v-else-if="selectedApp" class="flex flex-col gap-4">
-        <MatrixPreview :app="selected" :tick="tick" :device="device" :live="selectedApp.is_live" @render="renderPreview" />
+        <MatrixPreview :app="selected" :tick="tick" :device="device" :live="usesPanelLiveFrame(selectedApp)" @render="renderPreview" />
         <p v-if="note" class="font-mono text-[10px] text-[#c78a5a]">{{ note }}</p>
 
         <!-- data-ingress health & skip-when-unhealthy -->

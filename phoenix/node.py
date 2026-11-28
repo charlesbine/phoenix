@@ -129,7 +129,7 @@ def build_state(device_id: str) -> NodeState:
             "health_reason": "",
             "pixlet_config": app.pixlet_config if app.runtime.startswith("live_") else {},
         }))
-        if effective_enabled or name == requested_name:
+        if (effective_enabled or name == requested_name) and not app.runtime.startswith("live_"):
             if version := frame_version(output_path(name)):
                 frames[name] = version
         if name == requested_name and (name in frames or app.runtime.startswith("live_")):

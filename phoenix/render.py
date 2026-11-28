@@ -141,6 +141,25 @@ def render_preview(name: str, settings: Settings) -> None:
     """Render a preview of an app regardless of DB state. Works for apps not yet registered."""
     app_db = AppDatabase()
     existing = app_db.get(name)
+    if existing and existing.runtime == "live_matrix":
+        from phoenix.db import DeviceDatabase
+        from phoenix.procedural.matrix_rain import render_preview as render_matrix_preview
+
+        ensure_dirs()
+        local_time = (
+            DeviceDatabase(app_db.path).get_display_settings().local_time()
+            if name == "matrix_clock"
+            else None
+        )
+        render_matrix_preview(
+            config=existing.pixlet_config,
+            output=output_path(name),
+            output_large=output_path_large(name),
+            magnification=settings.magnification,
+            local_time=local_time,
+        )
+        _record_health(app_db, name, healthy=True, mark_updated=True)
+        return
     if existing and existing.runtime.startswith("live_"):
         _record_health(app_db, name, healthy=True, mark_updated=True)
         return

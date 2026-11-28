@@ -111,3 +111,60 @@ def test_player_streams_builtin_without_cached_artwork(tmp_path, monkeypatch, na
     assert app.name == name and app.runtime == "live_matrix"
     dm._display_app(app, 30)
     assert previews == frames and len(frames) == 1 and len(frames[0]) == 64 * 64 * 3
+
+
+@pytest.mark.parametrize("name", ["matrix_clock", "matrix_rain"])
+def test_dashboard_preview_renders_animated_webp_for_matrix_apps(tmp_path, monkeypatch, name):
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    import phoenix.db as db_mod
+    import phoenix.node as node_mod
+    import phoenix.paths as paths_mod
+    import phoenix.render as render_mod
+    import phoenix.server.dashboard as dashboard_mod
+
+    data_dir = tmp_path / "data"
+    outputs_dir = tmp_path / "outputs"
+    (data_dir / "output").mkdir(parents=True)
+    outputs_dir.mkdir(parents=True)
+    db_path = tmp_path / "dash.db"
+
+    monkeypatch.setattr(db_mod, "DB_PATH", db_path)
+    monkeypatch.setattr(paths_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(paths_mod, "OUTPUTS_DIR", outputs_dir)
+    monkeypatch.setattr(dashboard_mod, "DATA_DIR", data_dir)
+    monkeypatch.setattr(dashboard_mod, "OUTPUTS_DIR", outputs_dir)
+    monkeypatch.setattr(render_mod, "output_path", lambda n: outputs_dir / f"{n}.webp")
+    monkeypatch.setattr(render_mod, "output_path_large", lambda n: outputs_dir / f"{n}.large.webp")
+    monkeypatch.setattr(node_mod, "output_path", lambda n: outputs_dir / f"{n}.webp")
+
+    client = TestClient(dashboard_mod.create_app())
+    client.put(f"/api/apps/{name}/config", json={"rain_speed": "4", "rain_density": "dense"})
+    res = client.post(f"/api/apps/{name}/preview")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["preview"] is True
+    assert body["health_status"] == "healthy"
+
+    small = outputs_dir / f"{name}.webp"
+    large = outputs_dir / f"{name}.large.webp"
+    assert small.exists() and large.exists()
+    with Image.open(small) as img:
+        assert img.size == (64, 64)
+        assert getattr(img, "is_animated", False)
+        assert getattr(img, "n_frames", 1) > 1
+    with Image.open(large) as img:
+        assert img.size[0] >= 64 and img.size[1] >= 64
+        assert getattr(img, "is_animated", False)
+
+    # Panel-only live apps still keep their panel-stream message.
+    audio_res = client.post("/api/apps/audio_bars/preview")
+    assert "live app preview" in audio_res.json().get("info", "")
+
+    # Paired serial nodes still stream live_matrix natively without syncing the preview WebP.
+    devices = DeviceDatabase(db_path)
+    devices.create("aurora", "Aurora", "serial")
+    devices.set_app("aurora", name)
+    state = node_mod.build_state("aurora")
+    assert name not in state.frames
