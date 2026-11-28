@@ -17,7 +17,7 @@ from threading import Event
 
 from phoenix.db import AppDatabase, ConfigDatabase, DeviceDatabase, PlaylistDatabase
 from phoenix.display.backend import DisplayBackend
-from phoenix.display.sink import FramePlayer, FrameSink
+from phoenix.display.sink import RECONNECT_DELAY, FramePlayer, FrameSink
 from phoenix.models import AppConfig, device_brightness
 from phoenix.mqtt import pop_notification
 from phoenix.paths import (
@@ -44,7 +44,7 @@ AUDIO_BANDS = 24
 
 
 def _is_live_runtime(app: AppConfig) -> bool:
-    return app.runtime in {"live_audio", "live_nowplaying"}
+    return app.runtime in {"live_audio", "live_nowplaying", "live_matrix"}
 
 
 def _config_int(config: dict, key: str, default: int) -> int:
@@ -280,7 +280,9 @@ class DisplayManager:
     # -- live apps --
 
     def _display_live_app(self, app: AppConfig, duration: int | None) -> None:
-        if app.runtime == "live_audio":
+        if app.runtime == "live_matrix":
+            self._display_matrix_app(app.name, duration)
+        elif app.runtime == "live_audio":
             self._display_audio_app(app.name, app.pixlet_config, duration)
         elif app.runtime == "live_nowplaying":
             self._display_nowplaying_app(app.name, duration)
@@ -291,6 +293,39 @@ class DisplayManager:
         if self._should_interrupt():
             return False
         return self._current_brightness() > 0
+
+    def _display_matrix_app(self, name: str, duration: int | None) -> None:
+        from phoenix.procedural.matrix_rain import MatrixRain
+
+        rain = MatrixRain()
+        clock = self.device_db.get_display_settings() if name == "matrix_clock" else None
+        self._write_now_playing(name)
+        start = time.perf_counter()
+        next_preview = start
+        # Streaming sinks receive the animation; the web backend reads the preview.
+        while self.wake is None or not self.wake.is_set():
+            now = time.perf_counter()
+            if duration is not None and now - start >= duration:
+                break
+            if now >= next_preview:
+                if self._pending_notification():
+                    break
+                brightness = self._current_brightness()
+                if self.player is not None:
+                    self.backend.set_brightness(brightness)
+                if brightness == 0:
+                    break
+            frame = rain.frame(now, clock.local_time() if clock else None).tobytes()
+            interval = 0.5
+            if self.player is not None:
+                interval = 0.1 if self.backend.send_frame(frame) else RECONNECT_DELAY
+            if now >= next_preview:
+                self._save_preview(frame)
+                next_preview = now + 0.5
+            deadline = now + interval
+            if duration is not None:
+                deadline = min(deadline, start + duration)
+            self._wait(max(0, deadline - time.perf_counter()))
 
     def _display_audio_app(self, name: str, config: dict, duration: int | None) -> None:
         """Stream the live audio visualizer for one app slot."""

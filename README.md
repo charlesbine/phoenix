@@ -213,6 +213,14 @@ def render(settings: Settings, config: dict[str, str], output: Path, output_larg
     ).save(output_large, "WEBP", lossless=True)
 ```
 
+For Matrix-style digital rain, open **Apps**, select a device and choose **Add app to rotation**.
+Choose `matrix_rain` for streams of green terminal glyphs, or `matrix_clock`
+for a 24-hour clock over the rain. At the minute boundary a bright scanline
+reveals the changed digits. Both run on the player. The clock uses the time
+zone in Phoenix display settings, including on a paired node playing offline.
+
+![Matrix Clock on the left and Matrix Rain on the right](docs/media/matrix-clock-and-rain.gif)
+
 Built-in Python apps include:
 - `procedural_landscape` — Seamless 12-second looping anti-aliased generative terrain flyover (12 LED-tuned palettes × 6 terrain archetypes, `auto` random worlds)
 - `procedural_planet` — Continuously rotating procedural planets with bounded smooth animation timing

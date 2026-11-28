@@ -12,6 +12,7 @@ const TYPE_MARK: Record<string, string> = {
   panel: '▤',
   live_audio: 'au',
   live_nowplaying: 'np',
+  live_matrix: 'mx',
   unknown: '·',
 }
 

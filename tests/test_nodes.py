@@ -33,6 +33,7 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     app_db.upsert("planet", pixlet_config={"server_private": "value"})
     app_db.upsert("christmas")
     central.set_app("desk", "planet", sort_order=2)
+    central.set_app("desk", "matrix_clock", sort_order=3)
     central.update("desk", layout_mode="single", single_app="planet")
     central.set_app("apollo", "christmas")
     Image.new("RGB", (64, 64), "green").save(central_outputs / "planet.webp")
@@ -76,7 +77,10 @@ def test_publisher_pushes_valid_artwork_and_cached_controls_to_paired_player(tmp
     assert local.get("desk")["single_app"] == "planet"
     assert BrightnessSchedule.model_validate_json(local.get("desk")["brightness_schedule"]) == schedule
     assert local.get_display_settings() == display_settings
-    assert [row["app_name"] for row in local.list_apps("desk")] == ["planet"]
+    assert [row["app_name"] for row in local.list_apps("desk")] == ["planet", "matrix_clock"]
+    clock = AppDatabase(local._path).get("matrix_clock")
+    assert clock.active and clock.runtime == "live_matrix"
+    assert not (node_outputs / "matrix_clock.webp").exists()
     assert AppDatabase(local._path).get("planet").pixlet_config == {}
 
     wake.clear()
